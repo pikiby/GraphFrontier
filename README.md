@@ -16,9 +16,11 @@ pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and phys
 
 ## Demo
 
-**Прикрепляйте узлы туда, где вам больше нравится!**
+**Pin nodes exactly where you want them!**
 
 ![Pin node demo](docs/media/pin_node.gif)
+
+[Watch HD video (MP4)](docs/media/pin_node.mp4)
 
 ## Quick Start
 
