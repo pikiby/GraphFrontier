@@ -1,2 +1,9 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db

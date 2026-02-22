@@ -22,6 +22,18 @@ pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and phys
 
 [Watch HD video (MP4)](docs/media/pin_node.mp4)
 
+**Pin nodes to the grid.**
+
+![Pin node to grid demo](docs/media/pin_node_grid.gif)
+
+[Watch HD video (MP4)](docs/media/pin_node_grid.mp4)
+
+**Save node positions. Keep your layout exactly where you want it every time you open the graph.**
+
+![Save layout demo](docs/media/save.gif)
+
+[Watch HD video (MP4)](docs/media/save.mp4)
+
 ## Quick Start
 
 1. Build:
