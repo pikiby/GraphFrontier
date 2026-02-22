@@ -1,0 +1,557 @@
+.graphfrontier-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.graphfrontier-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+.graphfrontier-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+.graphfrontier-sidepanel {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 250px;
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  background: rgba(22, 26, 33, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  padding: 8px;
+  backdrop-filter: blur(4px);
+  z-index: 5;
+}
+
+.graphfrontier-sidepanel:not(.is-open) {
+  width: auto;
+  padding: 6px 6px 4px;
+}
+
+.graphfrontier-preview {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 380px;
+  max-width: min(380px, calc(100% - 16px));
+  height: 360px;
+  max-height: calc(100% - 16px);
+  display: none;
+  background: rgba(18, 22, 30, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  z-index: 6;
+  overflow: hidden;
+}
+
+.graphfrontier-preview.is-open {
+  display: flex;
+  flex-direction: column;
+}
+
+.graphfrontier-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.graphfrontier-preview-title {
+  font-size: 11px;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphfrontier-preview-close {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+}
+
+.graphfrontier-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-normal);
+  white-space: normal;
+  word-break: normal;
+}
+
+.graphfrontier-sidepanel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.graphfrontier-sidepanel-title {
+  font-size: 12px;
+  color: var(--text-normal);
+  padding-right: 8px;
+}
+
+.graphfrontier-sidepanel-toggle {
+  width: 46px;
+  height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 6px;
+  margin-left: 10px;
+}
+
+.graphfrontier-sidepanel-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin: 5px 0;
+}
+
+.graphfrontier-sidepanel-row.is-slider {
+  grid-template-columns: 1fr 90px 44px;
+}
+
+.graphfrontier-sidepanel-separator {
+  height: 1px;
+  margin: 6px 0 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.graphfrontier-sidepanel-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.graphfrontier-sidepanel-slider {
+  width: 90px;
+}
+
+.graphfrontier-sidepanel-value {
+  font-size: 10px;
+  color: var(--text-normal);
+  text-align: right;
+  min-width: 40px;
+}
+
+.graphfrontier-toggle-btn {
+  position: relative;
+  width: 34px;
+  min-width: 34px;
+  height: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: transparent;
+  font-size: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.graphfrontier-toggle-btn::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+
+.graphfrontier-toggle-btn.is-on {
+  border-color: rgba(174, 181, 191, 0.82);
+  background: rgba(174, 181, 191, 0.34);
+}
+
+.graphfrontier-toggle-btn.is-on::after {
+  transform: translateX(14px);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.graphfrontier-toggle-btn:focus-visible {
+  outline: 1px solid rgba(178, 186, 198, 0.75);
+  outline-offset: 1px;
+}
+
+.graphfrontier-sidepanel-actions {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.graphfrontier-sidepanel-actions-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.graphfrontier-sidepanel-autosave {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.graphfrontier-sidepanel-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.graphfrontier-sidepanel-save {
+  width: 96px;
+  height: 22px;
+  border: 1px solid rgba(173, 181, 192, 0.55);
+  border-radius: 6px;
+  background: rgba(173, 181, 192, 0.2);
+  color: var(--text-normal);
+  font-size: 11px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+
+.graphfrontier-find {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.graphfrontier-find-row {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  align-items: center;
+  gap: 6px;
+}
+
+.graphfrontier-search-mode-toggle {
+  width: 54px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 1px solid rgba(210, 215, 224, 0.26);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.graphfrontier-search-mode-toggle.is-filter {
+  color: var(--text-normal);
+  border-color: rgba(210, 215, 224, 0.34);
+}
+
+.graphfrontier-search-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.graphfrontier-input-anchor {
+  position: relative;
+}
+
+.graphfrontier-find-input {
+  width: 100%;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 400;
+  height: 22px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-normal);
+  padding-right: 20px;
+}
+
+.graphfrontier-search-inline-clear {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.graphfrontier-search-inline-clear.is-visible {
+  display: block;
+}
+
+.graphfrontier-groups {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.graphfrontier-groups-title {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.graphfrontier-group-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.graphfrontier-group-query-wrap {
+  flex: 1;
+  width: 1px;
+  min-width: 0;
+}
+
+.graphfrontier-group-row.is-property-layout {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.graphfrontier-group-row.is-dragging {
+  opacity: 0.6;
+}
+
+.graphfrontier-group-drag {
+  width: 12px;
+  color: var(--text-faint);
+  cursor: grab;
+  user-select: none;
+  font-size: 10px;
+  text-align: center;
+}
+
+.graphfrontier-group-type {
+  width: 46px;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.graphfrontier-group-property {
+  width: 80px;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.graphfrontier-group-query {
+  flex: 1;
+  width: 1px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 400;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 6px;
+}
+
+.graphfrontier-group-query-wrap .graphfrontier-group-query {
+  width: 100%;
+  min-width: 0;
+  flex: none;
+}
+
+.graphfrontier-group-row.is-property-layout .graphfrontier-group-query {
+  order: 10;
+  flex: 1 1 calc(100% - 24px);
+  width: calc(100% - 24px);
+  margin-left: 24px;
+}
+
+.graphfrontier-search-mode,
+.graphfrontier-group-type,
+.graphfrontier-group-property,
+.graphfrontier-group-query {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-normal);
+  font-weight: 400;
+}
+
+.graphfrontier-search-mode,
+.graphfrontier-group-type {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 22px;
+  padding: 0 6px;
+}
+
+.graphfrontier-group-property,
+.graphfrontier-group-query {
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 6px;
+}
+
+.graphfrontier-search-mode option,
+.graphfrontier-group-type option {
+  font-weight: 400;
+}
+
+.graphfrontier-group-color-input {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+  box-shadow: none;
+}
+
+.graphfrontier-group-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.graphfrontier-group-color-input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 999px;
+}
+
+.graphfrontier-group-color-input::-moz-color-swatch {
+  border: 0;
+  border-radius: 999px;
+}
+
+.graphfrontier-group-remove {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+
+.graphfrontier-input-menu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  min-width: 320px;
+  max-width: min(560px, calc(100vw - 16px));
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid rgba(210, 215, 224, 0.24);
+  border-radius: 8px;
+  background: rgba(18, 22, 30, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 1500;
+  padding: 3px;
+}
+
+.graphfrontier-input-menu-header {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  padding: 5px 8px;
+}
+
+.graphfrontier-input-menu-item {
+  display: block;
+  color: var(--text-normal);
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 4px;
+  user-select: none;
+  text-align: left;
+}
+
+.graphfrontier-input-menu-item.is-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.graphfrontier-input-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.graphfrontier-input-menu-main {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: normal;
+  word-break: break-word;
+  text-align: left;
+}
+
+.graphfrontier-input-menu-desc {
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-faint);
+  text-align: left;
+}
+
+.graphfrontier-settings-groups {
+  margin-top: 18px;
+}
+
+.graphfrontier-settings-groups-list {
+  margin-top: 8px;
+}
+
+.graphfrontier-coord-form {
+  display: grid;
+  gap: 8px;
+}
+
+.graphfrontier-coord-input {
+  width: 100%;
+}
+
+.graphfrontier-coord-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
