@@ -30,10 +30,27 @@ pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and phys
     </td>
   </tr>
   <tr>
-    <td colspan="2" align="center">
-      <img src="docs/media/save.gif" alt="Save layout demo" width="70%">
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/save.gif" alt="Save layout demo" width="100%">
       <br>
       <sub><strong>Save node positions. Keep your layout exactly where you want it every time you open the graph.</strong></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/strong_pull.gif" alt="Strong pull demo" width="100%">
+      <br>
+      <sub><strong>Boost attraction to a specific node.</strong></sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/pin_orbit.gif" alt="Pin linked nodes to orbit demo" width="100%">
+      <br>
+      <sub><strong>Place linked nodes on another node's orbit with one click.</strong></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/unpin_linked_grid.gif" alt="Move linked nodes and keep position demo" width="100%">
+      <br>
+      <sub><strong>Move linked nodes and keep them exactly where you need them.</strong></sub>
     </td>
   </tr>
 </table>
