@@ -1,0 +1,484 @@
+const {
+  TWO_PI,
+  DEFAULT_DATA,
+} = require('./constants');
+
+// Simulation restart marker used after manual layout-changing actions.
+function kickLayoutSearch(view) {
+  view.layoutKickAtMs = Date.now();
+  view.layoutStillFrames = 0;
+  view.layoutAutosaveDirty = true;
+}
+
+// Compute current layout center from core nodes, falling back to all nodes when needed.
+function updateLayoutCenter(view) {
+  if (view.nodes.length === 0) {
+    view.layoutCenter.x = 0;
+    view.layoutCenter.y = 0;
+    return;
+  }
+
+  let sumMainX = 0;
+  let sumMainY = 0;
+  let mainCount = 0;
+  for (const node of view.nodes) {
+    const isAttachment = !!(node?.meta?.isAttachment);
+    const isOrphan = node.degree === 0;
+    if (isAttachment || isOrphan) continue;
+    sumMainX += node.x;
+    sumMainY += node.y;
+    mainCount += 1;
+  }
+
+  if (mainCount > 0) {
+    view.layoutCenter.x = sumMainX / mainCount;
+    view.layoutCenter.y = sumMainY / mainCount;
+    return;
+  }
+
+  let sumAllX = 0;
+  let sumAllY = 0;
+  for (const node of view.nodes) {
+    sumAllX += node.x;
+    sumAllY += node.y;
+  }
+  view.layoutCenter.x = sumAllX / view.nodes.length;
+  view.layoutCenter.y = sumAllY / view.nodes.length;
+}
+
+// Camera smoothing per frame to avoid jumpy panning and zooming.
+function stepCameraSmoothing(view) {
+  const smooth = 0.22;
+  view.camera.x += (view.cameraTarget.x - view.camera.x) * smooth;
+  view.camera.y += (view.cameraTarget.y - view.camera.y) * smooth;
+  view.camera.zoom += (view.cameraTarget.zoom - view.camera.zoom) * smooth;
+}
+
+// Main force simulation step: repel/link/center forces, pin constraints, and autosave settling.
+function stepSimulation(view) {
+  if (view.nodes.length === 0) return;
+  updateLayoutCenter(view);
+
+  const settings = view.plugin.getSettings();
+  const nowMs = Date.now();
+  const layoutSearchMs = 2000;
+  const elapsedSearchMs = nowMs - view.layoutKickAtMs;
+  const baseSearchFactor = Math.max(0, Math.min(1, 1 - (elapsedSearchMs / layoutSearchMs)));
+  const layoutSearchFactor = view.dragNodeId ? 1 : baseSearchFactor;
+
+  const repelStrength = settings.repel_strength * 0.5 * layoutSearchFactor;
+  const centerStrength = settings.center_strength * 0.000025 * layoutSearchFactor;
+  const baseLinkStrength = settings.base_link_strength * 0.0001 * layoutSearchFactor;
+  const linkDistance = view.plugin.clampNumber(settings.link_distance, 1, 100, DEFAULT_DATA.settings.link_distance);
+  const attachmentLinkDistance = view.plugin.clampNumber(
+    settings.attachment_link_distance_multiplier,
+    1,
+    100,
+    DEFAULT_DATA.settings.attachment_link_distance_multiplier,
+  );
+  const damping = view.plugin.clampNumber(settings.damping, 0.01, 0.9, DEFAULT_DATA.settings.damping);
+  const hasRepel = repelStrength > 0;
+  const hasCenter = centerStrength > 0;
+  const hasLink = baseLinkStrength > 0 && view.edges.length > 0;
+  const noForces = !hasRepel && !hasCenter && !hasLink;
+
+  const nodes = view.nodes;
+  const nodeCount = nodes.length;
+  const minRepelDistance = 28;
+  const maxRepelForce = 16;
+  const maxSpringForce = 20;
+  const maxCenterForce = 1.6;
+  const maxAccel = 6;
+  const maxSpeed = 26;
+  const impulseGain = 7;
+  const orphanRepelScale = 1.2;
+  const orphanToMainRepelScale = 5.2;
+  const regularBackReactionScale = 0.06;
+  const orphanCenterScale = 1;
+  const oneSecondRetention = Math.pow(0.01, 1 / 60);
+  const dampingRetention = 1 - damping * 0.95;
+  const velocityRetention = Math.max(0.05, Math.min(0.995, oneSecondRetention * dampingRetention));
+  const settleVelocityEps = 0.02;
+  const settleAccelEps = 0.02;
+
+  const pairStride = nodeCount > 1300 ? 2 : 1;
+  const accelById = new Map();
+  for (const node of nodes) accelById.set(node.id, { ax: 0, ay: 0 });
+  const orbitPinsById = new Map();
+  for (const node of nodes) {
+    const orbitPin = view.plugin.getOrbitPin(node.id);
+    if (!orbitPin) continue;
+    const anchorNode = view.nodeById.get(orbitPin.anchor_id);
+    if (!anchorNode) continue;
+    orbitPinsById.set(node.id, orbitPin);
+  }
+  const orbitNodeIds = new Set(orbitPinsById.keys());
+  const autoAttachmentOrbitById = buildAttachmentAutoOrbitMap(view);
+  const autoAttachmentOrbitNodeIds = new Set(autoAttachmentOrbitById.keys());
+  const freeOrphanNodes = [];
+  const mainNodesForOrphanRepel = [];
+  for (const node of nodes) {
+    if (orbitNodeIds.has(node.id)) continue;
+    if (autoAttachmentOrbitNodeIds.has(node.id)) continue;
+    if (node.degree === 0) freeOrphanNodes.push(node);
+    if (node.degree > 0 && !node?.meta?.isAttachment) {
+      mainNodesForOrphanRepel.push(node);
+    }
+  }
+  let movingNodeCount = 0;
+
+  if (hasRepel) {
+    for (let indexA = 0; indexA < nodeCount; indexA += pairStride) {
+      const nodeA = nodes[indexA];
+      for (let indexB = indexA + 1; indexB < nodeCount; indexB += pairStride) {
+        const nodeB = nodes[indexB];
+        if (orbitNodeIds.has(nodeA.id) || orbitNodeIds.has(nodeB.id)) continue;
+        if (autoAttachmentOrbitNodeIds.has(nodeA.id) || autoAttachmentOrbitNodeIds.has(nodeB.id)) continue;
+        if (nodeA.degree === 0 || nodeB.degree === 0) continue;
+        const dx = nodeB.x - nodeA.x;
+        const dy = nodeB.y - nodeA.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+        const safeDist = Math.max(minRepelDistance, dist);
+
+        const force = Math.min(maxRepelForce, repelStrength / (safeDist * safeDist));
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+
+        const a = accelById.get(nodeA.id);
+        const b = accelById.get(nodeB.id);
+        a.ax -= fx;
+        a.ay -= fy;
+        b.ax += fx;
+        b.ay += fy;
+      }
+    }
+
+    const orphanRepelStrength = repelStrength * orphanRepelScale;
+    if (orphanRepelStrength > 0 && freeOrphanNodes.length > 1) {
+      for (let indexA = 0; indexA < freeOrphanNodes.length; indexA += 1) {
+        const nodeA = freeOrphanNodes[indexA];
+        for (let indexB = indexA + 1; indexB < freeOrphanNodes.length; indexB += 1) {
+          const nodeB = freeOrphanNodes[indexB];
+          const dx = nodeB.x - nodeA.x;
+          const dy = nodeB.y - nodeA.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+          const safeDist = Math.max(minRepelDistance, dist);
+          const force = Math.min(maxRepelForce, orphanRepelStrength / (safeDist * safeDist));
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          const a = accelById.get(nodeA.id);
+          const b = accelById.get(nodeB.id);
+          a.ax -= fx;
+          a.ay -= fy;
+          b.ax += fx;
+          b.ay += fy;
+        }
+      }
+    }
+
+    const orphanToMainRepelStrength = repelStrength * orphanToMainRepelScale;
+    if (orphanToMainRepelStrength > 0 && freeOrphanNodes.length > 0 && mainNodesForOrphanRepel.length > 0) {
+      for (const orphanNode of freeOrphanNodes) {
+        for (const mainNode of mainNodesForOrphanRepel) {
+          const dx = mainNode.x - orphanNode.x;
+          const dy = mainNode.y - orphanNode.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+          const safeDist = Math.max(minRepelDistance, dist);
+          const force = Math.min(maxRepelForce, orphanToMainRepelStrength / (safeDist * safeDist));
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          const orphanAccel = accelById.get(orphanNode.id);
+          const regularAccel = accelById.get(mainNode.id);
+          orphanAccel.ax -= fx;
+          orphanAccel.ay -= fy;
+          regularAccel.ax += fx * regularBackReactionScale;
+          regularAccel.ay += fy * regularBackReactionScale;
+        }
+      }
+    }
+  }
+
+  if (hasLink) {
+    for (const edge of view.edges) {
+      const sourceNode = view.nodeById.get(edge.source);
+      const targetNode = view.nodeById.get(edge.target);
+      if (!sourceNode || !targetNode) continue;
+      if (orbitNodeIds.has(sourceNode.id) || orbitNodeIds.has(targetNode.id)) continue;
+      if (autoAttachmentOrbitNodeIds.has(sourceNode.id) || autoAttachmentOrbitNodeIds.has(targetNode.id)) continue;
+
+      const dx = targetNode.x - sourceNode.x;
+      const dy = targetNode.y - sourceNode.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+      const sourceMultiplier = view.plugin.getNodeMultiplier(sourceNode.id);
+      const targetMultiplier = view.plugin.getNodeMultiplier(targetNode.id);
+      const edgeMultiplier = Math.max(sourceMultiplier, targetMultiplier);
+      const sourceDegreeNorm = Math.sqrt(Math.max(1, sourceNode.degree));
+      const targetDegreeNorm = Math.sqrt(Math.max(1, targetNode.degree));
+      const baseDegreeNorm = Math.max(sourceDegreeNorm, targetDegreeNorm);
+      const degreeNorm = edgeMultiplier > 1 ? Math.max(1, baseDegreeNorm * 0.75) : baseDegreeNorm;
+
+      const hasAttachmentInEdge = !!(sourceNode.meta?.isAttachment || targetNode.meta?.isAttachment);
+      const edgeTargetDistance = hasAttachmentInEdge ? attachmentLinkDistance : linkDistance;
+      const stretch = dist - edgeTargetDistance;
+      const springForceRaw = (baseLinkStrength * edgeMultiplier * stretch) / degreeNorm;
+      const springForce = Math.max(-maxSpringForce, Math.min(maxSpringForce, springForceRaw));
+      const fx = (dx / dist) * springForce;
+      const fy = (dy / dist) * springForce;
+
+      const sourceAccel = accelById.get(sourceNode.id);
+      const targetAccel = accelById.get(targetNode.id);
+      sourceAccel.ax += fx;
+      sourceAccel.ay += fy;
+      targetAccel.ax -= fx;
+      targetAccel.ay -= fy;
+    }
+  }
+
+  for (const node of nodes) {
+    const pin = view.plugin.getPin(node.id);
+    const orbitPin = orbitPinsById.get(node.id) || null;
+    const autoAttachmentOrbit = autoAttachmentOrbitById.get(node.id) || null;
+    const accel = accelById.get(node.id) || { ax: 0, ay: 0 };
+
+    if (hasCenter && !pin && !orbitPin && !autoAttachmentOrbit && node.id !== view.dragNodeId) {
+      const nodeCenterScale = node.degree === 0 ? orphanCenterScale : 1;
+      const centerFx = (view.layoutCenter.x - node.x) * centerStrength * nodeCenterScale;
+      const centerFy = (view.layoutCenter.y - node.y) * centerStrength * nodeCenterScale;
+      accel.ax += Math.max(-maxCenterForce, Math.min(maxCenterForce, centerFx));
+      accel.ay += Math.max(-maxCenterForce, Math.min(maxCenterForce, centerFy));
+    }
+
+    if (node.id === view.dragNodeId) {
+      node.vx = 0;
+      node.vy = 0;
+      continue;
+    }
+
+    if (pin) {
+      node.x = pin.x;
+      node.y = pin.y;
+      node.vx = 0;
+      node.vy = 0;
+      continue;
+    }
+
+    if (orbitPin) {
+      const anchorNode = view.nodeById.get(orbitPin.anchor_id);
+      if (anchorNode) {
+        node.x = anchorNode.x + Math.cos(orbitPin.angle) * orbitPin.radius;
+        node.y = anchorNode.y + Math.sin(orbitPin.angle) * orbitPin.radius;
+      }
+      node.vx = 0;
+      node.vy = 0;
+      continue;
+    }
+
+    if (autoAttachmentOrbit) {
+      const anchorNode = view.nodeById.get(autoAttachmentOrbit.anchor_id);
+      if (anchorNode) {
+        node.x = anchorNode.x + Math.cos(autoAttachmentOrbit.angle) * autoAttachmentOrbit.radius;
+        node.y = anchorNode.y + Math.sin(autoAttachmentOrbit.angle) * autoAttachmentOrbit.radius;
+      }
+      node.vx = 0;
+      node.vy = 0;
+      continue;
+    }
+
+    if (noForces) {
+      const calmFactor = layoutSearchFactor <= 0 ? 0.3 : 0.5;
+      node.vx *= calmFactor;
+      node.vy *= calmFactor;
+    } else {
+      let accelX = accel.ax;
+      let accelY = accel.ay;
+      const accelMagRaw = Math.sqrt(accelX * accelX + accelY * accelY);
+      if (accelMagRaw > maxAccel) {
+        const accelScale = maxAccel / accelMagRaw;
+        accelX *= accelScale;
+        accelY *= accelScale;
+      }
+      node.vx += accelX * impulseGain;
+      node.vy += accelY * impulseGain;
+      node.vx *= velocityRetention;
+      node.vy *= velocityRetention;
+    }
+
+    const accelMag = Math.sqrt(accel.ax * accel.ax + accel.ay * accel.ay);
+    const speedNow = Math.sqrt(node.vx * node.vx + node.vy * node.vy);
+    if (speedNow > maxSpeed) {
+      const ratio = maxSpeed / speedNow;
+      node.vx *= ratio;
+      node.vy *= ratio;
+    }
+    if (speedNow < settleVelocityEps && accelMag < settleAccelEps) {
+      node.vx = 0;
+      node.vy = 0;
+    } else {
+      movingNodeCount += 1;
+    }
+
+    node.x += node.vx;
+    node.y += node.vy;
+  }
+
+  const autosaveAllowed = settings.layout_autosave && !view.isSearchFilled();
+  if (autosaveAllowed) {
+    if (movingNodeCount > 0) {
+      view.layoutStillFrames = 0;
+      view.layoutAutosaveDirty = true;
+    } else {
+      view.layoutStillFrames += 1;
+    }
+
+    if (view.layoutAutosaveDirty && view.layoutStillFrames >= 8) {
+      view.saveCurrentLayout({ silent: true });
+      view.layoutAutosaveDirty = false;
+    }
+  } else {
+    view.layoutStillFrames = 0;
+    if (view.isSearchFilled()) view.layoutAutosaveDirty = false;
+  }
+}
+
+// Orbit radius helper: keep node spacing readable while respecting a minimum radius.
+function getOrbitRadiusBySpacing(plugin, orbitNodeCount, minRadius) {
+  const orbitDistance = plugin.clampNumber(
+    plugin.getSettings().orbit_distance,
+    1,
+    100,
+    DEFAULT_DATA.settings.orbit_distance,
+  );
+  const safeMinRadius = plugin.clampNumber(minRadius, 1, 100, 1);
+  const safeOrbitNodeCount = Math.max(1, Number(orbitNodeCount) || 1);
+  const radiusBySpacing = (safeOrbitNodeCount * orbitDistance) / TWO_PI;
+  return Math.max(safeMinRadius, radiusBySpacing);
+}
+
+// Anchor orbit radius helper: never smaller than base link distance.
+function getOrbitRadiusForAnchor(plugin, orbitNodeCount) {
+  const linkDistance = plugin.clampNumber(
+    plugin.getSettings().link_distance,
+    1,
+    100,
+    DEFAULT_DATA.settings.link_distance,
+  );
+  return getOrbitRadiusBySpacing(plugin, orbitNodeCount, linkDistance);
+}
+
+// Build virtual orbit constraints for free attachment nodes around their nearest anchor nodes.
+function buildAttachmentAutoOrbitMap(view) {
+  const autoOrbitMap = new Map();
+  const settings = view.plugin.getSettings();
+  const attachmentLinkDistance = view.plugin.clampNumber(
+    settings.attachment_link_distance_multiplier,
+    1,
+    100,
+    DEFAULT_DATA.settings.attachment_link_distance_multiplier,
+  );
+
+  const attachmentNodeIdsByAnchor = new Map();
+  for (const node of view.nodes) {
+    if (!node?.meta?.isAttachment) continue;
+    if (view.plugin.isPinned(node.id) || view.plugin.isOrbitPinned(node.id)) continue;
+
+    const neighborIds = view.neighborsById.get(node.id);
+    if (!neighborIds || neighborIds.size === 0) continue;
+
+    let anchorId = null;
+    for (const candidateId of neighborIds) {
+      const candidateNode = view.nodeById.get(candidateId);
+      if (!candidateNode) continue;
+      if (!candidateNode.meta?.isAttachment) {
+        anchorId = candidateNode.id;
+        break;
+      }
+    }
+    if (!anchorId) {
+      for (const candidateId of neighborIds) {
+        if (view.nodeById.has(candidateId)) {
+          anchorId = candidateId;
+          break;
+        }
+      }
+    }
+    if (!anchorId || !view.nodeById.has(anchorId)) continue;
+
+    if (!attachmentNodeIdsByAnchor.has(anchorId)) attachmentNodeIdsByAnchor.set(anchorId, []);
+    attachmentNodeIdsByAnchor.get(anchorId).push(node.id);
+  }
+
+  for (const [anchorId, attachmentNodeIds] of attachmentNodeIdsByAnchor.entries()) {
+    const sortedAttachmentNodeIds = attachmentNodeIds.slice().sort((leftId, rightId) => leftId.localeCompare(rightId));
+    const attachmentCount = Math.max(1, sortedAttachmentNodeIds.length);
+    const attachmentOrbitRadius = getOrbitRadiusBySpacing(view.plugin, attachmentCount, attachmentLinkDistance);
+
+    for (let index = 0; index < sortedAttachmentNodeIds.length; index++) {
+      const nodeId = sortedAttachmentNodeIds[index];
+      const angle = (Math.PI * 2 * index) / sortedAttachmentNodeIds.length;
+      autoOrbitMap.set(nodeId, {
+        anchor_id: anchorId,
+        radius: attachmentOrbitRadius,
+        angle,
+      });
+    }
+  }
+
+  return autoOrbitMap;
+}
+
+// Recompute persisted orbit radii and reposition orbit-pinned nodes after settings changes.
+function recomputeOrbitRadii(view) {
+  const orbitPins = view.plugin.data.orbit_pins || {};
+  const orbitNodeIdsByAnchor = new Map();
+
+  for (const [orbitNodeId, orbitMeta] of Object.entries(orbitPins)) {
+    const anchorId = String(orbitMeta?.anchor_id || '').trim();
+    if (!anchorId) continue;
+    if (!view.nodeById.has(orbitNodeId)) continue;
+    if (!view.nodeById.has(anchorId)) continue;
+    if (!orbitNodeIdsByAnchor.has(anchorId)) orbitNodeIdsByAnchor.set(anchorId, []);
+    orbitNodeIdsByAnchor.get(anchorId).push(orbitNodeId);
+  }
+
+  let changed = false;
+  for (const [anchorId, orbitNodeIds] of orbitNodeIdsByAnchor.entries()) {
+    const orbitRadius = getOrbitRadiusForAnchor(view.plugin, orbitNodeIds.length);
+    const anchorNode = view.nodeById.get(anchorId);
+    if (!anchorNode) continue;
+
+    for (const orbitNodeId of orbitNodeIds) {
+      const orbitMeta = orbitPins[orbitNodeId];
+      if (!orbitMeta) continue;
+      if (Number(orbitMeta.radius) !== orbitRadius) {
+        orbitMeta.radius = orbitRadius;
+        changed = true;
+      }
+
+      const orbitNode = view.nodeById.get(orbitNodeId);
+      if (!orbitNode) continue;
+      const angle = Number(orbitMeta.angle) || 0;
+      orbitNode.x = anchorNode.x + Math.cos(angle) * orbitRadius;
+      orbitNode.y = anchorNode.y + Math.sin(angle) * orbitRadius;
+      orbitNode.vx = 0;
+      orbitNode.vy = 0;
+    }
+  }
+
+  if (changed) view.plugin.schedulePersist();
+  kickLayoutSearch(view);
+  view.plugin.renderAllViews();
+}
+
+module.exports = {
+  kickLayoutSearch,
+  updateLayoutCenter,
+  stepCameraSmoothing,
+  stepSimulation,
+  getOrbitRadiusBySpacing,
+  getOrbitRadiusForAnchor,
+  buildAttachmentAutoOrbitMap,
+  recomputeOrbitRadii,
+};

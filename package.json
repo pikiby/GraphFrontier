@@ -1,0 +1,15 @@
+{
+  "name": "graphfrontier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GraphFrontier Obsidian plugin",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "build": "node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs dev"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}
