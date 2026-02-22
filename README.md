@@ -53,6 +53,42 @@ pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and phys
       <sub><strong>Move linked nodes and keep them exactly where you need them.</strong></sub>
     </td>
   </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/paint_links.gif" alt="Paint links demo" width="100%">
+      <br>
+      <sub><strong>Paint links for better visual clarity.</strong></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/hide_edges.gif" alt="Hide edges demo" width="100%">
+      <br>
+      <sub><strong>Hide links you do not need.</strong></sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/find.gif" alt="Find mode demo" width="100%">
+      <br>
+      <sub><strong>Find mode: explore links in the full context.</strong></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/filter.gif" alt="Filter mode demo" width="100%">
+      <br>
+      <sub><strong>Filter mode: local graph behavior directly in the global view.</strong></sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/orphan.gif" alt="Orphan files separation demo" width="100%">
+      <br>
+      <sub><strong>Orphan files stay separate from primary nodes.</strong></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/attachments.gif" alt="Attachments on orbit demo" width="100%">
+      <br>
+      <sub><strong>Show only linked attachments and place them directly on node orbits.</strong></sub>
+    </td>
+  </tr>
 </table>
 
 ## Quick Start
