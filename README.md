@@ -14,6 +14,12 @@ pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and phys
 - Layout save/load and autosave after stabilization
 - Attachment/orphan handling with separate behaviors
 
+## Demo
+
+**Прикрепляйте узлы туда, где вам больше нравится!**
+
+![Pin node demo](docs/media/pin_node.gif)
+
 ## Quick Start
 
 1. Build:
