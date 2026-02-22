@@ -16,23 +16,27 @@ pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and phys
 
 ## Demo
 
-**Pin nodes exactly where you want them!**
-
-![Pin node demo](docs/media/pin_node.gif)
-
-[Watch HD video (MP4)](docs/media/pin_node.mp4)
-
-**Pin nodes to the grid.**
-
-![Pin node to grid demo](docs/media/pin_node_grid.gif)
-
-[Watch HD video (MP4)](docs/media/pin_node_grid.mp4)
-
-**Save node positions. Keep your layout exactly where you want it every time you open the graph.**
-
-![Save layout demo](docs/media/save.gif)
-
-[Watch HD video (MP4)](docs/media/save.mp4)
+<table>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/pin_node.gif" alt="Pin node demo" width="100%">
+      <br>
+      <sub><strong>Pin nodes exactly where you want them!</strong></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/pin_node_grid.gif" alt="Pin node to grid demo" width="100%">
+      <br>
+      <sub><strong>Pin nodes to the grid.</strong></sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="docs/media/save.gif" alt="Save layout demo" width="70%">
+      <br>
+      <sub><strong>Save node positions. Keep your layout exactly where you want it every time you open the graph.</strong></sub>
+    </td>
+  </tr>
+</table>
 
 ## Quick Start
 
