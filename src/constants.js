@@ -55,16 +55,28 @@ const MAX_ZOOM = 12;
 const HOTKEY_COMMANDS = [
   { id: 'graphfrontier-open-view', name: 'Open GraphFrontier' },
   { id: 'graphfrontier-toggle-pin-under-cursor', name: 'Toggle pin under cursor' },
-  { id: 'graphfrontier-set-force-multiplier-under-cursor', name: 'Set force multiplier under cursor' },
-  { id: 'graphfrontier-clear-force-multiplier-under-cursor', name: 'Clear force multiplier under cursor' },
+  {
+    id: 'graphfrontier-set-force-multiplier-under-cursor',
+    name: 'Set force multiplier under cursor',
+  },
+  {
+    id: 'graphfrontier-clear-force-multiplier-under-cursor',
+    name: 'Clear force multiplier under cursor',
+  },
   { id: 'graphfrontier-align-pins-to-grid', name: 'Align pins to grid' },
   { id: 'graphfrontier-pin-node-under-cursor', name: 'Pin node under cursor' },
   { id: 'graphfrontier-pin-to-grid-under-cursor', name: 'Pin node to grid under cursor' },
   { id: 'graphfrontier-unpin-node-under-cursor', name: 'Unpin node under cursor' },
-  { id: 'graphfrontier-pin-linked-to-orbit-under-cursor', name: 'Pin linked to orbit under cursor' },
+  {
+    id: 'graphfrontier-pin-linked-to-orbit-under-cursor',
+    name: 'Pin linked to orbit under cursor',
+  },
   { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor' },
   { id: 'graphfrontier-paint-edges-under-cursor', name: 'Paint edges under cursor' },
-  { id: 'graphfrontier-clear-painted-edges-under-cursor', name: 'Clear painted edges under cursor' },
+  {
+    id: 'graphfrontier-clear-painted-edges-under-cursor',
+    name: 'Clear painted edges under cursor',
+  },
   { id: 'graphfrontier-strong-pull-under-cursor', name: 'Strong pull under cursor' },
   { id: 'graphfrontier-clear-strong-pull-under-cursor', name: 'Clear strong pull under cursor' },
   { id: 'graphfrontier-save-layout', name: 'Save layout' },

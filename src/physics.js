@@ -1,7 +1,4 @@
-const {
-  TWO_PI,
-  DEFAULT_DATA,
-} = require('./constants');
+const { TWO_PI, DEFAULT_DATA } = require('./constants');
 
 // Simulation restart marker used after manual layout-changing actions.
 function kickLayoutSearch(view) {
@@ -22,7 +19,7 @@ function updateLayoutCenter(view) {
   let sumMainY = 0;
   let mainCount = 0;
   for (const node of view.nodes) {
-    const isAttachment = !!(node?.meta?.isAttachment);
+    const isAttachment = !!node?.meta?.isAttachment;
     const isOrphan = node.degree === 0;
     if (isAttachment || isOrphan) continue;
     sumMainX += node.x;
@@ -63,20 +60,30 @@ function stepSimulation(view) {
   const nowMs = Date.now();
   const layoutSearchMs = 2000;
   const elapsedSearchMs = nowMs - view.layoutKickAtMs;
-  const baseSearchFactor = Math.max(0, Math.min(1, 1 - (elapsedSearchMs / layoutSearchMs)));
+  const baseSearchFactor = Math.max(0, Math.min(1, 1 - elapsedSearchMs / layoutSearchMs));
   const layoutSearchFactor = view.dragNodeId ? 1 : baseSearchFactor;
 
   const repelStrength = settings.repel_strength * 0.5 * layoutSearchFactor;
   const centerStrength = settings.center_strength * 0.000025 * layoutSearchFactor;
   const baseLinkStrength = settings.base_link_strength * 0.0001 * layoutSearchFactor;
-  const linkDistance = view.plugin.clampNumber(settings.link_distance, 1, 100, DEFAULT_DATA.settings.link_distance);
+  const linkDistance = view.plugin.clampNumber(
+    settings.link_distance,
+    1,
+    100,
+    DEFAULT_DATA.settings.link_distance
+  );
   const attachmentLinkDistance = view.plugin.clampNumber(
     settings.attachment_link_distance_multiplier,
     1,
     100,
-    DEFAULT_DATA.settings.attachment_link_distance_multiplier,
+    DEFAULT_DATA.settings.attachment_link_distance_multiplier
   );
-  const damping = view.plugin.clampNumber(settings.damping, 0.01, 0.9, DEFAULT_DATA.settings.damping);
+  const damping = view.plugin.clampNumber(
+    settings.damping,
+    0.01,
+    0.9,
+    DEFAULT_DATA.settings.damping
+  );
   const hasRepel = repelStrength > 0;
   const hasCenter = centerStrength > 0;
   const hasLink = baseLinkStrength > 0 && view.edges.length > 0;
@@ -133,7 +140,8 @@ function stepSimulation(view) {
       for (let indexB = indexA + 1; indexB < nodeCount; indexB += pairStride) {
         const nodeB = nodes[indexB];
         if (orbitNodeIds.has(nodeA.id) || orbitNodeIds.has(nodeB.id)) continue;
-        if (autoAttachmentOrbitNodeIds.has(nodeA.id) || autoAttachmentOrbitNodeIds.has(nodeB.id)) continue;
+        if (autoAttachmentOrbitNodeIds.has(nodeA.id) || autoAttachmentOrbitNodeIds.has(nodeB.id))
+          continue;
         if (nodeA.degree === 0 || nodeB.degree === 0) continue;
         const dx = nodeB.x - nodeA.x;
         const dy = nodeB.y - nodeA.y;
@@ -178,7 +186,11 @@ function stepSimulation(view) {
     }
 
     const orphanToMainRepelStrength = repelStrength * orphanToMainRepelScale;
-    if (orphanToMainRepelStrength > 0 && freeOrphanNodes.length > 0 && mainNodesForOrphanRepel.length > 0) {
+    if (
+      orphanToMainRepelStrength > 0 &&
+      freeOrphanNodes.length > 0 &&
+      mainNodesForOrphanRepel.length > 0
+    ) {
       for (const orphanNode of freeOrphanNodes) {
         for (const mainNode of mainNodesForOrphanRepel) {
           const dx = mainNode.x - orphanNode.x;
@@ -206,7 +218,11 @@ function stepSimulation(view) {
       const targetNode = view.nodeById.get(edge.target);
       if (!sourceNode || !targetNode) continue;
       if (orbitNodeIds.has(sourceNode.id) || orbitNodeIds.has(targetNode.id)) continue;
-      if (autoAttachmentOrbitNodeIds.has(sourceNode.id) || autoAttachmentOrbitNodeIds.has(targetNode.id)) continue;
+      if (
+        autoAttachmentOrbitNodeIds.has(sourceNode.id) ||
+        autoAttachmentOrbitNodeIds.has(targetNode.id)
+      )
+        continue;
 
       const dx = targetNode.x - sourceNode.x;
       const dy = targetNode.y - sourceNode.y;
@@ -220,7 +236,9 @@ function stepSimulation(view) {
       const baseDegreeNorm = Math.max(sourceDegreeNorm, targetDegreeNorm);
       const degreeNorm = edgeMultiplier > 1 ? Math.max(1, baseDegreeNorm * 0.75) : baseDegreeNorm;
 
-      const hasAttachmentInEdge = !!(sourceNode.meta?.isAttachment || targetNode.meta?.isAttachment);
+      const hasAttachmentInEdge = !!(
+        sourceNode.meta?.isAttachment || targetNode.meta?.isAttachment
+      );
       const edgeTargetDistance = hasAttachmentInEdge ? attachmentLinkDistance : linkDistance;
       const stretch = dist - edgeTargetDistance;
       const springForceRaw = (baseLinkStrength * edgeMultiplier * stretch) / degreeNorm;
@@ -349,7 +367,7 @@ function getOrbitRadiusBySpacing(plugin, orbitNodeCount, minRadius) {
     plugin.getSettings().orbit_distance,
     1,
     100,
-    DEFAULT_DATA.settings.orbit_distance,
+    DEFAULT_DATA.settings.orbit_distance
   );
   const safeMinRadius = plugin.clampNumber(minRadius, 1, 100, 1);
   const safeOrbitNodeCount = Math.max(1, Number(orbitNodeCount) || 1);
@@ -363,7 +381,7 @@ function getOrbitRadiusForAnchor(plugin, orbitNodeCount) {
     plugin.getSettings().link_distance,
     1,
     100,
-    DEFAULT_DATA.settings.link_distance,
+    DEFAULT_DATA.settings.link_distance
   );
   return getOrbitRadiusBySpacing(plugin, orbitNodeCount, linkDistance);
 }
@@ -376,7 +394,7 @@ function buildAttachmentAutoOrbitMap(view) {
     settings.attachment_link_distance_multiplier,
     1,
     100,
-    DEFAULT_DATA.settings.attachment_link_distance_multiplier,
+    DEFAULT_DATA.settings.attachment_link_distance_multiplier
   );
 
   const attachmentNodeIdsByAnchor = new Map();
@@ -411,9 +429,15 @@ function buildAttachmentAutoOrbitMap(view) {
   }
 
   for (const [anchorId, attachmentNodeIds] of attachmentNodeIdsByAnchor.entries()) {
-    const sortedAttachmentNodeIds = attachmentNodeIds.slice().sort((leftId, rightId) => leftId.localeCompare(rightId));
+    const sortedAttachmentNodeIds = attachmentNodeIds
+      .slice()
+      .sort((leftId, rightId) => leftId.localeCompare(rightId));
     const attachmentCount = Math.max(1, sortedAttachmentNodeIds.length);
-    const attachmentOrbitRadius = getOrbitRadiusBySpacing(view.plugin, attachmentCount, attachmentLinkDistance);
+    const attachmentOrbitRadius = getOrbitRadiusBySpacing(
+      view.plugin,
+      attachmentCount,
+      attachmentLinkDistance
+    );
 
     for (let index = 0; index < sortedAttachmentNodeIds.length; index++) {
       const nodeId = sortedAttachmentNodeIds[index];

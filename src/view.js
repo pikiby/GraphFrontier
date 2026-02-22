@@ -1,17 +1,10 @@
-const {
-  ItemView,
-  Notice,
-  Menu,
-  MarkdownRenderer,
-  Modal,
-} = require('obsidian');
+const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
 
 const {
   GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
   NODE_MULTIPLIER_MAX,
   ZOOM_STEP_FACTOR,
-  DEFAULT_DATA,
   MIN_ZOOM,
   MAX_ZOOM,
 } = require('./constants');
@@ -67,6 +60,9 @@ class GraphFrontierView extends ItemView {
     this.dragNodeId = null;
     this.dragNodeOffset = { x: 0, y: 0 };
     this.panDrag = null;
+    this.touchGesture = null;
+    this.ignoreMouseUntilMs = 0;
+    this.touchLongPressTimer = null;
 
     this.camera = {
       x: plugin.data.view_state.pan_x || 0,
@@ -132,6 +128,7 @@ class GraphFrontierView extends ItemView {
   // View lifecycle: create canvas/UI on open and release resources on close.
   async onOpen() {
     this.contentEl.empty();
+    this.contentEl.addClass('graphfrontier-host');
 
     this.wrapEl = this.contentEl.createDiv({ cls: 'graphfrontier-wrap' });
     this.canvasEl = this.wrapEl.createEl('canvas', { cls: 'graphfrontier-canvas' });
@@ -164,6 +161,8 @@ class GraphFrontierView extends ItemView {
     this.plugin.data.view_state.pan_x = this.cameraTarget.x;
     this.plugin.data.view_state.pan_y = this.cameraTarget.y;
     this.plugin.data.view_state.zoom = this.cameraTarget.zoom;
+    this.contentEl.removeClass('graphfrontier-host');
+    this.clearTouchLongPressTimer();
     this.closeInputSuggestMenu();
     this.closeQuickPreview();
     this.plugin.schedulePersist();
@@ -174,7 +173,21 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(this.canvasEl, 'mousedown', (event) => this.onMouseDown(event));
     this.registerDomEvent(this.canvasEl, 'mouseup', (event) => this.onMouseUp(event));
     this.registerDomEvent(this.canvasEl, 'mouseleave', () => this.onMouseUp());
-    this.registerDomEvent(this.canvasEl, 'wheel', (event) => this.onWheel(event), { passive: false });
+    this.registerDomEvent(this.canvasEl, 'touchstart', (event) => this.onTouchStart(event), {
+      passive: false,
+    });
+    this.registerDomEvent(this.canvasEl, 'touchmove', (event) => this.onTouchMove(event), {
+      passive: false,
+    });
+    this.registerDomEvent(this.canvasEl, 'touchend', (event) => this.onTouchEnd(event), {
+      passive: false,
+    });
+    this.registerDomEvent(this.canvasEl, 'touchcancel', (event) => this.onTouchEnd(event), {
+      passive: false,
+    });
+    this.registerDomEvent(this.canvasEl, 'wheel', (event) => this.onWheel(event), {
+      passive: false,
+    });
     this.registerDomEvent(this.canvasEl, 'contextmenu', (event) => this.onContextMenu(event));
     this.registerDomEvent(this.contentEl.ownerDocument, 'mousedown', (event) => {
       if (!this.quickPreviewEl || !this.quickPreviewEl.classList.contains('is-open')) return;
@@ -182,14 +195,25 @@ class GraphFrontierView extends ItemView {
       if (eventTarget && this.quickPreviewEl.contains(eventTarget)) return;
       this.closeQuickPreview();
     });
+    const visualViewport = this.contentEl.win ? this.contentEl.win.visualViewport : null;
+    if (visualViewport) {
+      this.registerDomEvent(visualViewport, 'resize', () => this.handleViewportResize());
+      this.registerDomEvent(visualViewport, 'scroll', () => this.handleViewportResize());
+    }
   }
 
   buildQuickPreviewPanel() {
     if (!this.wrapEl) return;
     this.quickPreviewEl = this.wrapEl.createDiv({ cls: 'graphfrontier-preview' });
     const header = this.quickPreviewEl.createDiv({ cls: 'graphfrontier-preview-header' });
-    this.quickPreviewTitleEl = header.createDiv({ cls: 'graphfrontier-preview-title', text: 'Preview' });
-    const closeButton = header.createEl('button', { cls: 'graphfrontier-preview-close', text: 'x' });
+    this.quickPreviewTitleEl = header.createDiv({
+      cls: 'graphfrontier-preview-title',
+      text: 'Preview',
+    });
+    const closeButton = header.createEl('button', {
+      cls: 'graphfrontier-preview-close',
+      text: 'x',
+    });
     this.quickPreviewBodyEl = this.quickPreviewEl.createDiv({ cls: 'graphfrontier-preview-body' });
     this.registerDomEvent(closeButton, 'click', () => this.closeQuickPreview());
   }
@@ -236,12 +260,30 @@ class GraphFrontierView extends ItemView {
       hint: 'Show non-markdown files as attachment nodes',
     });
     if (!this.plugin.data.settings.hide_attachments) {
-      this.addSideSlider(body, 'Attachment size', 'attachment_size_multiplier', 0.1, 1, 0.1, 'render', {
-        hint: 'Scale multiplier for attachment node size',
-      });
-      this.addSideSlider(body, 'Attachment link distance', 'attachment_link_distance_multiplier', 1, 100, 1, 'render', {
-        hint: 'Target distance for links connected to attachments',
-      });
+      this.addSideSlider(
+        body,
+        'Attachment size',
+        'attachment_size_multiplier',
+        0.1,
+        1,
+        0.1,
+        'render',
+        {
+          hint: 'Scale multiplier for attachment node size',
+        }
+      );
+      this.addSideSlider(
+        body,
+        'Attachment link distance',
+        'attachment_link_distance_multiplier',
+        1,
+        100,
+        1,
+        'render',
+        {
+          hint: 'Target distance for links connected to attachments',
+        }
+      );
     }
     body.createDiv({ cls: 'graphfrontier-sidepanel-separator' });
 
@@ -273,9 +315,18 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(body, 'Link distance', 'link_distance', 1, 100, 1, 'render', {
       hint: 'Target distance for regular links',
     });
-    this.addSideSlider(body, 'Strong pull x', 'strong_pull_multiplier', NODE_MULTIPLIER_MIN, NODE_MULTIPLIER_MAX, 1, 'render', {
-      hint: 'Multiplier used by Strong pull command',
-    });
+    this.addSideSlider(
+      body,
+      'Strong pull x',
+      'strong_pull_multiplier',
+      NODE_MULTIPLIER_MIN,
+      NODE_MULTIPLIER_MAX,
+      1,
+      'render',
+      {
+        hint: 'Multiplier used by Strong pull command',
+      }
+    );
     this.addSideSlider(body, 'Orbit distance', 'orbit_distance', 1, 100, 1, 'render', {
       hint: 'Desired spacing between nodes pinned to same orbit',
     });
@@ -374,14 +425,14 @@ class GraphFrontierView extends ItemView {
         this.plugin.applyStrongPullToMarkedNodes();
       }
       if (
-        key === 'strong_pull_multiplier'
-        || key === 'base_link_strength'
-        || key === 'link_distance'
-        || key === 'orbit_distance'
-        || key === 'attachment_link_distance_multiplier'
-        || key === 'repel_strength'
-        || key === 'center_strength'
-        || key === 'damping'
+        key === 'strong_pull_multiplier' ||
+        key === 'base_link_strength' ||
+        key === 'link_distance' ||
+        key === 'orbit_distance' ||
+        key === 'attachment_link_distance_multiplier' ||
+        key === 'repel_strength' ||
+        key === 'center_strength' ||
+        key === 'damping'
       ) {
         this.kickLayoutSearch();
       }
@@ -401,7 +452,10 @@ class GraphFrontierView extends ItemView {
     const row = wrap.createDiv({ cls: 'graphfrontier-sidepanel-actions-row' });
     const autosaveWrap = row.createDiv({ cls: 'graphfrontier-sidepanel-autosave' });
     autosaveWrap.setAttr('title', 'Automatically save layout after nodes stop moving');
-    const autosaveLabel = autosaveWrap.createSpan({ text: 'Autosave', cls: 'graphfrontier-sidepanel-label' });
+    const autosaveLabel = autosaveWrap.createSpan({
+      text: 'Autosave',
+      cls: 'graphfrontier-sidepanel-label',
+    });
     autosaveLabel.setAttr('title', 'Automatically save layout after nodes stop moving');
     const autosaveBtn = autosaveWrap.createEl('button', { cls: 'graphfrontier-toggle-btn' });
     autosaveBtn.setAttr('title', 'Automatically save layout after nodes stop moving');
@@ -456,7 +510,9 @@ class GraphFrontierView extends ItemView {
     this.searchModeToggleEl = modeToggle;
     this.syncSearchModeToggleUi();
 
-    const searchInputWrap = searchRow.createDiv({ cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor' });
+    const searchInputWrap = searchRow.createDiv({
+      cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor',
+    });
     const searchInput = searchInputWrap.createEl('input', {
       cls: 'graphfrontier-find-input',
       type: 'text',
@@ -565,7 +621,9 @@ class GraphFrontierView extends ItemView {
   }
 
   getVisibleNodeSuggestions(query = '', limit = Number.POSITIVE_INFINITY) {
-    const text = String(query || '').trim().toLowerCase();
+    const text = String(query || '')
+      .trim()
+      .toLowerCase();
     const labels = [];
     const used = new Set();
     for (const node of this.nodes) {
@@ -584,7 +642,9 @@ class GraphFrontierView extends ItemView {
   }
 
   getBestMatchingNode(queryText) {
-    const query = String(queryText || '').trim().toLowerCase();
+    const query = String(queryText || '')
+      .trim()
+      .toLowerCase();
     if (!query) return null;
 
     let bestStartsWithNode = null;
@@ -744,8 +804,14 @@ class GraphFrontierView extends ItemView {
       }
 
       const inputRect = inputEl.getBoundingClientRect();
-      const viewportWidth = Math.max(1, ownerWindow.innerWidth || ownerDocument.documentElement.clientWidth || 1);
-      const viewportHeight = Math.max(1, ownerWindow.innerHeight || ownerDocument.documentElement.clientHeight || 1);
+      const viewportWidth = Math.max(
+        1,
+        ownerWindow.innerWidth || ownerDocument.documentElement.clientWidth || 1
+      );
+      const viewportHeight = Math.max(
+        1,
+        ownerWindow.innerHeight || ownerDocument.documentElement.clientHeight || 1
+      );
       const marginPx = 8;
       const desiredWidth = Math.max(inputRect.width, 320);
       const maxWidth = Math.max(240, viewportWidth - marginPx * 2);
@@ -869,7 +935,9 @@ class GraphFrontierView extends ItemView {
       { value: 'section:', description: 'search keywords under same heading' },
       { value: '[property]:', description: 'match property' },
     ];
-    const cleanQuery = String(queryText || '').trim().toLowerCase();
+    const cleanQuery = String(queryText || '')
+      .trim()
+      .toLowerCase();
     if (!cleanQuery) {
       return allOptions.map((option) => ({
         title: option.value,
@@ -928,7 +996,9 @@ class GraphFrontierView extends ItemView {
     }
 
     if (parsed.type === 'property') {
-      const propertyKey = String(parsed.propertyKey || '').trim().toLowerCase();
+      const propertyKey = String(parsed.propertyKey || '')
+        .trim()
+        .toLowerCase();
       if (propertyKey === 'property' && !String(parsed.value || '').trim()) {
         const propertyKeys = this.plugin.getGroupPropertyKeySuggestions('', 2000);
         const propertyItems = [];
@@ -950,7 +1020,12 @@ class GraphFrontierView extends ItemView {
         };
       }
       const valueQuery = String(parsed.value || '').trim();
-      const propertyValues = this.plugin.getGroupValueSuggestions('property', valueQuery, propertyKey, 2000);
+      const propertyValues = this.plugin.getGroupValueSuggestions(
+        'property',
+        valueQuery,
+        propertyKey,
+        2000
+      );
       const propertyItems = [];
       for (const propertyValue of propertyValues) {
         propertyItems.push({
@@ -991,7 +1066,11 @@ class GraphFrontierView extends ItemView {
       const queryText = String(rowState.queryInput.value || '').trim();
       const parsed = this.plugin.parseGroupQuery(queryText);
       if (!parsed || !String(parsed.value || '').trim()) continue;
-      const query = this.plugin.composeGroupQuery(parsed.type, parsed.value, parsed.propertyKey || '');
+      const query = this.plugin.composeGroupQuery(
+        parsed.type,
+        parsed.value,
+        parsed.propertyKey || ''
+      );
       if (!query) continue;
       if (!rowState.id) rowState.id = this.plugin.createGroupId();
       nextGroups.push({
@@ -1003,7 +1082,9 @@ class GraphFrontierView extends ItemView {
     }
     this.plugin.updateGroups(nextGroups);
 
-    const hasIncompleteRow = this.groupEditorRows.some((rowState) => !this.isGroupRowComplete(rowState));
+    const hasIncompleteRow = this.groupEditorRows.some(
+      (rowState) => !this.isGroupRowComplete(rowState)
+    );
     if (!hasIncompleteRow) this.addGroupEditorRow(sectionEl, null);
   }
 
@@ -1012,7 +1093,9 @@ class GraphFrontierView extends ItemView {
 
     const row = sectionEl.createDiv({ cls: 'graphfrontier-group-row' });
     const dragHandle = row.createSpan({ cls: 'graphfrontier-group-drag', text: '::' });
-    const queryInputWrap = row.createDiv({ cls: 'graphfrontier-group-query-wrap graphfrontier-input-anchor' });
+    const queryInputWrap = row.createDiv({
+      cls: 'graphfrontier-group-query-wrap graphfrontier-input-anchor',
+    });
     const queryInput = queryInputWrap.createEl('input', {
       cls: 'graphfrontier-group-query',
       type: 'text',
@@ -1020,7 +1103,10 @@ class GraphFrontierView extends ItemView {
     });
     queryInput.value = form.query;
 
-    const colorInput = row.createEl('input', { cls: 'graphfrontier-group-color-input', type: 'color' });
+    const colorInput = row.createEl('input', {
+      cls: 'graphfrontier-group-color-input',
+      type: 'color',
+    });
     colorInput.value = form.color;
 
     const removeBtn = row.createEl('button', { cls: 'graphfrontier-group-remove', text: 'x' });
@@ -1043,19 +1129,24 @@ class GraphFrontierView extends ItemView {
         this.closeInputSuggestMenu();
         return;
       }
-      this.showInputSuggestMenu(rowState.queryInput, items, (selectedText) => {
-        rowState.queryInput.value = selectedText;
-        this.refreshGroupRowState(rowState);
-        this.persistGroupRows(sectionEl);
-        const shouldOpenValueMenu = /:\s*$/.test(String(selectedText || '').trim());
-        if (shouldOpenValueMenu) {
-          this.contentEl.win.setTimeout(() => {
-            if (!rowState.queryInput) return;
-            rowState.queryInput.focus();
-            openGroupSuggestMenu();
-          }, 0);
-        }
-      }, { title: suggestionPack?.menuTitle || '' });
+      this.showInputSuggestMenu(
+        rowState.queryInput,
+        items,
+        (selectedText) => {
+          rowState.queryInput.value = selectedText;
+          this.refreshGroupRowState(rowState);
+          this.persistGroupRows(sectionEl);
+          const shouldOpenValueMenu = /:\s*$/.test(String(selectedText || '').trim());
+          if (shouldOpenValueMenu) {
+            this.contentEl.win.setTimeout(() => {
+              if (!rowState.queryInput) return;
+              rowState.queryInput.focus();
+              openGroupSuggestMenu();
+            }, 0);
+          }
+        },
+        { title: suggestionPack?.menuTitle || '' }
+      );
     };
 
     this.registerDomEvent(queryInput, 'input', () => {
@@ -1147,13 +1238,16 @@ class GraphFrontierView extends ItemView {
 
   syncSidePanelControls() {
     if (!this.sidePanelOpen || this.sideControls.size === 0) return;
-    const activeEl = this.contentEl.ownerDocument ? this.contentEl.ownerDocument.activeElement : null;
+    const activeEl = this.contentEl.ownerDocument
+      ? this.contentEl.ownerDocument.activeElement
+      : null;
 
     for (const [key, meta] of this.sideControls.entries()) {
       const currentValue = this.plugin.data.settings[key];
       if (meta.type === 'boolean') {
         if (activeEl !== meta.input) {
-          const uiValue = typeof meta.toUiValue === 'function' ? meta.toUiValue(currentValue) : !!currentValue;
+          const uiValue =
+            typeof meta.toUiValue === 'function' ? meta.toUiValue(currentValue) : !!currentValue;
           meta.updateButton(uiValue);
         }
         continue;
@@ -1181,8 +1275,20 @@ class GraphFrontierView extends ItemView {
     this.resizeObserver.observe(this.wrapEl);
   }
 
+  handleViewportResize() {
+    this.resizeCanvas();
+  }
+
+  updateWrapHeightForKeyboard() {
+    if (!this.wrapEl) return;
+    if (this.wrapEl.style.height) this.wrapEl.style.height = '';
+    if (this.wrapEl.style.maxHeight) this.wrapEl.style.maxHeight = '';
+  }
+
   resizeCanvas() {
     if (!this.canvasEl || !this.ctx) return;
+
+    this.updateWrapHeightForKeyboard();
 
     const rect = this.wrapEl.getBoundingClientRect();
     this.viewWidth = Math.max(1, Math.floor(rect.width));
@@ -1228,7 +1334,11 @@ class GraphFrontierView extends ItemView {
   syncGraphRuntimeState(graphData) {
     const oldNodes = this.nodeById;
     const { nextNodes, nextNodeById } = this.buildNextNodesFromGraphData(graphData.nodes, oldNodes);
-    const { nextEdges, nextNeighborsById } = this.buildNextEdgesAndNeighbors(graphData.edges, nextNodeById, nextNodes);
+    const { nextEdges, nextNeighborsById } = this.buildNextEdgesAndNeighbors(
+      graphData.edges,
+      nextNodeById,
+      nextNodes
+    );
 
     this.applyOrbitPinnedPositions(nextNodes, nextNodeById);
 
@@ -1274,7 +1384,11 @@ class GraphFrontierView extends ItemView {
       y = oldNode.y;
       vx = oldNode.vx;
       vy = oldNode.vy;
-    } else if (savedPosition && Number.isFinite(savedPosition.x) && Number.isFinite(savedPosition.y)) {
+    } else if (
+      savedPosition &&
+      Number.isFinite(savedPosition.x) &&
+      Number.isFinite(savedPosition.y)
+    ) {
       x = Number(savedPosition.x);
       y = Number(savedPosition.y);
       vx = 0;
@@ -1372,7 +1486,9 @@ class GraphFrontierView extends ItemView {
         changed = true;
       }
     }
-    for (const [nodeId, orbitMeta] of Object.entries(this.plugin.data.saved_layout_orbit_pins || {})) {
+    for (const [nodeId, orbitMeta] of Object.entries(
+      this.plugin.data.saved_layout_orbit_pins || {}
+    )) {
       if (!nodeIds.has(nodeId)) {
         delete this.plugin.data.saved_layout_orbit_pins[nodeId];
         changed = true;
@@ -1460,12 +1576,12 @@ class GraphFrontierView extends ItemView {
     return updateLayoutCenterPhysics(this);
   }
 
-/*
- * ============================================================
- * PHYSICS BLOCK
- * Simulation layer: attraction/repulsion forces, damping, orbit logic, and autosave after stabilization.
- * ============================================================
- */
+  /*
+   * ============================================================
+   * PHYSICS BLOCK
+   * Simulation layer: attraction/repulsion forces, damping, orbit logic, and autosave after stabilization.
+   * ============================================================
+   */
   runFrame() {
     if (!this.isOpen) return;
     this.stepCameraSmoothing();
@@ -1483,12 +1599,12 @@ class GraphFrontierView extends ItemView {
     return stepSimulationPhysics(this);
   }
 
-/*
- * ============================================================
- * RENDER BLOCK
- * Rendering layer: background, grid, edges, nodes, labels, and focus/highlight effects.
- * ============================================================
- */
+  /*
+   * ============================================================
+   * RENDER BLOCK
+   * Rendering layer: background, grid, edges, nodes, labels, and focus/highlight effects.
+   * ============================================================
+   */
   render() {
     return renderFrameRender(this);
   }
@@ -1519,6 +1635,8 @@ class GraphFrontierView extends ItemView {
 
   // Pointer and navigation: hover, node drag, scene pan, zoom, and node open actions.
   onMouseMove(event) {
+    if (Date.now() < this.ignoreMouseUntilMs) return;
+
     const rect = this.canvasEl.getBoundingClientRect();
     const screenX = event.clientX - rect.left;
     const screenY = event.clientY - rect.top;
@@ -1536,7 +1654,10 @@ class GraphFrontierView extends ItemView {
         if (this.dragStartScreen) {
           const ddx = screenX - this.dragStartScreen.x;
           const ddy = screenY - this.dragStartScreen.y;
-          this.dragMovedDistance = Math.max(this.dragMovedDistance, Math.sqrt(ddx * ddx + ddy * ddy));
+          this.dragMovedDistance = Math.max(
+            this.dragMovedDistance,
+            Math.sqrt(ddx * ddx + ddy * ddy)
+          );
         }
       }
       return;
@@ -1556,6 +1677,7 @@ class GraphFrontierView extends ItemView {
   }
 
   onMouseDown(event) {
+    if (Date.now() < this.ignoreMouseUntilMs) return;
     if (event.button !== 0) return;
 
     const rect = this.canvasEl.getBoundingClientRect();
@@ -1593,7 +1715,11 @@ class GraphFrontierView extends ItemView {
     this.canvasEl.addClass('is-dragging');
   }
 
-  onMouseUp(event = null) {
+  onMouseUp(event = null, options = {}) {
+    const fromTouch = !!(options && options.fromTouch);
+    const suppressClick = !!(options && options.suppressClick);
+    if (!fromTouch && Date.now() < this.ignoreMouseUntilMs) return;
+
     let clickedNodeId = null;
     const hadDraggedNode = !!this.dragNodeId;
     const draggedNodeId = this.dragNodeId;
@@ -1610,7 +1736,11 @@ class GraphFrontierView extends ItemView {
           draggedNode.vy = 0;
           this.plugin.setPin(draggedNodeId, { x: snapped.x, y: snapped.y }, { mode: 'grid' });
         } else {
-          this.plugin.setPin(draggedNodeId, { x: draggedNode.x, y: draggedNode.y }, { mode: 'exact' });
+          this.plugin.setPin(
+            draggedNodeId,
+            { x: draggedNode.x, y: draggedNode.y },
+            { mode: 'exact' }
+          );
         }
       }
     }
@@ -1623,7 +1753,7 @@ class GraphFrontierView extends ItemView {
 
     if (hadDraggedNode) this.kickLayoutSearch();
 
-    if (clickedNodeId && event && event.button === 0) {
+    if (!suppressClick && clickedNodeId && event && event.button === 0) {
       this.clickFlashNodeId = clickedNodeId;
       this.clickFlashUntilMs = Date.now() + 180;
       this.openNodeFile(clickedNodeId);
@@ -1665,7 +1795,11 @@ class GraphFrontierView extends ItemView {
     const loadToken = ++this.quickPreviewLoadToken;
 
     const abstractFile = this.app.vault.getAbstractFileByPath(nodeId);
-    if (!abstractFile || typeof abstractFile.extension !== 'string' || abstractFile.extension.toLowerCase() !== 'md') {
+    if (
+      !abstractFile ||
+      typeof abstractFile.extension !== 'string' ||
+      abstractFile.extension.toLowerCase() !== 'md'
+    ) {
       if (loadToken !== this.quickPreviewLoadToken) return;
       this.quickPreviewBodyEl.setText('Preview is available only for markdown nodes.');
       return;
@@ -1678,9 +1812,20 @@ class GraphFrontierView extends ItemView {
     this.quickPreviewBodyEl.empty();
 
     if (MarkdownRenderer && typeof MarkdownRenderer.render === 'function') {
-      await MarkdownRenderer.render(this.app, markdownText || '', this.quickPreviewBodyEl, sourcePath, this);
+      await MarkdownRenderer.render(
+        this.app,
+        markdownText || '',
+        this.quickPreviewBodyEl,
+        sourcePath,
+        this
+      );
     } else if (MarkdownRenderer && typeof MarkdownRenderer.renderMarkdown === 'function') {
-      await MarkdownRenderer.renderMarkdown(markdownText || '', this.quickPreviewBodyEl, sourcePath, this);
+      await MarkdownRenderer.renderMarkdown(
+        markdownText || '',
+        this.quickPreviewBodyEl,
+        sourcePath,
+        this
+      );
     } else {
       this.quickPreviewBodyEl.setText(markdownText || '(empty)');
     }
@@ -1691,6 +1836,8 @@ class GraphFrontierView extends ItemView {
   }
 
   onWheel(event) {
+    if (Date.now() < this.ignoreMouseUntilMs) return;
+
     event.preventDefault();
 
     const rect = this.canvasEl.getBoundingClientRect();
@@ -1710,6 +1857,291 @@ class GraphFrontierView extends ItemView {
     this.persistViewState();
   }
 
+  // Touch navigation on mobile: one finger drags node/pans scene, two fingers pinch+pan camera.
+  onTouchStart(event) {
+    if (!event.touches || event.touches.length === 0) return;
+    this.ignoreMouseUntilMs = Date.now() + 700;
+    if (event.cancelable) event.preventDefault();
+    this.clearTouchLongPressTimer();
+
+    if (event.touches.length >= 2) {
+      this.startPinchGesture(event);
+      return;
+    }
+
+    const point = this.getTouchScreenPoint(event.touches[0]);
+    if (!point) return;
+    const node = this.startSingleTouchGesture(point);
+    if (node)
+      this.scheduleTouchLongPress(node.id, event.touches[0].clientX, event.touches[0].clientY);
+  }
+
+  onTouchMove(event) {
+    if (!event.touches || event.touches.length === 0) return;
+    this.ignoreMouseUntilMs = Date.now() + 700;
+    if (event.cancelable) event.preventDefault();
+
+    if (event.touches.length >= 2) {
+      this.clearTouchLongPressTimer();
+      if (!this.touchGesture || this.touchGesture.mode !== 'pinch') {
+        this.startPinchGesture(event);
+      }
+      this.updatePinchGesture(event);
+      return;
+    }
+
+    const point = this.getTouchScreenPoint(event.touches[0]);
+    if (!point) return;
+    this.lastCursorScreen = { x: point.x, y: point.y };
+    if (this.touchGesture && this.touchGesture.mode === 'single') {
+      const dx = point.x - this.touchGesture.startX;
+      const dy = point.y - this.touchGesture.startY;
+      const moved = Math.sqrt(dx * dx + dy * dy);
+      if (moved > 10) {
+        this.touchGesture.moved = true;
+        this.clearTouchLongPressTimer();
+      }
+      if (this.touchGesture.longPressTriggered) return;
+    }
+
+    if (this.dragNodeId) {
+      const node = this.nodeById.get(this.dragNodeId);
+      if (node) {
+        const world = this.screenToWorld(point.x, point.y);
+        node.x = world.x + this.dragNodeOffset.x;
+        node.y = world.y + this.dragNodeOffset.y;
+        node.vx = 0;
+        node.vy = 0;
+        if (this.dragStartScreen) {
+          const ddx = point.x - this.dragStartScreen.x;
+          const ddy = point.y - this.dragStartScreen.y;
+          this.dragMovedDistance = Math.max(
+            this.dragMovedDistance,
+            Math.sqrt(ddx * ddx + ddy * ddy)
+          );
+        }
+      }
+      return;
+    }
+
+    if (!this.panDrag) {
+      this.panDrag = {
+        startX: point.x,
+        startY: point.y,
+        startCameraX: this.cameraTarget.x,
+        startCameraY: this.cameraTarget.y,
+        startZoom: this.cameraTarget.zoom,
+      };
+      this.canvasEl.addClass('is-dragging');
+    }
+
+    const dx = point.x - this.panDrag.startX;
+    const dy = point.y - this.panDrag.startY;
+    this.cameraTarget.x = this.panDrag.startCameraX - dx / this.panDrag.startZoom;
+    this.cameraTarget.y = this.panDrag.startCameraY - dy / this.panDrag.startZoom;
+    this.persistViewState();
+  }
+
+  onTouchEnd(event) {
+    this.ignoreMouseUntilMs = Date.now() + 700;
+    if (event && event.cancelable) event.preventDefault();
+
+    const touchesCount = event && event.touches ? event.touches.length : 0;
+
+    if (touchesCount >= 2) {
+      this.clearTouchLongPressTimer();
+      this.startPinchGesture(event);
+      return;
+    }
+
+    if (touchesCount === 1) {
+      const point = this.getTouchScreenPoint(event.touches[0]);
+      this.touchGesture = null;
+      this.dragNodeId = null;
+      this.dragStartScreen = null;
+      this.dragMovedDistance = 0;
+      if (point) {
+        this.panDrag = {
+          startX: point.x,
+          startY: point.y,
+          startCameraX: this.cameraTarget.x,
+          startCameraY: this.cameraTarget.y,
+          startZoom: this.cameraTarget.zoom,
+        };
+      }
+      this.canvasEl.addClass('is-dragging');
+      return;
+    }
+
+    const hadLongPress =
+      !!this.touchGesture &&
+      this.touchGesture.mode === 'single' &&
+      !!this.touchGesture.longPressTriggered;
+    this.touchGesture = null;
+    this.clearTouchLongPressTimer();
+    this.onMouseUp({ button: 0 }, { fromTouch: true, suppressClick: hadLongPress });
+  }
+
+  startSingleTouchGesture(point) {
+    this.touchGesture = {
+      mode: 'single',
+      startX: point.x,
+      startY: point.y,
+      moved: false,
+      longPressTriggered: false,
+    };
+    this.lastCursorScreen = { x: point.x, y: point.y };
+
+    const node = this.getNodeAtScreen(point.x, point.y);
+    if (node) {
+      this.touchGesture.nodeId = node.id;
+      const world = this.screenToWorld(point.x, point.y);
+      this.dragNodeId = node.id;
+      this.dragNodeOffset = {
+        x: node.x - world.x,
+        y: node.y - world.y,
+      };
+      this.dragStartScreen = { x: point.x, y: point.y };
+      this.dragMovedDistance = 0;
+      this.canvasEl.addClass('is-dragging');
+      return node;
+    }
+
+    this.panDrag = {
+      startX: point.x,
+      startY: point.y,
+      startCameraX: this.cameraTarget.x,
+      startCameraY: this.cameraTarget.y,
+      startZoom: this.cameraTarget.zoom,
+    };
+    this.canvasEl.addClass('is-dragging');
+    return null;
+  }
+
+  startPinchGesture(event) {
+    const first = event && event.touches ? event.touches[0] : null;
+    const second = event && event.touches ? event.touches[1] : null;
+    if (!first || !second) return;
+
+    const pointA = this.getTouchScreenPoint(first);
+    const pointB = this.getTouchScreenPoint(second);
+    if (!pointA || !pointB) return;
+
+    const midX = (pointA.x + pointB.x) * 0.5;
+    const midY = (pointA.y + pointB.y) * 0.5;
+    const dist = Math.max(1, Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y));
+    const anchor = this.screenToWorldWithCamera(midX, midY, this.cameraTarget);
+
+    this.dragNodeId = null;
+    this.dragStartScreen = null;
+    this.dragMovedDistance = 0;
+    this.panDrag = null;
+    this.clearTouchLongPressTimer();
+    this.canvasEl.addClass('is-dragging');
+
+    this.touchGesture = {
+      mode: 'pinch',
+      touchIdA: first.identifier,
+      touchIdB: second.identifier,
+      startDistance: dist,
+      startCameraX: this.cameraTarget.x,
+      startCameraY: this.cameraTarget.y,
+      startCameraZoom: this.cameraTarget.zoom,
+      anchorWorldX: anchor.x,
+      anchorWorldY: anchor.y,
+    };
+  }
+
+  updatePinchGesture(event) {
+    if (!this.touchGesture || this.touchGesture.mode !== 'pinch') return;
+
+    const touchA = this.findTouchById(event.touches, this.touchGesture.touchIdA);
+    const touchB = this.findTouchById(event.touches, this.touchGesture.touchIdB);
+    if (!touchA || !touchB) {
+      this.startPinchGesture(event);
+      return;
+    }
+
+    const pointA = this.getTouchScreenPoint(touchA);
+    const pointB = this.getTouchScreenPoint(touchB);
+    if (!pointA || !pointB) return;
+
+    const midX = (pointA.x + pointB.x) * 0.5;
+    const midY = (pointA.y + pointB.y) * 0.5;
+    const dist = Math.max(1, Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y));
+
+    const zoomScale = dist / Math.max(1, this.touchGesture.startDistance);
+    const nextZoom = Math.min(
+      MAX_ZOOM,
+      Math.max(MIN_ZOOM, this.touchGesture.startCameraZoom * zoomScale)
+    );
+
+    const cameraAtStartCenter = {
+      x: this.touchGesture.startCameraX,
+      y: this.touchGesture.startCameraY,
+      zoom: nextZoom,
+    };
+    const worldAtCurrentCenter = this.screenToWorldWithCamera(midX, midY, cameraAtStartCenter);
+
+    this.cameraTarget.zoom = nextZoom;
+    this.cameraTarget.x =
+      this.touchGesture.startCameraX + (this.touchGesture.anchorWorldX - worldAtCurrentCenter.x);
+    this.cameraTarget.y =
+      this.touchGesture.startCameraY + (this.touchGesture.anchorWorldY - worldAtCurrentCenter.y);
+    this.persistViewState();
+  }
+
+  getTouchScreenPoint(touch) {
+    if (!touch || !this.canvasEl) return null;
+    const rect = this.canvasEl.getBoundingClientRect();
+    return {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top,
+    };
+  }
+
+  findTouchById(touches, id) {
+    if (!touches) return null;
+    for (const touch of touches) {
+      if (touch.identifier === id) return touch;
+    }
+    return null;
+  }
+
+  scheduleTouchLongPress(nodeId, clientX, clientY) {
+    this.clearTouchLongPressTimer();
+    this.touchLongPressTimer = window.setTimeout(() => {
+      if (!this.touchGesture || this.touchGesture.mode !== 'single') return;
+      if (this.touchGesture.moved || this.touchGesture.longPressTriggered) return;
+      if (this.touchGesture.nodeId !== nodeId) return;
+
+      this.touchGesture.longPressTriggered = true;
+      this.dragNodeId = null;
+      this.dragStartScreen = null;
+      this.dragMovedDistance = 0;
+      this.panDrag = null;
+      this.canvasEl.removeClass('is-dragging');
+      this.openTouchContextMenuAt(clientX, clientY);
+    }, 450);
+  }
+
+  clearTouchLongPressTimer() {
+    if (!this.touchLongPressTimer) return;
+    window.clearTimeout(this.touchLongPressTimer);
+    this.touchLongPressTimer = null;
+  }
+
+  openTouchContextMenuAt(clientX, clientY) {
+    if (!this.canvasEl) return;
+    const rect = this.canvasEl.getBoundingClientRect();
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
+    this.lastCursorScreen = { x: screenX, y: screenY };
+    const node = this.getNodeAtScreen(screenX, screenY);
+    if (!node) return;
+    this.showNodeContextMenu(node, clientX, clientY, null);
+  }
+
   // Node context menu: standard Obsidian actions plus GraphFrontier actions.
   onContextMenu(event) {
     event.preventDefault();
@@ -1721,144 +2153,189 @@ class GraphFrontierView extends ItemView {
 
     const node = this.getNodeAtScreen(screenX, screenY);
     if (!node) return;
+    this.showNodeContextMenu(node, event.clientX, event.clientY, event);
+  }
 
+  showNodeContextMenu(node, clientX, clientY, sourceMouseEvent = null) {
     const menu = new Menu(this.app);
     const abstractFile = this.app.vault.getAbstractFileByPath(node.id);
-    const isMarkdownNode = (
-      !!abstractFile
-      && typeof abstractFile.path === 'string'
-      && typeof abstractFile.extension === 'string'
-      && abstractFile.extension.toLowerCase() === 'md'
-    );
+    const isMarkdownNode =
+      !!abstractFile &&
+      typeof abstractFile.path === 'string' &&
+      typeof abstractFile.extension === 'string' &&
+      abstractFile.extension.toLowerCase() === 'md';
 
     if (isMarkdownNode && typeof this.app.workspace.trigger === 'function') {
       this.app.workspace.trigger('file-menu', menu, abstractFile, 'graphfrontier', this.leaf);
       this.removeLinkedViewMenuItems(menu);
       menu.addSeparator();
-      menu.addItem((item) => item
-        .setTitle('Add to search')
-        .setIcon('search')
-        .onClick(() => {
-          this.applySearchSelectionFromNode(node);
-        }));
-      menu.addItem((item) => item
-        .setTitle('Show local graph')
-        .setIcon('dot-network')
-        .onClick(async () => {
-          await this.openLocalGraphForNode(node.id);
-        }));
+      menu.addItem((item) =>
+        item
+          .setTitle('Add to search')
+          .setIcon('search')
+          .onClick(() => {
+            this.applySearchSelectionFromNode(node);
+          })
+      );
+      menu.addItem((item) =>
+        item
+          .setTitle('Show local graph')
+          .setIcon('dot-network')
+          .onClick(async () => {
+            await this.openLocalGraphForNode(node.id);
+          })
+      );
       menu.addSeparator();
     } else {
-      menu.addItem((item) => item
-        .setTitle('Add to search')
-        .setIcon('search')
-        .onClick(() => {
-          this.applySearchSelectionFromNode(node);
-        }));
+      menu.addItem((item) =>
+        item
+          .setTitle('Add to search')
+          .setIcon('search')
+          .onClick(() => {
+            this.applySearchSelectionFromNode(node);
+          })
+      );
       menu.addSeparator();
     }
 
     const isStrongPullNode = this.plugin.isStrongPullNode(node.id);
     if (!isStrongPullNode) {
-      menu.addItem((item) => item
-        .setTitle('Strong pull')
-        .setIcon('zap')
-        .onClick(async () => {
-          const strong = this.plugin.clampStrongPullMultiplier(this.plugin.getSettings().strong_pull_multiplier);
-          this.plugin.setNodeMultiplier(node.id, strong, { mode: 'strong-pull' });
-          this.kickLayoutSearch();
-          new Notice(`Strong pull: ${node.id} x${strong.toFixed(2)}`);
-        }));
+      menu.addItem((item) =>
+        item
+          .setTitle('Strong pull')
+          .setIcon('zap')
+          .onClick(async () => {
+            const strong = this.plugin.clampStrongPullMultiplier(
+              this.plugin.getSettings().strong_pull_multiplier
+            );
+            this.plugin.setNodeMultiplier(node.id, strong, { mode: 'strong-pull' });
+            this.kickLayoutSearch();
+            new Notice(`Strong pull: ${node.id} x${strong.toFixed(2)}`);
+          })
+      );
     }
 
     const nodeMultiplier = this.plugin.getNodeMultiplier(node.id);
     if (nodeMultiplier > 1 || isStrongPullNode) {
-      menu.addItem((item) => item
-        .setTitle('Clear strong pull')
-        .setIcon('x')
-        .onClick(async () => {
-          this.plugin.clearNodeMultiplier(node.id);
-          this.kickLayoutSearch();
-          new Notice(`Strong pull cleared: ${node.id}`);
-        }));
+      menu.addItem((item) =>
+        item
+          .setTitle('Clear strong pull')
+          .setIcon('x')
+          .onClick(async () => {
+            this.plugin.clearNodeMultiplier(node.id);
+            this.kickLayoutSearch();
+            new Notice(`Strong pull cleared: ${node.id}`);
+          })
+      );
     }
-    menu.addItem((item) => item
-      .setTitle('Paint edges')
-      .setIcon('palette')
-      .onClick(async () => {
-        await this.promptPickPaintedEdgeColor(node.id, event.clientX, event.clientY);
-      }));
-    if (this.plugin.getPaintedEdgeColor(node.id)) {
-      menu.addItem((item) => item
-        .setTitle('Clear painted edges')
-        .setIcon('x')
+    menu.addItem((item) =>
+      item
+        .setTitle('Paint edges')
+        .setIcon('palette')
         .onClick(async () => {
-          this.plugin.clearPaintedEdgeColor(node.id);
-          this.plugin.renderAllViews();
-          new Notice(`Painted edges cleared: ${node.id}`);
-        }));
+          await this.promptPickPaintedEdgeColor(node.id, clientX, clientY);
+        })
+    );
+    if (this.plugin.getPaintedEdgeColor(node.id)) {
+      menu.addItem((item) =>
+        item
+          .setTitle('Clear painted edges')
+          .setIcon('x')
+          .onClick(async () => {
+            this.plugin.clearPaintedEdgeColor(node.id);
+            this.plugin.renderAllViews();
+            new Notice(`Painted edges cleared: ${node.id}`);
+          })
+      );
     }
     menu.addSeparator();
 
-    menu.addItem((item) => item
-      .setTitle('Pin node')
-      .setIcon('pin')
-      .onClick(async () => {
-        await this.pinNodeExact(node.id, { x: node.x, y: node.y });
-        new Notice(`Pinned: ${node.id}`);
-      }));
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin node')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinNodeExact(node.id, { x: node.x, y: node.y });
+          new Notice(`Pinned: ${node.id}`);
+        })
+    );
 
-    menu.addItem((item) => item
-      .setTitle('Pin to grid')
-      .setIcon('pin')
-      .onClick(async () => {
-        await this.pinNodeToGrid(node.id, { x: node.x, y: node.y });
-        new Notice(`Pinned to grid: ${node.id}`);
-      }));
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin to grid')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinNodeToGrid(node.id, { x: node.x, y: node.y });
+          new Notice(`Pinned to grid: ${node.id}`);
+        })
+    );
 
     const hasPinState = this.plugin.isPinned(node.id) || this.plugin.isOrbitPinned(node.id);
     if (hasPinState) {
-      menu.addItem((item) => item
-        .setTitle('Unpin node')
-        .setIcon('pin-off')
-        .onClick(async () => {
-          this.plugin.removePin(node.id);
-          this.plugin.removeOrbitPin(node.id);
-          this.kickLayoutSearch();
-          new Notice(`Unpinned: ${node.id}`);
-        }));
+      menu.addItem((item) =>
+        item
+          .setTitle('Unpin node')
+          .setIcon('pin-off')
+          .onClick(async () => {
+            this.plugin.removePin(node.id);
+            this.plugin.removeOrbitPin(node.id);
+            this.kickLayoutSearch();
+            new Notice(`Unpinned: ${node.id}`);
+          })
+      );
     }
     menu.addSeparator();
 
-    menu.addItem((item) => item
-      .setTitle('Pin linked nodes')
-      .setIcon('pin')
-      .onClick(async () => {
-        await this.pinLinkedNodes(node.id);
-      }));
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin linked nodes')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinLinkedNodes(node.id);
+        })
+    );
 
-    menu.addItem((item) => item
-      .setTitle('Pin linked nodes to grid')
-      .setIcon('pin')
-      .onClick(async () => {
-        await this.pinLinkedNodesToGrid(node.id);
-      }));
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin linked nodes to grid')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinLinkedNodesToGrid(node.id);
+        })
+    );
 
-    menu.addItem((item) => item
-      .setTitle('Pin linked to orbit')
-      .setIcon('orbit')
-      .onClick(async () => {
-        await this.pinLinkedNodesToOrbit(node.id);
-      }));
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin linked to orbit')
+        .setIcon('orbit')
+        .onClick(async () => {
+          await this.pinLinkedNodesToOrbit(node.id);
+        })
+    );
 
-    menu.addItem((item) => item
-      .setTitle('Unpin linked nodes')
-      .setIcon('pin-off')
-      .onClick(async () => {
-        await this.unpinLinkedNodes(node.id);
-      }));
+    menu.addItem((item) =>
+      item
+        .setTitle('Unpin linked nodes')
+        .setIcon('pin-off')
+        .onClick(async () => {
+          await this.unpinLinkedNodes(node.id);
+        })
+    );
 
-    menu.showAtMouseEvent(event);
+    if (sourceMouseEvent && typeof menu.showAtMouseEvent === 'function') {
+      menu.showAtMouseEvent(sourceMouseEvent);
+      return;
+    }
+    if (typeof menu.showAtPosition === 'function') {
+      menu.showAtPosition({ x: clientX, y: clientY });
+      return;
+    }
+    menu.showAtMouseEvent({
+      clientX,
+      clientY,
+      preventDefault() {},
+      stopPropagation() {},
+    });
   }
 
   removeLinkedViewMenuItems(menu) {
@@ -1881,7 +2358,8 @@ class GraphFrontierView extends ItemView {
   getMenuItemTitleText(item) {
     if (!item) return '';
     if (typeof item.title === 'string') return item.title.trim();
-    if (item.titleEl && typeof item.titleEl.textContent === 'string') return item.titleEl.textContent.trim();
+    if (item.titleEl && typeof item.titleEl.textContent === 'string')
+      return item.titleEl.textContent.trim();
     if (item.dom && typeof item.dom.textContent === 'string') return item.dom.textContent.trim();
     return '';
   }
@@ -1889,16 +2367,18 @@ class GraphFrontierView extends ItemView {
   async openLocalGraphForNode(nodeId) {
     const abstractFile = this.app.vault.getAbstractFileByPath(nodeId);
     if (!abstractFile || typeof abstractFile.path !== 'string') return;
-    if (typeof abstractFile.extension === 'string' && abstractFile.extension.toLowerCase() !== 'md') return;
+    if (typeof abstractFile.extension === 'string' && abstractFile.extension.toLowerCase() !== 'md')
+      return;
 
     const sourceLeaf = this.app.workspace.getLeaf('tab') || this.leaf;
     await sourceLeaf.openFile(abstractFile);
     this.app.workspace.setActiveLeaf(sourceLeaf, true, true);
 
-    const localGraphLeaf = this.app.workspace.getLeavesOfType('localgraph')[0]
-      || this.app.workspace.getRightLeaf(true)
-      || this.app.workspace.getLeaf('tab')
-      || this.app.workspace.getLeaf(true);
+    const localGraphLeaf =
+      this.app.workspace.getLeavesOfType('localgraph')[0] ||
+      this.app.workspace.getRightLeaf(true) ||
+      this.app.workspace.getLeaf('tab') ||
+      this.app.workspace.getLeaf(true);
     await localGraphLeaf.setViewState({ type: 'localgraph', state: {}, active: true });
     this.app.workspace.revealLeaf(localGraphLeaf);
   }
@@ -2052,7 +2532,9 @@ class GraphFrontierView extends ItemView {
   async commandStrongPull() {
     const node = this.getCommandTargetNodeOrNotice();
     if (!node) return;
-    const strong = this.plugin.clampStrongPullMultiplier(this.plugin.getSettings().strong_pull_multiplier);
+    const strong = this.plugin.clampStrongPullMultiplier(
+      this.plugin.getSettings().strong_pull_multiplier
+    );
     this.plugin.setNodeMultiplier(node.id, strong, { mode: 'strong-pull' });
     this.kickLayoutSearch();
     new Notice(`Strong pull: ${node.id} x${strong.toFixed(2)}`);
@@ -2130,7 +2612,7 @@ class GraphFrontierView extends ItemView {
     const current = this.plugin.getNodeMultiplier(nodeId);
     const raw = this.contentEl.win.prompt(
       `Set force multiplier for node (${NODE_MULTIPLIER_MIN}..${NODE_MULTIPLIER_MAX})`,
-      String(current),
+      String(current)
     );
     if (raw == null) return;
 
@@ -2228,8 +2710,9 @@ class GraphFrontierView extends ItemView {
 
   async alignPinsToGrid() {
     const step = this.plugin.clampGridStep(this.plugin.getSettings().grid_step);
-    const sortedPins = Object.entries(this.plugin.data.pins)
-      .sort((entryA, entryB) => entryA[0].localeCompare(entryB[0]));
+    const sortedPins = Object.entries(this.plugin.data.pins).sort((entryA, entryB) =>
+      entryA[0].localeCompare(entryB[0])
+    );
 
     const occupied = new Set();
     let moved = 0;
@@ -2254,7 +2737,11 @@ class GraphFrontierView extends ItemView {
     }
 
     this.plugin.schedulePersist();
-    new Notice(moved > 0 ? `Aligned pinned nodes to grid: moved ${moved}` : `Pinned nodes already aligned (step ${step})`);
+    new Notice(
+      moved > 0
+        ? `Aligned pinned nodes to grid: moved ${moved}`
+        : `Pinned nodes already aligned (step ${step})`
+    );
   }
 
   // Linked-node bulk actions: pin, unpin, and pin-to-grid for neighbor nodes.
@@ -2300,7 +2787,12 @@ class GraphFrontierView extends ItemView {
       const linkedNode = this.nodeById.get(linkedNodeId);
       if (!linkedNode) continue;
 
-      const snappedCell = this.findNearestFreeGridCell(linkedNode.x, linkedNode.y, gridStep, occupiedGridCells);
+      const snappedCell = this.findNearestFreeGridCell(
+        linkedNode.x,
+        linkedNode.y,
+        gridStep,
+        occupiedGridCells
+      );
       occupiedGridCells.add(this.gridKey(snappedCell.gx, snappedCell.gy));
 
       this.plugin.setPin(linkedNodeId, { x: snappedCell.x, y: snappedCell.y }, { mode: 'grid' });
@@ -2379,7 +2871,9 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
-    const sortedLinkedNodeIds = linkedNodeIds.slice().sort((leftId, rightId) => leftId.localeCompare(rightId));
+    const sortedLinkedNodeIds = linkedNodeIds
+      .slice()
+      .sort((leftId, rightId) => leftId.localeCompare(rightId));
     const orbitRadius = this.getOrbitRadiusForAnchor(sortedLinkedNodeIds.length);
     let orbitPinnedCount = 0;
 
@@ -2515,12 +3009,11 @@ class GraphFrontierView extends ItemView {
     const savedPins = this.plugin.data.saved_layout_pins || {};
     const savedOrbitPins = this.plugin.data.saved_layout_orbit_pins || {};
 
-    const hasSomethingToLoad = (
-      Object.keys(savedPositions).length > 0
-      || Object.keys(savedSettings).length > 0
-      || Object.keys(savedPins).length > 0
-      || Object.keys(savedOrbitPins).length > 0
-    );
+    const hasSomethingToLoad =
+      Object.keys(savedPositions).length > 0 ||
+      Object.keys(savedSettings).length > 0 ||
+      Object.keys(savedPins).length > 0 ||
+      Object.keys(savedOrbitPins).length > 0;
     if (!hasSomethingToLoad) {
       if (!silent) new Notice('No saved layout');
       return;
@@ -2657,7 +3150,8 @@ class GraphFrontierView extends ItemView {
   async openNodeFile(nodeId) {
     const abstractFile = this.app.vault.getAbstractFileByPath(nodeId);
     if (!abstractFile) return;
-    if (typeof abstractFile.extension === 'string' && abstractFile.extension.toLowerCase() !== 'md') return;
+    if (typeof abstractFile.extension === 'string' && abstractFile.extension.toLowerCase() !== 'md')
+      return;
     if (typeof this.app.workspace.getLeaf === 'function' && typeof abstractFile.path === 'string') {
       const leaf = this.app.workspace.getLeaf(true);
       await leaf.openFile(abstractFile);

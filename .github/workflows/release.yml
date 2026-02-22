@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Validate release version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          TAG_VERSION="${TAG#v}"
+          MANIFEST_VERSION="$(node -p "require('./src/static/manifest.json').version")"
+
+          echo "Tag: ${TAG}"
+          echo "Tag version: ${TAG_VERSION}"
+          echo "Manifest version: ${MANIFEST_VERSION}"
+
+          if [ "${TAG_VERSION}" != "${MANIFEST_VERSION}" ]; then
+            echo "Error: tag version does not match manifest.json version"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Create release zip from dist
+        run: |
+          VERSION="$(node -p "require('./src/static/manifest.json').version")"
+          ZIP_NAME="graphfrontier-${VERSION}.zip"
+          cd dist
+          zip -r "../${ZIP_NAME}" .
+          cd ..
+          ls -la "${ZIP_NAME}" dist
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            graphfrontier-*.zip
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
+            dist/versions.json
+          generate_release_notes: true

@@ -1,15 +1,22 @@
 {
   "name": "graphfrontier",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "private": true,
   "description": "GraphFrontier Obsidian plugin",
   "license": "MIT",
-  "main": "main.js",
+  "main": "dist/main.js",
   "scripts": {
     "build": "node esbuild.config.mjs production",
-    "dev": "node esbuild.config.mjs dev"
+    "dev": "node esbuild.config.mjs dev",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
-    "esbuild": "^0.24.2"
+    "@eslint/js": "^9.21.0",
+    "esbuild": "^0.24.2",
+    "eslint": "^9.21.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.5.2"
   }
 }
