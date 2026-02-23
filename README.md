@@ -1,7 +1,18 @@
 # GraphFrontier
 
-GraphFrontier is a custom graph view plugin for Obsidian focused on advanced layout control:
-pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and physics tuning.
+GraphFrontier is **not** a plugin for Obsidian Graph View.
+It is a fully independent plugin with its own physics engine, designed to implement ideas that are not possible in the standard graph plugin.
+
+The main goal is to build an ideal, universal data-visualization tool that keeps the strengths of Graph View while removing its limitations.
+
+It helps create a clean, well-organized structure for large collections of notes and stays very smooth even with a very large number of objects.
+
+Especially useful for:
+
+- Finding patterns
+- Documentation
+- Visualizing relationships in database structures
+- Prompt engineering
 
 ## Highlights
 
@@ -103,18 +114,30 @@ pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and phys
   </tr>
 </table>
 
-## Quick Start
+## Installation
 
-1. Build:
+### Install from Release (Recommended)
+
+1. Open the latest GitHub Release.
+2. Download `graphfrontier-<version>.zip`.
+3. Extract it into your vault plugins folder:
+   - `<vault>/.obsidian/plugins/graphfrontier/`
+4. In Obsidian:
+   - `Settings -> Community plugins -> Installed plugins -> GraphFrontier -> Enable`
+
+### Build from Source (Development)
+
+1. Install dependencies:
+   - `npm install`
+2. Build:
    - `npm run build`
-2. Build output appears in `dist/`:
+3. Build output appears in `dist/`:
    - `dist/main.js`
    - `dist/manifest.json`
    - `dist/styles.css`
    - `dist/versions.json`
-3. Copy plugin files into your vault plugin folder.
-4. In Obsidian:
-   - `Settings -> Community plugins -> Installed plugins -> GraphFrontier -> Enable`
+4. Copy files from `dist/` into:
+   - `<vault>/.obsidian/plugins/graphfrontier/`
 
 ## Documentation
 
