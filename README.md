@@ -40,99 +40,88 @@ https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0
 3. In Obsidian enable the plugin:
    - `Settings -> Community plugins -> GraphFrontier -> Enable`
 
-## Highlights
-
-- Dedicated GraphFrontier view (openable as a normal tab)
-- Multiple pin modes for nodes: `pin`, `pin to grid`, `orbit pin`
-- Per-node force controls: strong pull / multiplier
-- Edge painting per node with separate painted edge width
-- Search row with `find` and `filter` behavior
-- Group-based node coloring using query expressions
-- Layout save/load and autosave after stabilization
-- Attachment/orphan handling with separate behaviors
-
 ## Features
 
-<table>
+<table style="border-collapse: collapse; width: 100%;">
   <tr>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/pin_node.gif" alt="Pin node demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Pin nodes exactly where you want them</strong></p>
     </td>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/pin_node_grid.gif" alt="Pin node to grid demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Pin nodes to the grid</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/save.gif" alt="Save layout demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Save node positions and keep your layout exactly where you want it every time you open the graph</strong></p>
     </td>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/strong_pull.gif" alt="Strong pull demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Boost attraction to a specific node</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/pin_orbit.gif" alt="Pin linked nodes to orbit demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Place linked nodes on another node orbit with one click</strong></p>
     </td>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/unpin_linked_grid.gif" alt="Move linked nodes and keep position demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Move linked nodes and keep them exactly where you need them</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/paint_links.gif" alt="Paint links demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Paint links for better visual clarity</strong></p>
     </td>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/hide_edges.gif" alt="Hide edges demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Hide links you do not need</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/find.gif" alt="Find mode demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Find mode explore links in the full context</strong></p>
     </td>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/filter.gif" alt="Filter mode demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Filter mode local graph behavior directly in the global view</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/orphan.gif" alt="Orphan files separation demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Orphan files stay separate from primary nodes</strong></p>
     </td>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/attachments.gif" alt="Attachments on orbit demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Show only linked attachments and place them directly on node orbits</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/hotkeys.gif" alt="Hotkey support demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Hotkey support</strong></p>
     </td>
-    <td width="50%" valign="top" align="left">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/commands.gif" alt="Command support demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Command support</strong></p>
