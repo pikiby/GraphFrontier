@@ -14,6 +14,20 @@ Especially useful for:
 - Visualizing relationships in database structures
 - Prompt engineering
 
+## Support
+
+This project is actively growing, and I would be very grateful for your support.
+
+<a href="https://www.buymeacoffee.com/pikiby" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+
+I would be happy to hear your ideas:
+
+https://github.com/pikiby/GraphFrontier/discussions
+
+And I would really appreciate your help with bug reports:
+
+https://github.com/pikiby/GraphFrontier/issues
+
 ## Highlights
 
 - Dedicated GraphFrontier view (openable as a normal tab)
