@@ -31,6 +31,7 @@ If `Show attachments` is enabled, additional controls appear:
 - `Strong pull x`: multiplier used by strong pull action
 - `Orbit distance`: spacing used when distributing orbit-pinned nodes
 - `Repel strength`: node-to-node repulsion force
+- `Repel radius`: cutoff distance for repel calculations (larger value means wider repel influence)
 - `Center strength`: pull toward layout center
 - `Damping`: per-frame velocity damping
 

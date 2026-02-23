@@ -333,6 +333,9 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(body, 'Repel strength', 'repel_strength', 0, 100, 1, 'render', {
       hint: 'Repulsion force between nodes',
     });
+    this.addSideSlider(body, 'Repel radius', 'repel_radius', 20, 200, 5, 'render', {
+      hint: 'Repulsion cutoff radius for node-to-node interactions',
+    });
     this.addSideSlider(body, 'Center strength', 'center_strength', 0, 100, 1, 'render', {
       hint: 'How strongly free nodes are attracted to layout center',
     });
@@ -431,6 +434,7 @@ class GraphFrontierView extends ItemView {
         key === 'orbit_distance' ||
         key === 'attachment_link_distance_multiplier' ||
         key === 'repel_strength' ||
+        key === 'repel_radius' ||
         key === 'center_strength' ||
         key === 'damping'
       ) {

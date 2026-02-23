@@ -29,27 +29,27 @@ function registerGraphFrontierCommands(plugin) {
 
   // Cursor-targeted actions: resolve active GraphFrontier view first, then run the matching handler.
   const viewActions = [
-    { id: 'graphfrontier-toggle-pin-under-cursor', name: 'Toggle pin under cursor (GraphFrontier)', method: 'togglePinUnderCursor' },
-    { id: 'graphfrontier-set-force-multiplier-under-cursor', name: 'Set force multiplier under cursor (GraphFrontier)', method: 'promptSetMultiplierUnderCursor' },
-    { id: 'graphfrontier-clear-force-multiplier-under-cursor', name: 'Clear force multiplier under cursor (GraphFrontier)', method: 'clearMultiplierUnderCursor' },
-    { id: 'graphfrontier-align-pins-to-grid', name: 'Align pins to grid (GraphFrontier)', method: 'alignPinsToGrid' },
-    { id: 'graphfrontier-pin-node-under-cursor', name: 'Pin node under cursor (GraphFrontier)', method: 'commandPinNode' },
-    { id: 'graphfrontier-pin-to-grid-under-cursor', name: 'Pin node to grid under cursor (GraphFrontier)', method: 'commandPinToGrid' },
-    { id: 'graphfrontier-unpin-node-under-cursor', name: 'Unpin node under cursor (GraphFrontier)', method: 'commandUnpinNode' },
-    { id: 'graphfrontier-pin-linked-to-orbit-under-cursor', name: 'Pin linked to orbit under cursor (GraphFrontier)', method: 'commandPinLinkedToOrbit' },
-    { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor (GraphFrontier)', method: 'commandUnpinLinkedNodes' },
-    { id: 'graphfrontier-add-to-search-under-cursor', name: 'Add to search under cursor (GraphFrontier)', method: 'commandAddToSearch' },
-    { id: 'graphfrontier-show-local-graph-under-cursor', name: 'Show local graph under cursor (GraphFrontier)', method: 'commandShowLocalGraph' },
-    { id: 'graphfrontier-pin-linked-nodes-under-cursor', name: 'Pin linked nodes under cursor (GraphFrontier)', method: 'commandPinLinkedNodes' },
-    { id: 'graphfrontier-pin-linked-nodes-to-grid-under-cursor', name: 'Pin linked nodes to grid under cursor (GraphFrontier)', method: 'commandPinLinkedNodesToGrid' },
-    { id: 'graphfrontier-paint-edges-under-cursor', name: 'Paint edges under cursor (GraphFrontier)', method: 'commandPaintEdges' },
-    { id: 'graphfrontier-clear-painted-edges-under-cursor', name: 'Clear painted edges under cursor (GraphFrontier)', method: 'commandClearPaintedEdges' },
-    { id: 'graphfrontier-strong-pull-under-cursor', name: 'Strong pull under cursor (GraphFrontier)', method: 'commandStrongPull' },
-    { id: 'graphfrontier-clear-strong-pull-under-cursor', name: 'Clear strong pull under cursor (GraphFrontier)', method: 'commandClearStrongPull' },
-    { id: 'graphfrontier-save-layout', name: 'Save layout (GraphFrontier)', method: 'saveCurrentLayout' },
-    { id: 'graphfrontier-load-layout', name: 'Load layout (GraphFrontier)', method: 'loadSavedLayout' },
-    { id: 'graphfrontier-pin-all', name: 'Pin all nodes (GraphFrontier)', method: 'commandPinAllNodes' },
-    { id: 'graphfrontier-unpin-all', name: 'Unpin all nodes (GraphFrontier)', method: 'commandUnpinAllNodes' },
+    { id: 'graphfrontier-toggle-pin-under-cursor', name: 'Toggle pin under cursor', method: 'togglePinUnderCursor' },
+    { id: 'graphfrontier-set-force-multiplier-under-cursor', name: 'Set force multiplier under cursor', method: 'promptSetMultiplierUnderCursor' },
+    { id: 'graphfrontier-clear-force-multiplier-under-cursor', name: 'Clear force multiplier under cursor', method: 'clearMultiplierUnderCursor' },
+    { id: 'graphfrontier-align-pins-to-grid', name: 'Align pins to grid', method: 'alignPinsToGrid' },
+    { id: 'graphfrontier-pin-node-under-cursor', name: 'Pin node under cursor', method: 'commandPinNode' },
+    { id: 'graphfrontier-pin-to-grid-under-cursor', name: 'Pin node to grid under cursor', method: 'commandPinToGrid' },
+    { id: 'graphfrontier-unpin-node-under-cursor', name: 'Unpin node under cursor', method: 'commandUnpinNode' },
+    { id: 'graphfrontier-pin-linked-to-orbit-under-cursor', name: 'Pin linked to orbit under cursor', method: 'commandPinLinkedToOrbit' },
+    { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor', method: 'commandUnpinLinkedNodes' },
+    { id: 'graphfrontier-add-to-search-under-cursor', name: 'Add to search under cursor', method: 'commandAddToSearch' },
+    { id: 'graphfrontier-show-local-graph-under-cursor', name: 'Show local graph under cursor', method: 'commandShowLocalGraph' },
+    { id: 'graphfrontier-pin-linked-nodes-under-cursor', name: 'Pin linked nodes under cursor', method: 'commandPinLinkedNodes' },
+    { id: 'graphfrontier-pin-linked-nodes-to-grid-under-cursor', name: 'Pin linked nodes to grid under cursor', method: 'commandPinLinkedNodesToGrid' },
+    { id: 'graphfrontier-paint-edges-under-cursor', name: 'Paint edges under cursor', method: 'commandPaintEdges' },
+    { id: 'graphfrontier-clear-painted-edges-under-cursor', name: 'Clear painted edges under cursor', method: 'commandClearPaintedEdges' },
+    { id: 'graphfrontier-strong-pull-under-cursor', name: 'Strong pull under cursor', method: 'commandStrongPull' },
+    { id: 'graphfrontier-clear-strong-pull-under-cursor', name: 'Clear strong pull under cursor', method: 'commandClearStrongPull' },
+    { id: 'graphfrontier-save-layout', name: 'Save layout', method: 'saveCurrentLayout' },
+    { id: 'graphfrontier-load-layout', name: 'Load layout', method: 'loadSavedLayout' },
+    { id: 'graphfrontier-pin-all', name: 'Pin all nodes', method: 'commandPinAllNodes' },
+    { id: 'graphfrontier-unpin-all', name: 'Unpin all nodes', method: 'commandUnpinAllNodes' },
   ];
 
   for (const action of viewActions) {
@@ -287,6 +287,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.base_link_strength = this.clampNumber(normalized.settings.base_link_strength, 1, 100, DEFAULT_DATA.settings.base_link_strength);
     normalized.settings.link_distance = this.clampNumber(normalized.settings.link_distance, 1, 100, DEFAULT_DATA.settings.link_distance);
     normalized.settings.repel_strength = this.clampNumber(normalized.settings.repel_strength, 0, 100, DEFAULT_DATA.settings.repel_strength);
+    normalized.settings.repel_radius = this.clampNumber(
+      normalized.settings.repel_radius,
+      20,
+      200,
+      DEFAULT_DATA.settings.repel_radius,
+    );
     // Backward compatibility: old center strength (e.g. 0.0001 -> new scale 10).
     if (Number(normalized.settings.center_strength) < 1) {
       normalized.settings.center_strength = Number(normalized.settings.center_strength) / 0.00001;

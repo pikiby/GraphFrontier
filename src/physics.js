@@ -84,6 +84,17 @@ function stepSimulation(view) {
     0.9,
     DEFAULT_DATA.settings.damping
   );
+  const repelRadius = view.plugin.clampNumber(
+    settings.repel_radius,
+    20,
+    200,
+    DEFAULT_DATA.settings.repel_radius
+  );
+  const orphanRepelRadius = repelRadius * 1.25;
+  const orphanToMainRepelRadius = repelRadius * 1.25;
+  const repelRadiusSq = repelRadius * repelRadius;
+  const orphanRepelRadiusSq = orphanRepelRadius * orphanRepelRadius;
+  const orphanToMainRepelRadiusSq = orphanToMainRepelRadius * orphanToMainRepelRadius;
   const hasRepel = repelStrength > 0;
   const hasCenter = centerStrength > 0;
   const hasLink = baseLinkStrength > 0 && view.edges.length > 0;
@@ -100,7 +111,10 @@ function stepSimulation(view) {
   const impulseGain = 7;
   const orphanRepelScale = 1.2;
   const orphanToMainRepelScale = 5.2;
+  const attachmentOnlyRepelScale = 0.85;
+  const attachmentOnlyToMainRepelScale = 3.6;
   const regularBackReactionScale = 0.06;
+  const attachmentOnlyBackReactionScale = 0.04;
   const orphanCenterScale = 1;
   const oneSecondRetention = Math.pow(0.01, 1 / 60);
   const dampingRetention = 1 - damping * 0.95;
@@ -108,7 +122,6 @@ function stepSimulation(view) {
   const settleVelocityEps = 0.02;
   const settleAccelEps = 0.02;
 
-  const pairStride = nodeCount > 1300 ? 2 : 1;
   const accelById = new Map();
   for (const node of nodes) accelById.set(node.id, { ax: 0, ay: 0 });
   const orbitPinsById = new Map();
@@ -123,29 +136,57 @@ function stepSimulation(view) {
   const autoAttachmentOrbitById = buildAttachmentAutoOrbitMap(view);
   const autoAttachmentOrbitNodeIds = new Set(autoAttachmentOrbitById.keys());
   const freeOrphanNodes = [];
+  const attachmentOnlyAnchorNodes = [];
+  const attachmentOnlyAnchorIds = new Set();
   const mainNodesForOrphanRepel = [];
   for (const node of nodes) {
-    if (orbitNodeIds.has(node.id)) continue;
     if (autoAttachmentOrbitNodeIds.has(node.id)) continue;
     if (node.degree === 0) freeOrphanNodes.push(node);
     if (node.degree > 0 && !node?.meta?.isAttachment) {
+      const neighborIds = view.neighborsById.get(node.id);
+      if (!neighborIds || neighborIds.size === 0) {
+        mainNodesForOrphanRepel.push(node);
+        continue;
+      }
+      let hasRegularNeighbor = false;
+      for (const neighborId of neighborIds) {
+        const neighborNode = view.nodeById.get(neighborId);
+        if (!neighborNode) continue;
+        if (!neighborNode.meta?.isAttachment) {
+          hasRegularNeighbor = true;
+          break;
+        }
+      }
+      // Attachment-only anchors: regular nodes linked only to attachments.
+      // They use orphan-like mechanics with reduced force to stay stable and smooth.
+      if (!hasRegularNeighbor) {
+        attachmentOnlyAnchorNodes.push(node);
+        attachmentOnlyAnchorIds.add(node.id);
+        continue;
+      }
       mainNodesForOrphanRepel.push(node);
     }
   }
   let movingNodeCount = 0;
 
   if (hasRepel) {
-    for (let indexA = 0; indexA < nodeCount; indexA += pairStride) {
+    for (let indexA = 0; indexA < nodeCount; indexA += 1) {
       const nodeA = nodes[indexA];
-      for (let indexB = indexA + 1; indexB < nodeCount; indexB += pairStride) {
+      for (let indexB = indexA + 1; indexB < nodeCount; indexB += 1) {
         const nodeB = nodes[indexB];
-        if (orbitNodeIds.has(nodeA.id) || orbitNodeIds.has(nodeB.id)) continue;
         if (autoAttachmentOrbitNodeIds.has(nodeA.id) || autoAttachmentOrbitNodeIds.has(nodeB.id))
           continue;
         if (nodeA.degree === 0 || nodeB.degree === 0) continue;
+        if (attachmentOnlyAnchorIds.has(nodeA.id) || attachmentOnlyAnchorIds.has(nodeB.id))
+          continue;
+        const nodeAIsOrbitPinned = orbitNodeIds.has(nodeA.id);
+        const nodeBIsOrbitPinned = orbitNodeIds.has(nodeB.id);
+        if (nodeAIsOrbitPinned && nodeBIsOrbitPinned) continue;
         const dx = nodeB.x - nodeA.x;
         const dy = nodeB.y - nodeA.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > repelRadiusSq) continue;
+        const dist = Math.sqrt(distSq) || 0.0001;
         const safeDist = Math.max(minRepelDistance, dist);
 
         const force = Math.min(maxRepelForce, repelStrength / (safeDist * safeDist));
@@ -154,10 +195,14 @@ function stepSimulation(view) {
 
         const a = accelById.get(nodeA.id);
         const b = accelById.get(nodeB.id);
-        a.ax -= fx;
-        a.ay -= fy;
-        b.ax += fx;
-        b.ay += fy;
+        if (!nodeAIsOrbitPinned) {
+          a.ax -= fx;
+          a.ay -= fy;
+        }
+        if (!nodeBIsOrbitPinned) {
+          b.ax += fx;
+          b.ay += fy;
+        }
       }
     }
 
@@ -169,7 +214,9 @@ function stepSimulation(view) {
           const nodeB = freeOrphanNodes[indexB];
           const dx = nodeB.x - nodeA.x;
           const dy = nodeB.y - nodeA.y;
-          const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > orphanRepelRadiusSq) continue;
+          const dist = Math.sqrt(distSq) || 0.0001;
           const safeDist = Math.max(minRepelDistance, dist);
           const force = Math.min(maxRepelForce, orphanRepelStrength / (safeDist * safeDist));
           const fx = (dx / dist) * force;
@@ -185,6 +232,77 @@ function stepSimulation(view) {
       }
     }
 
+    const attachmentOnlyRepelStrength = repelStrength * attachmentOnlyRepelScale;
+    if (attachmentOnlyRepelStrength > 0 && attachmentOnlyAnchorNodes.length > 1) {
+      for (let indexA = 0; indexA < attachmentOnlyAnchorNodes.length; indexA += 1) {
+        const nodeA = attachmentOnlyAnchorNodes[indexA];
+        for (let indexB = indexA + 1; indexB < attachmentOnlyAnchorNodes.length; indexB += 1) {
+          const nodeB = attachmentOnlyAnchorNodes[indexB];
+          const nodeAIsOrbitPinned = orbitNodeIds.has(nodeA.id);
+          const nodeBIsOrbitPinned = orbitNodeIds.has(nodeB.id);
+          if (nodeAIsOrbitPinned && nodeBIsOrbitPinned) continue;
+          const dx = nodeB.x - nodeA.x;
+          const dy = nodeB.y - nodeA.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > orphanRepelRadiusSq) continue;
+          const dist = Math.sqrt(distSq) || 0.0001;
+          const safeDist = Math.max(minRepelDistance, dist);
+          const force = Math.min(
+            maxRepelForce,
+            attachmentOnlyRepelStrength / (safeDist * safeDist)
+          );
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          const a = accelById.get(nodeA.id);
+          const b = accelById.get(nodeB.id);
+          if (!nodeAIsOrbitPinned) {
+            a.ax -= fx;
+            a.ay -= fy;
+          }
+          if (!nodeBIsOrbitPinned) {
+            b.ax += fx;
+            b.ay += fy;
+          }
+        }
+      }
+    }
+
+    const orphanToAttachmentOnlyRepelStrength =
+      repelStrength * ((orphanRepelScale + attachmentOnlyRepelScale) / 2);
+    if (
+      orphanToAttachmentOnlyRepelStrength > 0 &&
+      freeOrphanNodes.length > 0 &&
+      attachmentOnlyAnchorNodes.length > 0
+    ) {
+      for (const orphanNode of freeOrphanNodes) {
+        for (const attachmentOnlyNode of attachmentOnlyAnchorNodes) {
+          const attachmentOnlyIsOrbitPinned = orbitNodeIds.has(attachmentOnlyNode.id);
+          const dx = attachmentOnlyNode.x - orphanNode.x;
+          const dy = attachmentOnlyNode.y - orphanNode.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > orphanRepelRadiusSq) continue;
+          const dist = Math.sqrt(distSq) || 0.0001;
+          const safeDist = Math.max(minRepelDistance, dist);
+          const force = Math.min(
+            maxRepelForce,
+            orphanToAttachmentOnlyRepelStrength / (safeDist * safeDist)
+          );
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          const orphanAccel = accelById.get(orphanNode.id);
+          const attachmentOnlyAccel = accelById.get(attachmentOnlyNode.id);
+          orphanAccel.ax -= fx;
+          orphanAccel.ay -= fy;
+          if (!attachmentOnlyIsOrbitPinned) {
+            attachmentOnlyAccel.ax += fx;
+            attachmentOnlyAccel.ay += fy;
+          }
+        }
+      }
+    }
+
     const orphanToMainRepelStrength = repelStrength * orphanToMainRepelScale;
     if (
       orphanToMainRepelStrength > 0 &&
@@ -195,7 +313,9 @@ function stepSimulation(view) {
         for (const mainNode of mainNodesForOrphanRepel) {
           const dx = mainNode.x - orphanNode.x;
           const dy = mainNode.y - orphanNode.y;
-          const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > orphanToMainRepelRadiusSq) continue;
+          const dist = Math.sqrt(distSq) || 0.0001;
           const safeDist = Math.max(minRepelDistance, dist);
           const force = Math.min(maxRepelForce, orphanToMainRepelStrength / (safeDist * safeDist));
           const fx = (dx / dist) * force;
@@ -203,10 +323,50 @@ function stepSimulation(view) {
 
           const orphanAccel = accelById.get(orphanNode.id);
           const regularAccel = accelById.get(mainNode.id);
+          const mainIsOrbitPinned = orbitNodeIds.has(mainNode.id);
           orphanAccel.ax -= fx;
           orphanAccel.ay -= fy;
-          regularAccel.ax += fx * regularBackReactionScale;
-          regularAccel.ay += fy * regularBackReactionScale;
+          if (!mainIsOrbitPinned) {
+            regularAccel.ax += fx * regularBackReactionScale;
+            regularAccel.ay += fy * regularBackReactionScale;
+          }
+        }
+      }
+    }
+
+    const attachmentOnlyToMainRepelStrength = repelStrength * attachmentOnlyToMainRepelScale;
+    if (
+      attachmentOnlyToMainRepelStrength > 0 &&
+      attachmentOnlyAnchorNodes.length > 0 &&
+      mainNodesForOrphanRepel.length > 0
+    ) {
+      for (const attachmentOnlyNode of attachmentOnlyAnchorNodes) {
+        const attachmentOnlyIsOrbitPinned = orbitNodeIds.has(attachmentOnlyNode.id);
+        for (const mainNode of mainNodesForOrphanRepel) {
+          const dx = mainNode.x - attachmentOnlyNode.x;
+          const dy = mainNode.y - attachmentOnlyNode.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > orphanToMainRepelRadiusSq) continue;
+          const dist = Math.sqrt(distSq) || 0.0001;
+          const safeDist = Math.max(minRepelDistance, dist);
+          const force = Math.min(
+            maxRepelForce,
+            attachmentOnlyToMainRepelStrength / (safeDist * safeDist)
+          );
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          const attachmentOnlyAccel = accelById.get(attachmentOnlyNode.id);
+          const regularAccel = accelById.get(mainNode.id);
+          const mainIsOrbitPinned = orbitNodeIds.has(mainNode.id);
+          if (!attachmentOnlyIsOrbitPinned) {
+            attachmentOnlyAccel.ax -= fx;
+            attachmentOnlyAccel.ay -= fy;
+          }
+          if (!mainIsOrbitPinned) {
+            regularAccel.ax += fx * attachmentOnlyBackReactionScale;
+            regularAccel.ay += fy * attachmentOnlyBackReactionScale;
+          }
         }
       }
     }

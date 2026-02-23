@@ -89,6 +89,18 @@ pin modes, orbit pinning, strong pull, edge painting, grouped coloring, and phys
       <sub><strong>Show only linked attachments and place them directly on node orbits.</strong></sub>
     </td>
   </tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/hotkeys.gif" alt="Hotkey support demo" width="100%">
+      <br>
+      <sub><strong>Hotkey support.</strong></sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/media/commands.gif" alt="Command support demo" width="100%">
+      <br>
+      <sub><strong>Command support.</strong></sub>
+    </td>
+  </tr>
 </table>
 
 ## Quick Start

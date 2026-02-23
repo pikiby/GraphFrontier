@@ -17,9 +17,22 @@ Then velocity is damped and position is updated each frame.
 - `Link strength`: stronger spring between linked nodes
 - `Link distance`: preferred distance of regular linked nodes
 - `Repel strength`: stronger anti-overlap spreading
+- `Repel radius`: distance cutoff for repel interactions
 - `Center strength`: stronger pull toward center
 - `Damping`: stronger velocity decay per frame
 - `Strong pull x`: per-node multiplier used by strong pull action
+
+## Repel Radius Logic
+
+Repel is distance-limited:
+
+- if two nodes are farther than `Repel radius`, repel between them is skipped
+- this keeps movement smooth on large graphs and avoids over-computation on distant pairs
+
+Derived radii:
+
+- orphan-related repel uses a slightly wider radius (`Repel radius * 1.25`)
+- attachment-only orphan-like interactions use base radius or orphan radius depending on pair type
 
 ## Stabilization Logic
 
@@ -54,6 +67,30 @@ Where:
 
 Attachments can also be auto-distributed around anchors using similar logic.
 
+## Node Classes In Simulation
+
+GraphFrontier now treats several node classes differently for stability:
+
+- Main nodes: regular non-attachment nodes with regular links
+- Orphans: nodes with `degree = 0`
+- Attachments: non-markdown files, usually auto-orbited around anchors
+- Attachment-only anchors: regular nodes linked only to attachments
+
+Attachment-only anchors use orphan-like mechanics with reduced force.  
+This prevents jitter while keeping them integrated with orphan/main repulsion behavior.
+
+## Orphan And Attachment-Oriented Repel
+
+Additional repel layers are applied on top of main repel:
+
+- orphan <-> orphan
+- orphan <-> main
+- attachment-only <-> attachment-only
+- orphan <-> attachment-only
+- attachment-only <-> main
+
+These layers help keep peripheral nodes separated from the core while preserving smooth motion.
+
 ## Why Graph Can Still Move
 
 Even with many controls low, movement may continue if:
@@ -62,6 +99,7 @@ Even with many controls low, movement may continue if:
 - links remain stretched
 - center pull remains active
 - nodes are being dragged or constraints are changing
+- orphan/attachment class interactions are still active
 
 If needed, reduce link/center/repel and increase damping to calm down faster.
 

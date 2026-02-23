@@ -38,6 +38,7 @@ const DEFAULT_DATA = {
     base_link_strength: 40,
     link_distance: 20,
     repel_strength: 100,
+    repel_radius: 80,
     center_strength: 10,
     damping: 0.9,
     layout_autosave: false,
