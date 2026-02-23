@@ -28,6 +28,18 @@ And I would really appreciate your help with bug reports:
 
 https://github.com/pikiby/GraphFrontier/issues
 
+## Installation
+
+Download:
+
+https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0.6.0.zip
+
+1. Download `graphfrontier-0.6.0.zip` from Releases
+2. Extract it into your vault plugins folder:
+   - `<vault>/.obsidian/plugins/graphfrontier/`
+3. In Obsidian enable the plugin:
+   - `Settings -> Community plugins -> GraphFrontier -> Enable`
+
 ## Highlights
 
 - Dedicated GraphFrontier view (openable as a normal tab)
@@ -39,119 +51,94 @@ https://github.com/pikiby/GraphFrontier/issues
 - Layout save/load and autosave after stabilization
 - Attachment/orphan handling with separate behaviors
 
-## Demo
+## Features
 
 <table>
   <tr>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/pin_node.gif" alt="Pin node demo" width="100%">
       <br>
-      <sub><strong>Pin nodes exactly where you want them!</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Pin nodes exactly where you want them</strong></p>
     </td>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/pin_node_grid.gif" alt="Pin node to grid demo" width="100%">
       <br>
-      <sub><strong>Pin nodes to the grid.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Pin nodes to the grid</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/save.gif" alt="Save layout demo" width="100%">
       <br>
-      <sub><strong>Save node positions. Keep your layout exactly where you want it every time you open the graph.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Save node positions and keep your layout exactly where you want it every time you open the graph</strong></p>
     </td>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/strong_pull.gif" alt="Strong pull demo" width="100%">
       <br>
-      <sub><strong>Boost attraction to a specific node.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Boost attraction to a specific node</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/pin_orbit.gif" alt="Pin linked nodes to orbit demo" width="100%">
       <br>
-      <sub><strong>Place linked nodes on another node's orbit with one click.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Place linked nodes on another node orbit with one click</strong></p>
     </td>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/unpin_linked_grid.gif" alt="Move linked nodes and keep position demo" width="100%">
       <br>
-      <sub><strong>Move linked nodes and keep them exactly where you need them.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Move linked nodes and keep them exactly where you need them</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/paint_links.gif" alt="Paint links demo" width="100%">
       <br>
-      <sub><strong>Paint links for better visual clarity.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Paint links for better visual clarity</strong></p>
     </td>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/hide_edges.gif" alt="Hide edges demo" width="100%">
       <br>
-      <sub><strong>Hide links you do not need.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Hide links you do not need</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/find.gif" alt="Find mode demo" width="100%">
       <br>
-      <sub><strong>Find mode: explore links in the full context.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Find mode explore links in the full context</strong></p>
     </td>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/filter.gif" alt="Filter mode demo" width="100%">
       <br>
-      <sub><strong>Filter mode: local graph behavior directly in the global view.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Filter mode local graph behavior directly in the global view</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/orphan.gif" alt="Orphan files separation demo" width="100%">
       <br>
-      <sub><strong>Orphan files stay separate from primary nodes.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Orphan files stay separate from primary nodes</strong></p>
     </td>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/attachments.gif" alt="Attachments on orbit demo" width="100%">
       <br>
-      <sub><strong>Show only linked attachments and place them directly on node orbits.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Show only linked attachments and place them directly on node orbits</strong></p>
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/hotkeys.gif" alt="Hotkey support demo" width="100%">
       <br>
-      <sub><strong>Hotkey support.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Hotkey support</strong></p>
     </td>
-    <td width="50%" valign="top" align="center">
+    <td width="50%" valign="top" align="left">
       <img src="docs/media/commands.gif" alt="Command support demo" width="100%">
       <br>
-      <sub><strong>Command support.</strong></sub>
+      <p style="font-size: 1.05em;"><strong>Command support</strong></p>
     </td>
   </tr>
 </table>
-
-## Installation
-
-### Install from Release (Recommended)
-
-1. Open the latest GitHub Release.
-2. Download `graphfrontier-<version>.zip`.
-3. Extract it into your vault plugins folder:
-   - `<vault>/.obsidian/plugins/graphfrontier/`
-4. In Obsidian:
-   - `Settings -> Community plugins -> Installed plugins -> GraphFrontier -> Enable`
-
-### Build from Source (Development)
-
-1. Install dependencies:
-   - `npm install`
-2. Build:
-   - `npm run build`
-3. Build output appears in `dist/`:
-   - `dist/main.js`
-   - `dist/manifest.json`
-   - `dist/styles.css`
-   - `dist/versions.json`
-4. Copy files from `dist/` into:
-   - `<vault>/.obsidian/plugins/graphfrontier/`
 
 ## Documentation
 
