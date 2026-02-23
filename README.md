@@ -43,7 +43,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0
 ## Features
 
 <table style="border-collapse: collapse; width: 100%;">
-  <tr>
+  <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/pin_node.gif" alt="Pin node demo" width="100%">
       <br>
@@ -55,7 +55,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0
       <p style="font-size: 1.05em;"><strong>Pin nodes to the grid</strong></p>
     </td>
   </tr>
-  <tr>
+  <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/save.gif" alt="Save layout demo" width="100%">
       <br>
@@ -67,7 +67,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0
       <p style="font-size: 1.05em;"><strong>Boost attraction to a specific node</strong></p>
     </td>
   </tr>
-  <tr>
+  <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/pin_orbit.gif" alt="Pin linked nodes to orbit demo" width="100%">
       <br>
@@ -79,7 +79,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0
       <p style="font-size: 1.05em;"><strong>Move linked nodes and keep them exactly where you need them</strong></p>
     </td>
   </tr>
-  <tr>
+  <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/paint_links.gif" alt="Paint links demo" width="100%">
       <br>
@@ -91,7 +91,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0
       <p style="font-size: 1.05em;"><strong>Hide links you do not need</strong></p>
     </td>
   </tr>
-  <tr>
+  <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/find.gif" alt="Find mode demo" width="100%">
       <br>
@@ -103,7 +103,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0
       <p style="font-size: 1.05em;"><strong>Filter mode local graph behavior directly in the global view</strong></p>
     </td>
   </tr>
-  <tr>
+  <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/orphan.gif" alt="Orphan files separation demo" width="100%">
       <br>
@@ -115,7 +115,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/v0.6.0/graphfrontier-0
       <p style="font-size: 1.05em;"><strong>Show only linked attachments and place them directly on node orbits</strong></p>
     </td>
   </tr>
-  <tr>
+  <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/hotkeys.gif" alt="Hotkey support demo" width="100%">
       <br>
