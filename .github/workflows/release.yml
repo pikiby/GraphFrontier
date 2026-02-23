@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - '*'
 
 permissions:
   contents: write
@@ -25,14 +25,12 @@ jobs:
       - name: Validate release version
         run: |
           TAG="${GITHUB_REF_NAME}"
-          TAG_VERSION="${TAG#v}"
-          MANIFEST_VERSION="$(node -p "require('./src/static/manifest.json').version")"
+          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
 
           echo "Tag: ${TAG}"
-          echo "Tag version: ${TAG_VERSION}"
           echo "Manifest version: ${MANIFEST_VERSION}"
 
-          if [ "${TAG_VERSION}" != "${MANIFEST_VERSION}" ]; then
+          if [ "${TAG}" != "${MANIFEST_VERSION}" ]; then
             echo "Error: tag version does not match manifest.json version"
             exit 1
           fi
@@ -45,7 +43,7 @@ jobs:
 
       - name: Create release zip from dist
         run: |
-          VERSION="$(node -p "require('./src/static/manifest.json').version")"
+          VERSION="$(node -p "require('./manifest.json').version")"
           ZIP_NAME="graphfrontier-${VERSION}.zip"
           cd dist
           zip -r "../${ZIP_NAME}" .
@@ -55,5 +53,9 @@ jobs:
       - name: Publish GitHub Release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: graphfrontier-*.zip
+          files: |
+            graphfrontier-*.zip
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
           generate_release_notes: true
