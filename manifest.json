@@ -7,6 +7,5 @@
   "authorUrl": "https://github.com/pikiby",
   "fundingUrl": "https://buymeacoffee.com/pikiby",
   "description": "Advanced graph view for Obsidian with pin modes, orbit layout, strong pull, edge painting, and physics controls.",
-  "isDesktopOnly": false,
-  "main": "main.js"
+  "isDesktopOnly": false
 }
