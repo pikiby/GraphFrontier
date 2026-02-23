@@ -55,10 +55,5 @@ jobs:
       - name: Publish GitHub Release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            graphfrontier-*.zip
-            dist/main.js
-            dist/manifest.json
-            dist/styles.css
-            dist/versions.json
+          files: graphfrontier-*.zip
           generate_release_notes: true
