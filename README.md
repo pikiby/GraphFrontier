@@ -137,7 +137,6 @@ https://github.com/pikiby/GraphFrontier/releases/download/0.6.1/graphfrontier-0.
 - Hotkeys and commands: `docs/hotkeys.md`
 - Physics model: `docs/physics.md`
 - Troubleshooting: `docs/troubleshooting.md`
-- Manual build and release: `docs/manual-build-release.md`
 
 ## Project Structure
 
