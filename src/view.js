@@ -616,7 +616,9 @@ class GraphFrontierView extends ItemView {
     });
     this.registerDomEvent(searchInput, 'keydown', (event) => {
       const hasActiveMenu =
-        !!this.inputSuggestMenu && this.inputSuggestInputEl && this.inputSuggestInputEl === searchInput;
+        !!this.inputSuggestMenu &&
+        this.inputSuggestInputEl &&
+        this.inputSuggestInputEl === searchInput;
       if (hasActiveMenu && event.key === 'ArrowDown') {
         event.preventDefault();
         this.moveInputSuggestSelection(1);
@@ -671,14 +673,17 @@ class GraphFrontierView extends ItemView {
     const safeMode = this.searchMode === 'filter' ? 'filter' : 'find';
     this.searchModeToggleEl.toggleClass('is-on', safeMode === 'filter');
     this.searchModeToggleEl.setAttr('aria-label', `Search mode: ${safeMode}`);
-    if (this.searchModeFindLabelEl) this.searchModeFindLabelEl.toggleClass('is-active', safeMode === 'find');
+    if (this.searchModeFindLabelEl)
+      this.searchModeFindLabelEl.toggleClass('is-active', safeMode === 'find');
     if (this.searchModeFilterLabelEl)
       this.searchModeFilterLabelEl.toggleClass('is-active', safeMode === 'filter');
   }
 
   parseDropdownQuery(rawQueryText, options = {}) {
     const allowName = options.allowName === true;
-    const implicitSource = String(options.implicitSource || '').trim().toLowerCase();
+    const implicitSource = String(options.implicitSource || '')
+      .trim()
+      .toLowerCase();
     const raw = String(rawQueryText || '');
     const trimmed = raw.trim();
     const lower = trimmed.toLowerCase();
@@ -791,7 +796,9 @@ class GraphFrontierView extends ItemView {
       }));
     }
     if (parsed.source === 'property') {
-      const propertyKey = String(parsed.parsedGroup?.propertyKey || '').trim().toLowerCase();
+      const propertyKey = String(parsed.parsedGroup?.propertyKey || '')
+        .trim()
+        .toLowerCase();
       if (propertyKey === 'property' && !String(parsed.query || '').trim()) {
         const propertyKeys = this.plugin.getGroupPropertyKeySuggestions('', limit);
         return propertyKeys.map((propertyName) => ({
@@ -803,7 +810,12 @@ class GraphFrontierView extends ItemView {
         }));
       }
       if (!propertyKey) return [];
-      const values = this.plugin.getGroupValueSuggestions('property', parsed.query, propertyKey, limit);
+      const values = this.plugin.getGroupValueSuggestions(
+        'property',
+        parsed.query,
+        propertyKey,
+        limit
+      );
       return values.map((value) => ({
         title: value,
         value: `[${propertyKey}]:${value}`,
@@ -901,9 +913,10 @@ class GraphFrontierView extends ItemView {
     return filtered;
   }
 
-
   getBestMatchingNodeByName(queryText) {
-    const query = String(queryText || '').trim().toLowerCase();
+    const query = String(queryText || '')
+      .trim()
+      .toLowerCase();
     if (!query) return null;
     let bestStartsWithNode = null;
     let bestStartsWithLabel = '';
@@ -942,7 +955,9 @@ class GraphFrontierView extends ItemView {
 
   nodeMatchesSearchParsed(meta, parsed) {
     if (!meta || !parsed) return false;
-    const needle = String(parsed.query || '').trim().toLowerCase();
+    const needle = String(parsed.query || '')
+      .trim()
+      .toLowerCase();
     if (!needle) return false;
 
     const includesCI = (value) =>
@@ -971,7 +986,9 @@ class GraphFrontierView extends ItemView {
   getMatchedNodeIdsForParsedSearch(parsed) {
     const matches = new Set();
     if (!parsed) return matches;
-    const queryText = String(parsed.query || '').trim().toLowerCase();
+    const queryText = String(parsed.query || '')
+      .trim()
+      .toLowerCase();
     if (!queryText) return matches;
 
     if (parsed.source === 'content') {
@@ -1041,10 +1058,18 @@ class GraphFrontierView extends ItemView {
     if (!node) return;
     this.searchMatchedNodeIds = new Set();
     this.searchSelectedNodeId = node.id;
-    const parsed = this.parseSearchQuery(this.searchInputEl ? this.searchInputEl.value : this.searchInputValue);
+    const parsed = this.parseSearchQuery(
+      this.searchInputEl ? this.searchInputEl.value : this.searchInputValue
+    );
     const forcedSource = options && options.forceSource === 'name' ? 'name' : '';
-    const prefix = forcedSource ? `${forcedSource}:` : parsed.hasExplicitSource ? `${parsed.source}:` : '';
-    this.searchInputValue = prefix ? `${prefix}${String(node.label || '')}` : String(node.label || '');
+    const prefix = forcedSource
+      ? `${forcedSource}:`
+      : parsed.hasExplicitSource
+        ? `${parsed.source}:`
+        : '';
+    this.searchInputValue = prefix
+      ? `${prefix}${String(node.label || '')}`
+      : String(node.label || '');
     if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
     this.syncSearchClearButtonVisibility();
     this.plugin.schedulePersist();
@@ -1188,8 +1213,9 @@ class GraphFrontierView extends ItemView {
 
     const setActiveIndex = (nextIndex) => {
       if (selectableEntries.length <= 0) return false;
-      const boundedIndex = ((nextIndex % selectableEntries.length) + selectableEntries.length)
-        % selectableEntries.length;
+      const boundedIndex =
+        ((nextIndex % selectableEntries.length) + selectableEntries.length) %
+        selectableEntries.length;
       for (const entry of selectableEntries) entry.itemEl.classList.remove('is-active');
       const activeEntry = selectableEntries[boundedIndex];
       if (!activeEntry) return false;
@@ -1302,7 +1328,8 @@ class GraphFrontierView extends ItemView {
   }
 
   selectInputSuggestActive() {
-    if (!this.inputSuggestMenu || !Array.isArray(this.inputSuggestMenu.selectableEntries)) return false;
+    if (!this.inputSuggestMenu || !Array.isArray(this.inputSuggestMenu.selectableEntries))
+      return false;
     const itemCount = this.inputSuggestMenu.selectableEntries.length;
     if (itemCount <= 0) return false;
     const currentIndex = Number.isInteger(this.inputSuggestMenu.activeIndex)
@@ -1471,7 +1498,9 @@ class GraphFrontierView extends ItemView {
     });
     this.registerDomEvent(queryInput, 'keydown', (event) => {
       const hasActiveMenu =
-        !!this.inputSuggestMenu && this.inputSuggestInputEl && this.inputSuggestInputEl === queryInput;
+        !!this.inputSuggestMenu &&
+        this.inputSuggestInputEl &&
+        this.inputSuggestInputEl === queryInput;
       if (hasActiveMenu && event.key === 'ArrowDown') {
         event.preventDefault();
         this.moveInputSuggestSelection(1);

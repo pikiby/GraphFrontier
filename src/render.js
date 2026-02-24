@@ -305,7 +305,8 @@ function drawEdges(view, ctx) {
   const visibleNodeIds = view.getFilterVisibleNodeIds();
   const hasFilter = visibleNodeIds instanceof Set;
   const filterNodeId = hasFilter ? view.getFilterNodeId() : null;
-  const isNameFilterMode = hasFilter && view.getEffectiveSearchSource() === 'name' && !!filterNodeId;
+  const isNameFilterMode =
+    hasFilter && view.getEffectiveSearchSource() === 'name' && !!filterNodeId;
   const focusNodeId = view.focusNodeId;
   const focusProgress = view.focusProgress;
   const hasFocus = !!focusNodeId && focusProgress > 0.001;
@@ -484,7 +485,7 @@ function drawNodes(view, ctx) {
           ? isSearchHighlightNode
             ? 1
             : searchDimAlpha
-        : 1;
+          : 1;
 
     let fillColor = '#7aa2f7';
     if (groupColor) fillColor = groupColor;
