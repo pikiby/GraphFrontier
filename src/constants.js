@@ -16,6 +16,8 @@ const DEFAULT_DATA = {
   strong_pull_nodes: {},
   painted_edge_colors: {},
   groups: [],
+  blacklist: [],
+  whitelist: [],
   hotkeys: {},
   settings: {
     grid_step: 20,

@@ -81,6 +81,9 @@ class GraphFrontierView extends ItemView {
     this.sideControls = new Map();
     this.groupEditorRows = [];
     this.draggingGroupRow = null;
+    this.blacklistEditorRows = [];
+    this.whitelistEditorRows = [];
+    this.draggingQueryRuleRow = null;
     this.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
     this.searchInputValue = '';
     this.searchSelectedNodeId = null;
@@ -352,6 +355,16 @@ class GraphFrontierView extends ItemView {
     });
 
     this.buildGroupEditorSection(body);
+    this.buildQueryRuleEditorSection(body, {
+      title: 'Blacklist',
+      key: 'blacklist',
+      hint: 'Hide nodes that match query rules',
+    });
+    this.buildQueryRuleEditorSection(body, {
+      title: 'Whitelist',
+      key: 'whitelist',
+      hint: 'Show only nodes that match query rules (after blacklist)',
+    });
     this.addSideSaveLayoutButton(body);
   }
 
@@ -1091,6 +1104,22 @@ class GraphFrontierView extends ItemView {
   }
 
   getFilterVisibleNodeIds() {
+    const queryRuleVisibleNodeIds = this.getQueryRuleVisibleNodeIds();
+    const searchVisibleNodeIds = this.getSearchModeVisibleNodeIds();
+    if (!(queryRuleVisibleNodeIds instanceof Set) && !(searchVisibleNodeIds instanceof Set)) {
+      return null;
+    }
+    if (!(queryRuleVisibleNodeIds instanceof Set)) return new Set(searchVisibleNodeIds);
+    if (!(searchVisibleNodeIds instanceof Set)) return new Set(queryRuleVisibleNodeIds);
+
+    const combined = new Set();
+    for (const nodeId of queryRuleVisibleNodeIds) {
+      if (searchVisibleNodeIds.has(nodeId)) combined.add(nodeId);
+    }
+    return combined;
+  }
+
+  getSearchModeVisibleNodeIds() {
     if (this.searchMode !== 'filter') return null;
 
     const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
@@ -1110,6 +1139,58 @@ class GraphFrontierView extends ItemView {
 
     if (this.searchMatchedNodeIds instanceof Set) return new Set(this.searchMatchedNodeIds);
     return new Set();
+  }
+
+  getQueryRuleVisibleNodeIds() {
+    const blacklistRules = this.getCompleteQueryRulesByKey('blacklist');
+    const whitelistRules = this.getCompleteQueryRulesByKey('whitelist');
+    if (blacklistRules.length === 0 && whitelistRules.length === 0) return null;
+
+    const visibleNodeIds = new Set(this.nodes.map((node) => node.id));
+    if (blacklistRules.length > 0) {
+      for (const node of this.nodes) {
+        const meta = this.nodeMetaById.get(node.id) || node.meta || null;
+        if (!meta) continue;
+        for (const parsedRule of blacklistRules) {
+          if (this.nodeMatchesParsedGroup(meta, parsedRule)) {
+            visibleNodeIds.delete(node.id);
+            break;
+          }
+        }
+      }
+    }
+
+    if (whitelistRules.length > 0) {
+      const whitelistMatchedNodeIds = new Set();
+      for (const node of this.nodes) {
+        if (!visibleNodeIds.has(node.id)) continue;
+        const meta = this.nodeMetaById.get(node.id) || node.meta || null;
+        if (!meta) continue;
+        for (const parsedRule of whitelistRules) {
+          if (this.nodeMatchesParsedGroup(meta, parsedRule)) {
+            whitelistMatchedNodeIds.add(node.id);
+            break;
+          }
+        }
+      }
+      return whitelistMatchedNodeIds;
+    }
+
+    return visibleNodeIds;
+  }
+
+  getCompleteQueryRulesByKey(ruleKey) {
+    const rawRules = Array.isArray(this.plugin.data?.[ruleKey]) ? this.plugin.data[ruleKey] : [];
+    const parsedRules = [];
+    for (const rawRule of rawRules) {
+      if (!rawRule || rawRule.enabled === false) continue;
+      const queryText = String(rawRule.query || '').trim();
+      if (!queryText) continue;
+      const parsed = this.plugin.parseGroupQuery(queryText);
+      if (!parsed || !String(parsed.value || '').trim()) continue;
+      parsedRules.push(parsed);
+    }
+    return parsedRules;
   }
 
   isSearchFilled() {
@@ -1585,6 +1666,231 @@ class GraphFrontierView extends ItemView {
     });
 
     this.refreshGroupRowState(rowState);
+  }
+
+  buildQueryRuleEditorSection(parentEl, options = {}) {
+    const ruleKey = String(options.key || '').trim().toLowerCase();
+    if (!ruleKey || !['blacklist', 'whitelist'].includes(ruleKey)) return;
+
+    const section = parentEl.createDiv({ cls: 'graphfrontier-groups' });
+    const titleText = String(options.title || '').trim() || ruleKey;
+    const titleEl = section.createDiv({ cls: 'graphfrontier-groups-title', text: titleText });
+    if (options.hint) titleEl.setAttr('title', String(options.hint));
+
+    const existingRules = Array.isArray(this.plugin.data[ruleKey]) ? this.plugin.data[ruleKey] : [];
+    const rowStateList = [];
+    if (ruleKey === 'blacklist') this.blacklistEditorRows = rowStateList;
+    else this.whitelistEditorRows = rowStateList;
+
+    for (const rule of existingRules) {
+      this.addQueryRuleEditorRow(section, ruleKey, rowStateList, rule);
+    }
+    this.addQueryRuleEditorRow(section, ruleKey, rowStateList, null);
+  }
+
+  parseQueryRuleForm(rule) {
+    return {
+      id: rule?.id || null,
+      query: String(rule?.query || ''),
+    };
+  }
+
+  isQueryRuleRowComplete(rowState) {
+    const queryText = String(rowState.queryInput.value || '').trim();
+    if (!queryText) return false;
+    const parsed = this.plugin.parseGroupQuery(queryText);
+    if (!parsed) return false;
+    return !!String(parsed.value || '').trim();
+  }
+
+  isQueryRuleRowEmpty(rowState) {
+    const queryText = String(rowState.queryInput.value || '').trim();
+    return !queryText;
+  }
+
+  refreshQueryRuleRowState(rowState) {
+    const complete = this.isQueryRuleRowComplete(rowState);
+    const empty = this.isQueryRuleRowEmpty(rowState);
+    rowState.removeBtn.style.visibility = empty ? 'hidden' : 'visible';
+    rowState.dragHandle.style.visibility = complete ? 'visible' : 'hidden';
+    rowState.row.draggable = complete;
+    rowState.row.toggleClass('is-empty', empty);
+    rowState.row.toggleClass('is-complete', complete);
+  }
+
+  persistQueryRuleRows(sectionEl, ruleKey, rowStateList) {
+    const nextRules = [];
+    for (const rowState of rowStateList) {
+      const queryText = String(rowState.queryInput.value || '').trim();
+      const parsed = this.plugin.parseGroupQuery(queryText);
+      if (!parsed || !String(parsed.value || '').trim()) continue;
+      const query = this.plugin.composeGroupQuery(
+        parsed.type,
+        parsed.value,
+        parsed.propertyKey || ''
+      );
+      if (!query) continue;
+      if (!rowState.id) rowState.id = this.plugin.createGroupId();
+      nextRules.push({
+        id: rowState.id,
+        query,
+        enabled: true,
+      });
+    }
+
+    if (ruleKey === 'blacklist') this.plugin.updateBlacklist(nextRules);
+    else this.plugin.updateWhitelist(nextRules);
+
+    const hasIncompleteRow = rowStateList.some((rowState) => !this.isQueryRuleRowComplete(rowState));
+    if (!hasIncompleteRow) {
+      this.addQueryRuleEditorRow(sectionEl, ruleKey, rowStateList, null);
+    }
+  }
+
+  addQueryRuleEditorRow(sectionEl, ruleKey, rowStateList, rule) {
+    const form = this.parseQueryRuleForm(rule);
+
+    const row = sectionEl.createDiv({ cls: 'graphfrontier-group-row' });
+    const dragHandle = row.createSpan({ cls: 'graphfrontier-group-drag', text: '::' });
+    const queryInputWrap = row.createDiv({
+      cls: 'graphfrontier-group-query-wrap graphfrontier-input-anchor',
+    });
+    const queryInput = queryInputWrap.createEl('input', {
+      cls: 'graphfrontier-group-query',
+      type: 'text',
+      placeholder: 'Enter query...',
+    });
+    queryInput.value = form.query;
+    const removeBtn = row.createEl('button', { cls: 'graphfrontier-group-remove', text: 'x' });
+
+    const rowState = {
+      row,
+      dragHandle,
+      queryInput,
+      removeBtn,
+      id: form.id,
+    };
+    rowStateList.push(rowState);
+
+    const openRuleSuggestMenu = () => {
+      const queryText = String(rowState.queryInput.value || '');
+      const suggestionPack = this.getGroupQuerySuggestions(queryText);
+      const items = Array.isArray(suggestionPack?.items) ? suggestionPack.items : [];
+      if (items.length === 0) {
+        this.closeInputSuggestMenu();
+        return;
+      }
+      this.showInputSuggestMenu(
+        rowState.queryInput,
+        items,
+        (selectedText) => {
+          rowState.queryInput.value = selectedText;
+          this.refreshQueryRuleRowState(rowState);
+          this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
+          const shouldOpenValueMenu = /:\s*$/.test(String(selectedText || '').trim());
+          if (shouldOpenValueMenu) {
+            this.contentEl.win.setTimeout(() => {
+              if (!rowState.queryInput) return;
+              rowState.queryInput.focus();
+              openRuleSuggestMenu();
+            }, 0);
+          }
+        },
+        { title: suggestionPack?.menuTitle || '' }
+      );
+    };
+
+    this.registerDomEvent(queryInput, 'input', () => {
+      this.refreshQueryRuleRowState(rowState);
+      this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
+      openRuleSuggestMenu();
+    });
+    this.registerDomEvent(queryInput, 'keydown', (event) => {
+      const hasActiveMenu =
+        !!this.inputSuggestMenu &&
+        this.inputSuggestInputEl &&
+        this.inputSuggestInputEl === queryInput;
+      if (hasActiveMenu && event.key === 'ArrowDown') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'ArrowUp') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(-1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'Escape') {
+        event.preventDefault();
+        this.closeInputSuggestMenu();
+        return;
+      }
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      if (hasActiveMenu && this.selectInputSuggestActive()) {
+        this.refreshQueryRuleRowState(rowState);
+        this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
+        return;
+      }
+      this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
+      this.closeInputSuggestMenu();
+    });
+    this.registerDomEvent(queryInput, 'blur', () => {
+      this.contentEl.win.setTimeout(() => {
+        if (!this.inputSuggestInputEl || this.inputSuggestInputEl !== queryInput) return;
+        this.closeInputSuggestMenu();
+      }, 0);
+    });
+    this.registerDomEvent(queryInput, 'click', () => {
+      openRuleSuggestMenu();
+    });
+    this.registerDomEvent(queryInput, 'focus', () => {
+      openRuleSuggestMenu();
+    });
+    this.registerDomEvent(removeBtn, 'click', () => {
+      const index = rowStateList.indexOf(rowState);
+      if (index >= 0) rowStateList.splice(index, 1);
+      row.remove();
+      this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
+    });
+
+    this.registerDomEvent(row, 'dragstart', (event) => {
+      if (!this.isQueryRuleRowComplete(rowState)) {
+        event.preventDefault();
+        return;
+      }
+      this.draggingQueryRuleRow = rowState;
+      row.addClass('is-dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', rowState.id || 'rule');
+      }
+    });
+    this.registerDomEvent(row, 'dragover', (event) => {
+      if (!this.draggingQueryRuleRow || this.draggingQueryRuleRow === rowState) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    });
+    this.registerDomEvent(row, 'drop', (event) => {
+      if (!this.draggingQueryRuleRow || this.draggingQueryRuleRow === rowState) return;
+      event.preventDefault();
+
+      const fromIndex = rowStateList.indexOf(this.draggingQueryRuleRow);
+      const toIndex = rowStateList.indexOf(rowState);
+      if (fromIndex < 0 || toIndex < 0) return;
+
+      const [moved] = rowStateList.splice(fromIndex, 1);
+      rowStateList.splice(toIndex, 0, moved);
+      if (fromIndex < toIndex) sectionEl.insertBefore(moved.row, rowState.row.nextSibling);
+      else sectionEl.insertBefore(moved.row, rowState.row);
+      this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
+    });
+    this.registerDomEvent(row, 'dragend', () => {
+      row.removeClass('is-dragging');
+      this.draggingQueryRuleRow = null;
+    });
+
+    this.refreshQueryRuleRowState(rowState);
   }
 
   formatSliderValue(value, step) {

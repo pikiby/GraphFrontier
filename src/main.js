@@ -204,6 +204,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       ? safe.painted_edge_colors
       : {};
     const rawGroups = Array.isArray(safe.groups) ? safe.groups : [];
+    const rawBlacklist = Array.isArray(safe.blacklist) ? safe.blacklist : [];
+    const rawWhitelist = Array.isArray(safe.whitelist) ? safe.whitelist : [];
     const rawHotkeys = safe.hotkeys && typeof safe.hotkeys === 'object' ? safe.hotkeys : {};
     const settings = safe.settings && typeof safe.settings === 'object' ? safe.settings : {};
     const viewState = safe.view_state && typeof safe.view_state === 'object' ? safe.view_state : {};
@@ -219,6 +221,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       strong_pull_nodes: {},
       painted_edge_colors: {},
       groups: [],
+      blacklist: [],
+      whitelist: [],
       hotkeys: {},
       settings: Object.assign({}, DEFAULT_DATA.settings, settings),
       view_state: Object.assign({}, DEFAULT_DATA.view_state, viewState),
@@ -427,6 +431,26 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         query,
         color,
         enabled: rawGroup.enabled !== false,
+      });
+    }
+    for (const rawRule of rawBlacklist) {
+      if (!rawRule || typeof rawRule !== 'object') continue;
+      const query = String(rawRule.query || '').trim();
+      if (!query) continue;
+      normalized.blacklist.push({
+        id: typeof rawRule.id === 'string' && rawRule.id ? rawRule.id : this.createGroupId(),
+        query,
+        enabled: rawRule.enabled !== false,
+      });
+    }
+    for (const rawRule of rawWhitelist) {
+      if (!rawRule || typeof rawRule !== 'object') continue;
+      const query = String(rawRule.query || '').trim();
+      if (!query) continue;
+      normalized.whitelist.push({
+        id: typeof rawRule.id === 'string' && rawRule.id ? rawRule.id : this.createGroupId(),
+        query,
+        enabled: rawRule.enabled !== false,
       });
     }
     for (const [commandId, rawHotkey] of Object.entries(rawHotkeys)) {
@@ -759,6 +783,35 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       }
     }
     this.data.groups = normalizedGroups;
+    this.schedulePersist();
+    this.renderAllViews();
+  }
+
+  normalizeQueryRuleList(nextRules) {
+    const normalizedRules = [];
+    if (Array.isArray(nextRules)) {
+      for (const rawRule of nextRules) {
+        if (!rawRule || typeof rawRule !== 'object') continue;
+        const query = String(rawRule.query || '').trim();
+        if (!query) continue;
+        normalizedRules.push({
+          id: typeof rawRule.id === 'string' && rawRule.id ? rawRule.id : this.createGroupId(),
+          query,
+          enabled: rawRule.enabled !== false,
+        });
+      }
+    }
+    return normalizedRules;
+  }
+
+  updateBlacklist(nextRules) {
+    this.data.blacklist = this.normalizeQueryRuleList(nextRules);
+    this.schedulePersist();
+    this.renderAllViews();
+  }
+
+  updateWhitelist(nextRules) {
+    this.data.whitelist = this.normalizeQueryRuleList(nextRules);
     this.schedulePersist();
     this.renderAllViews();
   }
