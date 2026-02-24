@@ -32,9 +32,9 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.6.3/graphfrontier-0.6.3.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.6.6/graphfrontier-0.6.6.zip
 
-1. Download `graphfrontier-0.6.3.zip` from Releases
+1. Download `graphfrontier-0.6.6.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
@@ -115,6 +115,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/0.6.3/graphfrontier-0.
       <p style="font-size: 1.05em;"><strong>Show only linked attachments and place them directly on node orbits</strong></p>
     </td>
   </tr>
+  
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/hotkeys.gif" alt="Hotkey support demo" width="100%">
@@ -125,6 +126,18 @@ https://github.com/pikiby/GraphFrontier/releases/download/0.6.3/graphfrontier-0.
       <img src="docs/media/commands.gif" alt="Command support demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Command support</strong></p>
+    </td>
+  </tr>
+  <tr style="background-color: transparent;">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/blacklist.gif" alt="Blacklist demo" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Hide unnecessary objects</strong></p>
+    </td>
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/whitelist.gif" alt="Whitelist demo" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Keep only necessary objects</strong></p>
     </td>
   </tr>
 </table>
