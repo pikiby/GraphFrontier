@@ -323,7 +323,7 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(body, 'Link strength', 'base_link_strength', 1, 100, 1, 'render', {
       hint: 'Spring force for graph links',
     });
-    this.addSideSlider(body, 'Link distance', 'link_distance', 1, 100, 1, 'render', {
+    this.addSideSlider(body, 'Link distance', 'link_distance', 1, 50, 1, 'render', {
       hint: 'Target distance for regular links',
     });
     this.addSideSlider(
@@ -344,10 +344,10 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(body, 'Repel strength', 'repel_strength', 0, 100, 1, 'render', {
       hint: 'Repulsion force between nodes',
     });
-    this.addSideSlider(body, 'Repel radius', 'repel_radius', 20, 300, 5, 'render', {
+    this.addSideSlider(body, 'Repel radius', 'repel_radius', 20, 500, 5, 'render', {
       hint: 'Repulsion cutoff radius for node-to-node interactions',
     });
-    this.addSideSlider(body, 'Center strength', 'center_strength', 0, 100, 1, 'render', {
+    this.addSideSlider(body, 'Center strength', 'center_strength', 1, 100, 1, 'render', {
       hint: 'How strongly free nodes are attracted to layout center',
     });
     this.addSideSlider(body, 'Damping', 'damping', 0.01, 0.9, 0.01, 'render', {
@@ -598,6 +598,7 @@ class GraphFrontierView extends ItemView {
           searchInput.value = selectedText;
           this.searchInputValue = selectedText;
           commitBestSearchSelection();
+          this.kickLayoutSearch();
         },
         { title: suggestionPack.menuTitle || '' }
       );
@@ -1041,6 +1042,7 @@ class GraphFrontierView extends ItemView {
       this.searchSelectedNodeId = null;
       this.searchMatchedNodeIds = new Set();
       this.syncSearchClearButtonVisibility();
+      if (this.searchMode === 'filter') this.kickLayoutSearch();
       return;
     }
     if (parsed.source === 'name') {
@@ -1049,15 +1051,18 @@ class GraphFrontierView extends ItemView {
       if (!bestNode) {
         this.searchSelectedNodeId = null;
         this.syncSearchClearButtonVisibility();
+        if (this.searchMode === 'filter') this.kickLayoutSearch();
         return;
       }
       this.applySearchSelectionFromNode(bestNode, { forceSource: 'name' });
       this.syncSearchClearButtonVisibility();
+      if (this.searchMode === 'filter') this.kickLayoutSearch();
       return;
     }
     this.searchSelectedNodeId = null;
     this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
     this.syncSearchClearButtonVisibility();
+    if (this.searchMode === 'filter') this.kickLayoutSearch();
   }
 
   getSearchHighlightNodeIds() {
@@ -1100,6 +1105,12 @@ class GraphFrontierView extends ItemView {
   getFilterNodeId() {
     if (this.searchMode !== 'filter') return null;
     if (this.getEffectiveSearchSource() !== 'name') return null;
+    const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
+    const parsed = this.parseSearchQuery(rawText);
+    if (parsed.query) {
+      const liveBestNode = this.getBestMatchingNodeByName(parsed.query);
+      if (liveBestNode) return liveBestNode.id;
+    }
     return this.searchSelectedNodeId || null;
   }
 
@@ -3196,6 +3207,7 @@ class GraphFrontierView extends ItemView {
     const node = this.getCommandTargetNodeOrNotice();
     if (!node) return;
     this.applySearchSelectionFromNode(node, { forceSource: 'name' });
+    if (this.searchMode === 'filter') this.kickLayoutSearch();
   }
 
   async commandShowLocalGraph() {

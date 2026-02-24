@@ -289,19 +289,19 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       normalized.settings.base_link_strength = Number(normalized.settings.base_link_strength) / 0.000025;
     }
     normalized.settings.base_link_strength = this.clampNumber(normalized.settings.base_link_strength, 1, 100, DEFAULT_DATA.settings.base_link_strength);
-    normalized.settings.link_distance = this.clampNumber(normalized.settings.link_distance, 1, 100, DEFAULT_DATA.settings.link_distance);
+    normalized.settings.link_distance = this.clampNumber(normalized.settings.link_distance, 1, 50, DEFAULT_DATA.settings.link_distance);
     normalized.settings.repel_strength = this.clampNumber(normalized.settings.repel_strength, 0, 100, DEFAULT_DATA.settings.repel_strength);
     normalized.settings.repel_radius = this.clampNumber(
       normalized.settings.repel_radius,
       20,
-      300,
+      500,
       DEFAULT_DATA.settings.repel_radius,
     );
     // Backward compatibility: old center strength (e.g. 0.0001 -> new scale 10).
     if (Number(normalized.settings.center_strength) < 1) {
       normalized.settings.center_strength = Number(normalized.settings.center_strength) / 0.00001;
     }
-    normalized.settings.center_strength = this.clampNumber(normalized.settings.center_strength, 0, 100, DEFAULT_DATA.settings.center_strength);
+    normalized.settings.center_strength = this.clampNumber(normalized.settings.center_strength, 1, 100, DEFAULT_DATA.settings.center_strength);
     normalized.settings.damping = this.clampNumber(normalized.settings.damping, 0.01, 0.9, DEFAULT_DATA.settings.damping);
     normalized.settings.node_size_scale = this.clampNumber(normalized.settings.node_size_scale, 0.1, 2, DEFAULT_DATA.settings.node_size_scale);
     normalized.settings.edge_width_scale = this.clampNumber(normalized.settings.edge_width_scale, 0.01, 1, DEFAULT_DATA.settings.edge_width_scale);

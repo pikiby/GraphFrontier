@@ -9,7 +9,7 @@ function kickLayoutSearch(view) {
 }
 
 // Compute current layout center from core nodes, falling back to all nodes when needed.
-function updateLayoutCenter(view, nodesForCenter = view.nodes) {
+function updateLayoutCenter(view, nodesForCenter = view.nodes, degreeById = null) {
   const sourceNodes = Array.isArray(nodesForCenter) ? nodesForCenter : view.nodes;
   if (sourceNodes.length === 0) {
     view.layoutCenter.x = 0;
@@ -22,7 +22,10 @@ function updateLayoutCenter(view, nodesForCenter = view.nodes) {
   let mainCount = 0;
   for (const node of sourceNodes) {
     const isAttachment = !!node?.meta?.isAttachment;
-    const isOrphan = node.degree === 0;
+    const degree = degreeById instanceof Map
+      ? Number(degreeById.get(node.id) || 0)
+      : Number(node.degree || 0);
+    const isOrphan = degree === 0;
     if (isAttachment || isOrphan) continue;
     sumMainX += node.x;
     sumMainY += node.y;
@@ -72,21 +75,36 @@ function stepSimulation(view) {
     : view.nodes;
   const nodeCount = nodes.length;
   if (nodeCount === 0) return;
-  updateLayoutCenter(view, nodes);
+  const localDegreeById = hasPhysicsFilter ? new Map(nodes.map((node) => [node.id, 0])) : null;
+  if (localDegreeById) {
+    for (const edge of view.edges) {
+      if (!localDegreeById.has(edge.source) || !localDegreeById.has(edge.target)) continue;
+      localDegreeById.set(edge.source, Number(localDegreeById.get(edge.source) || 0) + 1);
+      localDegreeById.set(edge.target, Number(localDegreeById.get(edge.target) || 0) + 1);
+    }
+  }
+  const getNodeDegree = (node) =>
+    localDegreeById instanceof Map ? Number(localDegreeById.get(node.id) || 0) : Number(node.degree || 0);
+  updateLayoutCenter(view, nodes, localDegreeById);
 
   const settings = view.plugin.getSettings();
   const nowMs = Date.now();
-  const layoutSearchMs = 2000;
+  const layoutSearchMs = 3000;
   const elapsedSearchMs = nowMs - view.layoutKickAtMs;
   const layoutSearchFactor = 1;
+  const settleProgress = view.dragNodeId
+    ? 0
+    : Math.max(0, Math.min(1, elapsedSearchMs / layoutSearchMs));
+  // Gradual global slowdown during settle window to imitate increasing damping.
+  const settleVelocityBrake = 1 - settleProgress * 0.7;
 
-  const repelStrength = settings.repel_strength * 0.5 * layoutSearchFactor;
+  const repelStrength = settings.repel_strength * 1 * layoutSearchFactor;
   const centerStrength = settings.center_strength * 0.000025 * layoutSearchFactor;
-  const baseLinkStrength = settings.base_link_strength * 0.0003 * layoutSearchFactor;
+  const baseLinkStrength = settings.base_link_strength * 0.00015 * layoutSearchFactor;
   const linkDistance = view.plugin.clampNumber(
     settings.link_distance,
     1,
-    100,
+    50,
     DEFAULT_DATA.settings.link_distance
   );
   const attachmentLinkDistance = view.plugin.clampNumber(
@@ -104,7 +122,7 @@ function stepSimulation(view) {
   const repelRadius = view.plugin.clampNumber(
     settings.repel_radius,
     20,
-    300,
+    500,
     DEFAULT_DATA.settings.repel_radius
   );
   const orphanRepelRadius = repelRadius * 1.25;
@@ -163,9 +181,10 @@ function stepSimulation(view) {
   const attachmentOnlyAnchorIds = new Set();
   const mainNodesForOrphanRepel = [];
   for (const node of nodes) {
+    const nodeDegree = getNodeDegree(node);
     if (autoAttachmentOrbitNodeIds.has(node.id)) continue;
-    if (node.degree === 0) freeOrphanNodes.push(node);
-    if (node.degree > 0 && !node?.meta?.isAttachment) {
+    if (nodeDegree === 0) freeOrphanNodes.push(node);
+    if (nodeDegree > 0 && !node?.meta?.isAttachment) {
       const neighborIds = view.neighborsById.get(node.id);
       if (!neighborIds || neighborIds.size === 0) {
         mainNodesForOrphanRepel.push(node);
@@ -173,6 +192,7 @@ function stepSimulation(view) {
       }
       let hasRegularNeighbor = false;
       for (const neighborId of neighborIds) {
+        if (hasPhysicsFilter && !filterVisibleNodeIds.has(neighborId)) continue;
         const neighborNode = view.nodeById.get(neighborId);
         if (!neighborNode) continue;
         if (!neighborNode.meta?.isAttachment) {
@@ -199,7 +219,7 @@ function stepSimulation(view) {
         const nodeB = nodes[indexB];
         if (autoAttachmentOrbitNodeIds.has(nodeA.id) || autoAttachmentOrbitNodeIds.has(nodeB.id))
           continue;
-        if (nodeA.degree === 0 || nodeB.degree === 0) continue;
+        if (getNodeDegree(nodeA) === 0 || getNodeDegree(nodeB) === 0) continue;
         if (attachmentOnlyAnchorIds.has(nodeA.id) || attachmentOnlyAnchorIds.has(nodeB.id))
           continue;
         const nodeAIsOrbitPinned = orbitNodeIds.has(nodeA.id);
@@ -434,8 +454,8 @@ function stepSimulation(view) {
       const springForce = Math.max(-maxSpringForce, Math.min(maxSpringForce, springForceRaw));
       const fx = (dx / dist) * springForce;
       const fy = (dy / dist) * springForce;
-      const sourceMass = 1 + Math.max(0, sourceNode.degree - 1) * degreeMassFactor;
-      const targetMass = 1 + Math.max(0, targetNode.degree - 1) * degreeMassFactor;
+      const sourceMass = 1 + Math.max(0, getNodeDegree(sourceNode) - 1) * degreeMassFactor;
+      const targetMass = 1 + Math.max(0, getNodeDegree(targetNode) - 1) * degreeMassFactor;
 
       const sourceAccel = accelById.get(sourceNode.id);
       const targetAccel = accelById.get(targetNode.id);
@@ -457,9 +477,9 @@ function stepSimulation(view) {
     const accel = accelById.get(node.id) || { ax: 0, ay: 0 };
 
     if (hasCenter && !pin && !orbitPin && !autoAttachmentOrbit && node.id !== view.dragNodeId) {
-      const nodeCenterScale = node.degree === 0 ? orphanCenterScale : 1;
-      const centerFx = (view.layoutCenter.x - node.x) * centerStrength * nodeCenterScale;
-      const centerFy = (view.layoutCenter.y - node.y) * centerStrength * nodeCenterScale;
+      const nodeCenterScale = getNodeDegree(node) === 0 ? orphanCenterScale : 1;
+      const centerFx = (0 - node.x) * centerStrength * nodeCenterScale;
+      const centerFy = (0 - node.y) * centerStrength * nodeCenterScale;
       accel.ax += Math.max(-maxCenterForce, Math.min(maxCenterForce, centerFx));
       accel.ay += Math.max(-maxCenterForce, Math.min(maxCenterForce, centerFy));
     }
@@ -518,6 +538,8 @@ function stepSimulation(view) {
       node.vx *= velocityRetention;
       node.vy *= velocityRetention;
     }
+    node.vx *= settleVelocityBrake;
+    node.vy *= settleVelocityBrake;
 
     const accelMag = Math.sqrt(accel.ax * accel.ax + accel.ay * accel.ay);
     const speedNow = Math.sqrt(node.vx * node.vx + node.vy * node.vy);
@@ -580,7 +602,7 @@ function getOrbitRadiusForAnchor(plugin, orbitNodeCount) {
   const linkDistance = plugin.clampNumber(
     plugin.getSettings().link_distance,
     1,
-    100,
+    50,
     DEFAULT_DATA.settings.link_distance
   );
   return getOrbitRadiusBySpacing(plugin, orbitNodeCount, linkDistance);
