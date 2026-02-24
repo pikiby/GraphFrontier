@@ -1669,7 +1669,9 @@ class GraphFrontierView extends ItemView {
   }
 
   buildQueryRuleEditorSection(parentEl, options = {}) {
-    const ruleKey = String(options.key || '').trim().toLowerCase();
+    const ruleKey = String(options.key || '')
+      .trim()
+      .toLowerCase();
     if (!ruleKey || !['blacklist', 'whitelist'].includes(ruleKey)) return;
 
     const section = parentEl.createDiv({ cls: 'graphfrontier-groups' });
@@ -1741,7 +1743,9 @@ class GraphFrontierView extends ItemView {
     if (ruleKey === 'blacklist') this.plugin.updateBlacklist(nextRules);
     else this.plugin.updateWhitelist(nextRules);
 
-    const hasIncompleteRow = rowStateList.some((rowState) => !this.isQueryRuleRowComplete(rowState));
+    const hasIncompleteRow = rowStateList.some(
+      (rowState) => !this.isQueryRuleRowComplete(rowState)
+    );
     if (!hasIncompleteRow) {
       this.addQueryRuleEditorRow(sectionEl, ruleKey, rowStateList, null);
     }
