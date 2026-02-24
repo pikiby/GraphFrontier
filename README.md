@@ -115,6 +115,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/0.6.5/graphfrontier-0.
       <p style="font-size: 1.05em;"><strong>Show only linked attachments and place them directly on node orbits</strong></p>
     </td>
   </tr>
+  
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/hotkeys.gif" alt="Hotkey support demo" width="100%">
