@@ -5,11 +5,13 @@ function kickLayoutSearch(view) {
   view.layoutKickAtMs = Date.now();
   view.layoutStillFrames = 0;
   view.layoutAutosaveDirty = true;
+  view.layoutPaused = false;
 }
 
 // Compute current layout center from core nodes, falling back to all nodes when needed.
-function updateLayoutCenter(view) {
-  if (view.nodes.length === 0) {
+function updateLayoutCenter(view, nodesForCenter = view.nodes) {
+  const sourceNodes = Array.isArray(nodesForCenter) ? nodesForCenter : view.nodes;
+  if (sourceNodes.length === 0) {
     view.layoutCenter.x = 0;
     view.layoutCenter.y = 0;
     return;
@@ -18,7 +20,7 @@ function updateLayoutCenter(view) {
   let sumMainX = 0;
   let sumMainY = 0;
   let mainCount = 0;
-  for (const node of view.nodes) {
+  for (const node of sourceNodes) {
     const isAttachment = !!node?.meta?.isAttachment;
     const isOrphan = node.degree === 0;
     if (isAttachment || isOrphan) continue;
@@ -35,12 +37,12 @@ function updateLayoutCenter(view) {
 
   let sumAllX = 0;
   let sumAllY = 0;
-  for (const node of view.nodes) {
+  for (const node of sourceNodes) {
     sumAllX += node.x;
     sumAllY += node.y;
   }
-  view.layoutCenter.x = sumAllX / view.nodes.length;
-  view.layoutCenter.y = sumAllY / view.nodes.length;
+  view.layoutCenter.x = sumAllX / sourceNodes.length;
+  view.layoutCenter.y = sumAllY / sourceNodes.length;
 }
 
 // Camera smoothing per frame to avoid jumpy panning and zooming.
@@ -53,19 +55,34 @@ function stepCameraSmoothing(view) {
 
 // Main force simulation step: repel/link/center forces, pin constraints, and autosave settling.
 function stepSimulation(view) {
+  if (view.layoutPaused && !view.dragNodeId) return;
   if (view.nodes.length === 0) return;
-  updateLayoutCenter(view);
+
+  const filterVisibleNodeIds = view.getFilterVisibleNodeIds();
+  const hasPhysicsFilter = filterVisibleNodeIds instanceof Set;
+  if (hasPhysicsFilter) {
+    for (const node of view.nodes) {
+      if (filterVisibleNodeIds.has(node.id)) continue;
+      node.vx = 0;
+      node.vy = 0;
+    }
+  }
+  const nodes = hasPhysicsFilter
+    ? view.nodes.filter((node) => filterVisibleNodeIds.has(node.id))
+    : view.nodes;
+  const nodeCount = nodes.length;
+  if (nodeCount === 0) return;
+  updateLayoutCenter(view, nodes);
 
   const settings = view.plugin.getSettings();
   const nowMs = Date.now();
   const layoutSearchMs = 2000;
   const elapsedSearchMs = nowMs - view.layoutKickAtMs;
-  const baseSearchFactor = Math.max(0, Math.min(1, 1 - elapsedSearchMs / layoutSearchMs));
-  const layoutSearchFactor = view.dragNodeId ? 1 : baseSearchFactor;
+  const layoutSearchFactor = 1;
 
   const repelStrength = settings.repel_strength * 0.5 * layoutSearchFactor;
   const centerStrength = settings.center_strength * 0.000025 * layoutSearchFactor;
-  const baseLinkStrength = settings.base_link_strength * 0.0001 * layoutSearchFactor;
+  const baseLinkStrength = settings.base_link_strength * 0.0003 * layoutSearchFactor;
   const linkDistance = view.plugin.clampNumber(
     settings.link_distance,
     1,
@@ -87,7 +104,7 @@ function stepSimulation(view) {
   const repelRadius = view.plugin.clampNumber(
     settings.repel_radius,
     20,
-    200,
+    300,
     DEFAULT_DATA.settings.repel_radius
   );
   const orphanRepelRadius = repelRadius * 1.25;
@@ -97,11 +114,13 @@ function stepSimulation(view) {
   const orphanToMainRepelRadiusSq = orphanToMainRepelRadius * orphanToMainRepelRadius;
   const hasRepel = repelStrength > 0;
   const hasCenter = centerStrength > 0;
-  const hasLink = baseLinkStrength > 0 && view.edges.length > 0;
+  let hasLink = baseLinkStrength > 0 && view.edges.length > 0;
+  if (hasLink && hasPhysicsFilter) {
+    hasLink = view.edges.some(
+      (edge) => filterVisibleNodeIds.has(edge.source) && filterVisibleNodeIds.has(edge.target)
+    );
+  }
   const noForces = !hasRepel && !hasCenter && !hasLink;
-
-  const nodes = view.nodes;
-  const nodeCount = nodes.length;
   const minRepelDistance = 28;
   const maxRepelForce = 16;
   const maxSpringForce = 20;
@@ -109,6 +128,7 @@ function stepSimulation(view) {
   const maxAccel = 6;
   const maxSpeed = 26;
   const impulseGain = 7;
+  const degreeMassFactor = 0.25;
   const orphanRepelScale = 1.2;
   const orphanToMainRepelScale = 5.2;
   const attachmentOnlyRepelScale = 0.85;
@@ -133,7 +153,10 @@ function stepSimulation(view) {
     orbitPinsById.set(node.id, orbitPin);
   }
   const orbitNodeIds = new Set(orbitPinsById.keys());
-  const autoAttachmentOrbitById = buildAttachmentAutoOrbitMap(view);
+  const autoAttachmentOrbitById = buildAttachmentAutoOrbitMap(
+    view,
+    hasPhysicsFilter ? filterVisibleNodeIds : null
+  );
   const autoAttachmentOrbitNodeIds = new Set(autoAttachmentOrbitById.keys());
   const freeOrphanNodes = [];
   const attachmentOnlyAnchorNodes = [];
@@ -374,10 +397,20 @@ function stepSimulation(view) {
 
   if (hasLink) {
     for (const edge of view.edges) {
+      if (
+        hasPhysicsFilter &&
+        (!filterVisibleNodeIds.has(edge.source) || !filterVisibleNodeIds.has(edge.target))
+      ) {
+        continue;
+      }
       const sourceNode = view.nodeById.get(edge.source);
       const targetNode = view.nodeById.get(edge.target);
       if (!sourceNode || !targetNode) continue;
-      if (orbitNodeIds.has(sourceNode.id) || orbitNodeIds.has(targetNode.id)) continue;
+      const sourceIsOrbitPinned = orbitNodeIds.has(sourceNode.id);
+      const targetIsOrbitPinned = orbitNodeIds.has(targetNode.id);
+      // Orbit-pinned nodes must remain fixed in place, but their links should still
+      // attract/free connected nodes. Only skip fully fixed orbit-to-orbit edges.
+      if (sourceIsOrbitPinned && targetIsOrbitPinned) continue;
       if (
         autoAttachmentOrbitNodeIds.has(sourceNode.id) ||
         autoAttachmentOrbitNodeIds.has(targetNode.id)
@@ -391,27 +424,29 @@ function stepSimulation(view) {
       const sourceMultiplier = view.plugin.getNodeMultiplier(sourceNode.id);
       const targetMultiplier = view.plugin.getNodeMultiplier(targetNode.id);
       const edgeMultiplier = Math.max(sourceMultiplier, targetMultiplier);
-      const sourceDegreeNorm = Math.sqrt(Math.max(1, sourceNode.degree));
-      const targetDegreeNorm = Math.sqrt(Math.max(1, targetNode.degree));
-      const baseDegreeNorm = Math.max(sourceDegreeNorm, targetDegreeNorm);
-      const degreeNorm = edgeMultiplier > 1 ? Math.max(1, baseDegreeNorm * 0.75) : baseDegreeNorm;
-
       const hasAttachmentInEdge = !!(
         sourceNode.meta?.isAttachment || targetNode.meta?.isAttachment
       );
       const edgeTargetDistance = hasAttachmentInEdge ? attachmentLinkDistance : linkDistance;
       const stretch = dist - edgeTargetDistance;
-      const springForceRaw = (baseLinkStrength * edgeMultiplier * stretch) / degreeNorm;
+      // Temporary test mode: disable degree-based normalization for link force.
+      const springForceRaw = baseLinkStrength * edgeMultiplier * stretch;
       const springForce = Math.max(-maxSpringForce, Math.min(maxSpringForce, springForceRaw));
       const fx = (dx / dist) * springForce;
       const fy = (dy / dist) * springForce;
+      const sourceMass = 1 + Math.max(0, sourceNode.degree - 1) * degreeMassFactor;
+      const targetMass = 1 + Math.max(0, targetNode.degree - 1) * degreeMassFactor;
 
       const sourceAccel = accelById.get(sourceNode.id);
       const targetAccel = accelById.get(targetNode.id);
-      sourceAccel.ax += fx;
-      sourceAccel.ay += fy;
-      targetAccel.ax -= fx;
-      targetAccel.ay -= fy;
+      if (!sourceIsOrbitPinned) {
+        sourceAccel.ax += fx / sourceMass;
+        sourceAccel.ay += fy / sourceMass;
+      }
+      if (!targetIsOrbitPinned) {
+        targetAccel.ax -= fx / targetMass;
+        targetAccel.ay -= fy / targetMass;
+      }
     }
   }
 
@@ -507,6 +542,7 @@ function stepSimulation(view) {
     if (movingNodeCount > 0) {
       view.layoutStillFrames = 0;
       view.layoutAutosaveDirty = true;
+      view.layoutPaused = false;
     } else {
       view.layoutStillFrames += 1;
     }
@@ -518,6 +554,10 @@ function stepSimulation(view) {
   } else {
     view.layoutStillFrames = 0;
     if (view.isSearchFilled()) view.layoutAutosaveDirty = false;
+  }
+
+  if (!view.dragNodeId && elapsedSearchMs >= layoutSearchMs) {
+    view.layoutPaused = true;
   }
 }
 
@@ -547,7 +587,7 @@ function getOrbitRadiusForAnchor(plugin, orbitNodeCount) {
 }
 
 // Build virtual orbit constraints for free attachment nodes around their nearest anchor nodes.
-function buildAttachmentAutoOrbitMap(view) {
+function buildAttachmentAutoOrbitMap(view, activeNodeIds = null) {
   const autoOrbitMap = new Map();
   const settings = view.plugin.getSettings();
   const attachmentLinkDistance = view.plugin.clampNumber(
@@ -559,6 +599,7 @@ function buildAttachmentAutoOrbitMap(view) {
 
   const attachmentNodeIdsByAnchor = new Map();
   for (const node of view.nodes) {
+    if (activeNodeIds && !activeNodeIds.has(node.id)) continue;
     if (!node?.meta?.isAttachment) continue;
     if (view.plugin.isPinned(node.id) || view.plugin.isOrbitPinned(node.id)) continue;
 
@@ -567,6 +608,7 @@ function buildAttachmentAutoOrbitMap(view) {
 
     let anchorId = null;
     for (const candidateId of neighborIds) {
+      if (activeNodeIds && !activeNodeIds.has(candidateId)) continue;
       const candidateNode = view.nodeById.get(candidateId);
       if (!candidateNode) continue;
       if (!candidateNode.meta?.isAttachment) {
@@ -576,6 +618,7 @@ function buildAttachmentAutoOrbitMap(view) {
     }
     if (!anchorId) {
       for (const candidateId of neighborIds) {
+        if (activeNodeIds && !activeNodeIds.has(candidateId)) continue;
         if (view.nodeById.has(candidateId)) {
           anchorId = candidateId;
           break;

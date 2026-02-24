@@ -84,10 +84,15 @@ class GraphFrontierView extends ItemView {
     this.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
     this.searchInputValue = '';
     this.searchSelectedNodeId = null;
+    this.searchMatchedNodeIds = new Set();
     this.searchModeToggleEl = null;
+    this.searchModeFindLabelEl = null;
+    this.searchModeFilterLabelEl = null;
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
     this.searchSuggestSuppressUntilMs = 0;
+    this.contentSearchIndex = new Map();
+    this.contentSearchBuildToken = 0;
     this.focusNodeId = null;
     this.focusProgress = 0;
     this.hoverFocusNodeId = null;
@@ -100,6 +105,7 @@ class GraphFrontierView extends ItemView {
     this.layoutKickAtMs = Date.now();
     this.layoutStillFrames = 0;
     this.layoutAutosaveDirty = false;
+    this.layoutPaused = false;
     this.quickPreviewEl = null;
     this.quickPreviewTitleEl = null;
     this.quickPreviewBodyEl = null;
@@ -224,6 +230,8 @@ class GraphFrontierView extends ItemView {
     this.sidePanelEl.empty();
     this.sideControls.clear();
     this.searchModeToggleEl = null;
+    this.searchModeFindLabelEl = null;
+    this.searchModeFilterLabelEl = null;
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
     this.sidePanelEl.toggleClass('is-open', this.sidePanelOpen);
@@ -333,7 +341,7 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(body, 'Repel strength', 'repel_strength', 0, 100, 1, 'render', {
       hint: 'Repulsion force between nodes',
     });
-    this.addSideSlider(body, 'Repel radius', 'repel_radius', 20, 200, 5, 'render', {
+    this.addSideSlider(body, 'Repel radius', 'repel_radius', 20, 300, 5, 'render', {
       hint: 'Repulsion cutoff radius for node-to-node interactions',
     });
     this.addSideSlider(body, 'Center strength', 'center_strength', 0, 100, 1, 'render', {
@@ -503,90 +511,130 @@ class GraphFrontierView extends ItemView {
     });
   }
 
-  // Search block: unified find/filter row, autocomplete, and target-node selection.
+  // Search block: find/filter mode controls, source picker (name/content), and node suggestions.
   buildFindSection(parentEl) {
     const section = parentEl.createDiv({ cls: 'graphfrontier-find' });
-    const searchRow = section.createDiv({ cls: 'graphfrontier-find-row' });
-    const modeToggle = searchRow.createEl('button', {
-      cls: 'graphfrontier-search-mode-toggle',
+
+    const controlsRow = section.createDiv({ cls: 'graphfrontier-find-mode-row' });
+    const controlsLeft = controlsRow.createDiv({
+      cls: 'graphfrontier-find-mode-controls graphfrontier-find-mode-controls-left',
+    });
+    const findLabel = controlsLeft.createSpan({
+      cls: 'graphfrontier-find-mode-label',
+      text: 'Find',
+    });
+    this.searchModeFindLabelEl = findLabel;
+    const modeToggle = controlsLeft.createEl('button', {
+      cls: 'graphfrontier-toggle-btn graphfrontier-search-mode-toggle',
       attr: { 'aria-label': 'Search mode toggle' },
     });
     this.searchModeToggleEl = modeToggle;
+    const filterLabel = controlsLeft.createSpan({
+      cls: 'graphfrontier-find-mode-label',
+      text: 'Filter',
+    });
+    this.searchModeFilterLabelEl = filterLabel;
     this.syncSearchModeToggleUi();
 
+    const searchRow = section.createDiv({ cls: 'graphfrontier-find-row' });
     const searchInputWrap = searchRow.createDiv({
       cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor',
     });
     const searchInput = searchInputWrap.createEl('input', {
       cls: 'graphfrontier-find-input',
       type: 'text',
-      placeholder: 'node',
+      placeholder: 'Enter query...',
     });
     searchInput.value = this.searchInputValue;
     this.searchInputEl = searchInput;
-    const searchClearButton = searchInputWrap.createEl('button', {
+    const clearButton = searchInputWrap.createEl('button', {
       cls: 'graphfrontier-search-inline-clear',
       text: 'x',
       attr: { 'aria-label': 'Clear search' },
     });
-    this.searchClearButtonEl = searchClearButton;
+    this.searchClearButtonEl = clearButton;
 
-    const refreshSuggestions = () => {
-      const rawQuery = String(searchInput.value || '').trim();
-      const suggestions = this.getVisibleNodeSuggestions(rawQuery, Number.POSITIVE_INFINITY);
-      return suggestions;
+    const getSuggestionPack = () => {
+      const rawQuery = String(searchInput.value || '');
+      return this.getSearchSuggestionPack(rawQuery, Number.POSITIVE_INFINITY);
     };
 
     const isSuggestPopupSuppressed = () => Date.now() < this.searchSuggestSuppressUntilMs;
 
     const openSearchSuggestionPopup = () => {
       if (isSuggestPopupSuppressed()) return;
-      const suggestions = refreshSuggestions();
-      this.showInputSuggestMenu(searchInput, suggestions, (selectedText) => {
-        searchInput.value = selectedText;
-        this.searchInputValue = selectedText;
-        commitBestSearchSelection();
-      });
+      const suggestionPack = getSuggestionPack();
+      this.showInputSuggestMenu(
+        searchInput,
+        suggestionPack.items,
+        (selectedText, selectedSuggestion) => {
+          const suggestionKind = String(selectedSuggestion?.kind || '');
+          if (suggestionKind === 'source') {
+            const parsed = this.parseSearchQuery(searchInput.value || '');
+            const suffixQuery = String(parsed.query || '').trim();
+            const nextText = suffixQuery ? `${selectedText}${suffixQuery}` : selectedText;
+            searchInput.value = nextText;
+            this.searchInputValue = nextText;
+            this.searchSelectedNodeId = null;
+            this.syncSearchMatchesLive();
+            this.syncSearchClearButtonVisibility();
+            this.kickLayoutSearch();
+            this.contentEl.win.setTimeout(() => openSearchSuggestionPopup(), 0);
+            return;
+          }
+          searchInput.value = selectedText;
+          this.searchInputValue = selectedText;
+          commitBestSearchSelection();
+        },
+        { title: suggestionPack.menuTitle || '' }
+      );
     };
 
     const commitBestSearchSelection = () => {
-      const queryText = String(searchInput.value || '').trim();
-      this.searchInputValue = queryText;
-      if (!queryText) {
-        this.searchSelectedNodeId = null;
-        this.syncSearchClearButtonVisibility();
-        return;
-      }
-      const bestNode = this.getBestMatchingNode(queryText);
-      if (!bestNode) {
-        this.searchSelectedNodeId = null;
-        this.syncSearchClearButtonVisibility();
-        return;
-      }
-      this.applySearchSelectionFromNode(bestNode);
-      this.syncSearchClearButtonVisibility();
-      refreshSuggestions();
+      const rawText = String(searchInput.value || '');
+      this.commitSearchSelectionFromInput(rawText);
     };
 
     this.registerDomEvent(modeToggle, 'click', () => {
       this.searchMode = this.searchMode === 'filter' ? 'find' : 'filter';
       this.plugin.data.settings.search_mode = this.searchMode;
       this.syncSearchModeToggleUi();
+      this.kickLayoutSearch();
       this.plugin.schedulePersist();
     });
 
     this.registerDomEvent(searchInput, 'input', () => {
       this.searchInputValue = String(searchInput.value || '');
       this.searchSelectedNodeId = null;
+      this.syncSearchMatchesLive();
       this.syncSearchClearButtonVisibility();
+      this.kickLayoutSearch();
       openSearchSuggestionPopup();
     });
     this.registerDomEvent(searchInput, 'change', () => {
       commitBestSearchSelection();
     });
     this.registerDomEvent(searchInput, 'keydown', (event) => {
+      const hasActiveMenu =
+        !!this.inputSuggestMenu && this.inputSuggestInputEl && this.inputSuggestInputEl === searchInput;
+      if (hasActiveMenu && event.key === 'ArrowDown') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'ArrowUp') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(-1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'Escape') {
+        event.preventDefault();
+        this.closeInputSuggestMenu();
+        return;
+      }
       if (event.key !== 'Enter') return;
       event.preventDefault();
+      if (hasActiveMenu && this.selectInputSuggestActive()) return;
       commitBestSearchSelection();
       this.closeInputSuggestMenu();
     });
@@ -601,30 +649,238 @@ class GraphFrontierView extends ItemView {
       openSearchSuggestionPopup();
     });
 
-    this.registerDomEvent(searchClearButton, 'click', (event) => {
+    this.registerDomEvent(clearButton, 'click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       this.searchSuggestSuppressUntilMs = Date.now() + 220;
       this.searchInputValue = '';
       this.searchSelectedNodeId = null;
+      this.searchMatchedNodeIds = new Set();
       if (this.searchInputEl) this.searchInputEl.value = '';
       this.syncSearchClearButtonVisibility();
+      this.kickLayoutSearch();
       this.closeInputSuggestMenu();
       if (this.searchInputEl) this.searchInputEl.focus();
     });
 
     this.syncSearchClearButtonVisibility();
-    refreshSuggestions();
   }
 
   syncSearchModeToggleUi() {
     if (!this.searchModeToggleEl) return;
     const safeMode = this.searchMode === 'filter' ? 'filter' : 'find';
-    this.searchModeToggleEl.setText(`${safeMode}:`);
-    this.searchModeToggleEl.toggleClass('is-filter', safeMode === 'filter');
+    this.searchModeToggleEl.toggleClass('is-on', safeMode === 'filter');
+    this.searchModeToggleEl.setAttr('aria-label', `Search mode: ${safeMode}`);
+    if (this.searchModeFindLabelEl) this.searchModeFindLabelEl.toggleClass('is-active', safeMode === 'find');
+    if (this.searchModeFilterLabelEl)
+      this.searchModeFilterLabelEl.toggleClass('is-active', safeMode === 'filter');
   }
 
-  getVisibleNodeSuggestions(query = '', limit = Number.POSITIVE_INFINITY) {
+  parseDropdownQuery(rawQueryText, options = {}) {
+    const allowName = options.allowName === true;
+    const implicitSource = String(options.implicitSource || '').trim().toLowerCase();
+    const raw = String(rawQueryText || '');
+    const trimmed = raw.trim();
+    const lower = trimmed.toLowerCase();
+    if (allowName && lower.startsWith('name:')) {
+      return {
+        source: 'name',
+        query: trimmed.slice('name:'.length).trim(),
+        hasExplicitSource: true,
+        parsedGroup: null,
+      };
+    }
+    const parsedGroup = this.plugin.parseGroupQuery(trimmed);
+    if (parsedGroup) {
+      return {
+        source: parsedGroup.type,
+        query: String(parsedGroup.value || '').trim(),
+        hasExplicitSource: true,
+        parsedGroup,
+      };
+    }
+    return {
+      source: implicitSource,
+      query: trimmed,
+      hasExplicitSource: false,
+      parsedGroup: null,
+    };
+  }
+
+  parseSearchQuery(rawQueryText) {
+    return this.parseDropdownQuery(rawQueryText, {
+      allowName: true,
+      implicitSource: 'content',
+    });
+  }
+
+  getEffectiveSearchSource() {
+    const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
+    return this.parseSearchQuery(rawText).source;
+  }
+
+  getQueryTypeOptions(options = {}) {
+    const includeName = options.includeName === true;
+    const base = [
+      { value: 'path:', description: 'match path of the file' },
+      { value: 'file:', description: 'match file name' },
+      { value: 'tag:', description: 'search for tags' },
+      { value: 'line:', description: 'search keywords on same line' },
+      { value: 'section:', description: 'search keywords under same heading' },
+      { value: '[property]:', description: 'match property' },
+    ];
+    if (!includeName) return base;
+    return [{ value: 'name:', description: 'search by node names' }, ...base];
+  }
+
+  getQueryTypeSuggestions(rawQueryText, options = {}) {
+    const allowName = options.allowName === true;
+    const showWhenTyping = options.showWhenTyping === true;
+    const parsed = this.parseDropdownQuery(rawQueryText, {
+      allowName,
+      implicitSource: String(options.implicitSource || ''),
+    });
+    if (parsed.hasExplicitSource) return [];
+
+    const text = String(parsed.query || '')
+      .trim()
+      .toLowerCase();
+    if (text && !showWhenTyping) return [];
+
+    const optionItems = this.getQueryTypeOptions({ includeName: allowName });
+    const filteredItems = text
+      ? optionItems.filter((option) => {
+          const valueText = String(option.value || '').toLowerCase();
+          const descriptionText = String(option.description || '').toLowerCase();
+          return valueText.includes(text) || descriptionText.includes(text);
+        })
+      : optionItems;
+    return filteredItems.map((option) => ({
+      title: option.value,
+      value: option.value,
+      description: option.description,
+      kind: 'source',
+      selectable: true,
+    }));
+  }
+
+  getQueryPropertyPrefixSuggestions(rawQueryText, limit = 2000) {
+    const cleanQuery = String(rawQueryText || '').trim();
+    const maybeProperty = /^\[([^\]]*)$/i.exec(cleanQuery);
+    if (!maybeProperty) return [];
+    const propertyQuery = String(maybeProperty[1] || '').trim();
+    const propertyKeys = this.plugin.getGroupPropertyKeySuggestions(propertyQuery, limit);
+    return propertyKeys.map((propertyKey) => ({
+      title: `[${propertyKey}]:`,
+      value: `[${propertyKey}]:`,
+      description: '',
+      kind: 'source',
+      selectable: true,
+    }));
+  }
+
+  getQueryValueSuggestions(parsed, limit = 2000) {
+    if (!parsed || !parsed.hasExplicitSource) return [];
+    if (parsed.source === 'name') {
+      return this.getVisibleNodeSuggestionsByName(parsed.query, limit).map((label) => ({
+        title: label,
+        value: `name:${label}`,
+        description: '',
+        kind: 'node',
+        selectable: true,
+      }));
+    }
+    if (parsed.source === 'property') {
+      const propertyKey = String(parsed.parsedGroup?.propertyKey || '').trim().toLowerCase();
+      if (propertyKey === 'property' && !String(parsed.query || '').trim()) {
+        const propertyKeys = this.plugin.getGroupPropertyKeySuggestions('', limit);
+        return propertyKeys.map((propertyName) => ({
+          title: `[${propertyName}]:`,
+          value: `[${propertyName}]:`,
+          description: '',
+          kind: 'value',
+          selectable: true,
+        }));
+      }
+      if (!propertyKey) return [];
+      const values = this.plugin.getGroupValueSuggestions('property', parsed.query, propertyKey, limit);
+      return values.map((value) => ({
+        title: value,
+        value: `[${propertyKey}]:${value}`,
+        description: '',
+        kind: 'value',
+        selectable: true,
+      }));
+    }
+
+    if (!['path', 'file', 'tag', 'line', 'section'].includes(parsed.source)) return [];
+    const values = this.plugin.getGroupValueSuggestions(parsed.source, parsed.query, '', limit);
+    return values.map((value) => ({
+      title: value,
+      value: `${parsed.source}:${value}`,
+      description: '',
+      kind: 'value',
+      selectable: true,
+    }));
+  }
+
+  getQuerySuggestionPack(rawQueryText, options = {}) {
+    const allowName = options.allowName === true;
+    const showTypeSuggestionsWhenTyping = options.showTypeSuggestionsWhenTyping === true;
+    const implicitSource = String(options.implicitSource || '');
+    const limit = Number.isFinite(options.limit) ? Number(options.limit) : Number.POSITIVE_INFINITY;
+    const parsed = this.parseDropdownQuery(rawQueryText, {
+      allowName,
+      implicitSource,
+    });
+
+    if (!parsed.hasExplicitSource) {
+      if (!parsed.query) {
+        return {
+          items: this.getQueryTypeSuggestions(rawQueryText, {
+            allowName,
+            implicitSource,
+            showWhenTyping: true,
+          }),
+          menuTitle: 'Search options',
+        };
+      }
+      if (!showTypeSuggestionsWhenTyping) return { items: [], menuTitle: '' };
+      const propertyPrefixItems = this.getQueryPropertyPrefixSuggestions(rawQueryText, limit);
+      if (propertyPrefixItems.length > 0) {
+        return { items: propertyPrefixItems, menuTitle: 'Search options' };
+      }
+      return {
+        items: this.getQueryTypeSuggestions(rawQueryText, {
+          allowName,
+          implicitSource,
+          showWhenTyping: true,
+        }),
+        menuTitle: 'Search options',
+      };
+    }
+    return { items: this.getQueryValueSuggestions(parsed, limit), menuTitle: '' };
+  }
+
+  getSearchSuggestionPack(rawQueryText, limit = Number.POSITIVE_INFINITY) {
+    return this.getQuerySuggestionPack(rawQueryText, {
+      allowName: true,
+      implicitSource: 'content',
+      showTypeSuggestionsWhenTyping: false,
+      limit,
+    });
+  }
+
+  getGroupQuerySuggestions(queryText = '') {
+    return this.getQuerySuggestionPack(queryText, {
+      allowName: false,
+      implicitSource: '',
+      showTypeSuggestionsWhenTyping: true,
+      limit: 2000,
+    });
+  }
+
+  getVisibleNodeSuggestionsByName(query = '', limit = Number.POSITIVE_INFINITY) {
     const text = String(query || '')
       .trim()
       .toLowerCase();
@@ -645,12 +901,10 @@ class GraphFrontierView extends ItemView {
     return filtered;
   }
 
-  getBestMatchingNode(queryText) {
-    const query = String(queryText || '')
-      .trim()
-      .toLowerCase();
-    if (!query) return null;
 
+  getBestMatchingNodeByName(queryText) {
+    const query = String(queryText || '').trim().toLowerCase();
+    if (!query) return null;
     let bestStartsWithNode = null;
     let bestStartsWithLabel = '';
     let bestContainsNode = null;
@@ -676,10 +930,121 @@ class GraphFrontierView extends ItemView {
     return bestStartsWithNode || bestContainsNode || null;
   }
 
-  applySearchSelectionFromNode(node) {
+  getBestMatchingNode(queryText) {
+    const parsed = this.parseSearchQuery(queryText);
+    if (parsed.source !== 'name') return null;
+    return this.getBestMatchingNodeByName(parsed.query);
+  }
+
+  getNodeMetaForSearch(node) {
+    return this.nodeMetaById.get(node.id) || node.meta || null;
+  }
+
+  nodeMatchesSearchParsed(meta, parsed) {
+    if (!meta || !parsed) return false;
+    const needle = String(parsed.query || '').trim().toLowerCase();
+    if (!needle) return false;
+
+    const includesCI = (value) =>
+      String(value || '')
+        .toLowerCase()
+        .includes(needle);
+    if (parsed.source === 'path') return includesCI(meta.path);
+    if (parsed.source === 'file') return includesCI(meta.fileName);
+    if (parsed.source === 'tag')
+      return Array.isArray(meta.tags) && meta.tags.some((tag) => includesCI(tag));
+    if (parsed.source === 'section')
+      return Array.isArray(meta.sections) && meta.sections.some((section) => includesCI(section));
+    if (parsed.source === 'line')
+      return Array.isArray(meta.lines) && meta.lines.some((line) => includesCI(line));
+    if (parsed.source === 'property') {
+      const key = String(parsed.parsedGroup?.propertyKey || '')
+        .trim()
+        .toLowerCase();
+      if (!key) return false;
+      const values = meta.properties instanceof Map ? meta.properties.get(key) : null;
+      return Array.isArray(values) && values.some((value) => includesCI(value));
+    }
+    return false;
+  }
+
+  getMatchedNodeIdsForParsedSearch(parsed) {
+    const matches = new Set();
+    if (!parsed) return matches;
+    const queryText = String(parsed.query || '').trim().toLowerCase();
+    if (!queryText) return matches;
+
+    if (parsed.source === 'content') {
+      for (const node of this.nodes) {
+        if (node?.meta?.isAttachment) continue;
+        const contentText = this.contentSearchIndex.get(node.id);
+        if (contentText && contentText.includes(queryText)) matches.add(node.id);
+      }
+      return matches;
+    }
+
+    if (parsed.source === 'name') return matches;
+
+    for (const node of this.nodes) {
+      const meta = this.getNodeMetaForSearch(node);
+      if (!meta) continue;
+      if (this.nodeMatchesSearchParsed(meta, parsed)) matches.add(node.id);
+    }
+    return matches;
+  }
+
+  syncSearchMatchesLive() {
+    const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
+    const parsed = this.parseSearchQuery(rawText);
+    if (!parsed.query || parsed.source === 'name') {
+      this.searchMatchedNodeIds = new Set();
+      return;
+    }
+    this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
+  }
+
+  commitSearchSelectionFromInput(rawText) {
+    const text = String(rawText || '');
+    this.searchInputValue = text;
+    const parsed = this.parseSearchQuery(text);
+    if (!parsed.query) {
+      this.searchSelectedNodeId = null;
+      this.searchMatchedNodeIds = new Set();
+      this.syncSearchClearButtonVisibility();
+      return;
+    }
+    if (parsed.source === 'name') {
+      this.searchMatchedNodeIds = new Set();
+      const bestNode = this.getBestMatchingNodeByName(parsed.query);
+      if (!bestNode) {
+        this.searchSelectedNodeId = null;
+        this.syncSearchClearButtonVisibility();
+        return;
+      }
+      this.applySearchSelectionFromNode(bestNode, { forceSource: 'name' });
+      this.syncSearchClearButtonVisibility();
+      return;
+    }
+    this.searchSelectedNodeId = null;
+    this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
+    this.syncSearchClearButtonVisibility();
+  }
+
+  getSearchHighlightNodeIds() {
+    if (this.searchMatchedNodeIds instanceof Set && this.searchMatchedNodeIds.size > 0) {
+      return this.searchMatchedNodeIds;
+    }
+    return null;
+  }
+
+  applySearchSelectionFromNode(node, options = {}) {
     if (!node) return;
+    this.searchMatchedNodeIds = new Set();
     this.searchSelectedNodeId = node.id;
-    this.searchInputValue = String(node.label || '');
+    const parsed = this.parseSearchQuery(this.searchInputEl ? this.searchInputEl.value : this.searchInputValue);
+    const forcedSource = options && options.forceSource === 'name' ? 'name' : '';
+    const prefix = forcedSource ? `${forcedSource}:` : parsed.hasExplicitSource ? `${parsed.source}:` : '';
+    this.searchInputValue = prefix ? `${prefix}${String(node.label || '')}` : String(node.label || '');
     if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
     this.syncSearchClearButtonVisibility();
     this.plugin.schedulePersist();
@@ -689,32 +1054,48 @@ class GraphFrontierView extends ItemView {
     if (!this.searchClearButtonEl) return;
     const textFromInput = this.searchInputEl ? this.searchInputEl.value : '';
     const effectiveText = String(textFromInput || this.searchInputValue || '').trim();
-    this.searchClearButtonEl.toggleClass('is-visible', effectiveText.length > 0);
+    const hasText = effectiveText.length > 0;
+    this.searchClearButtonEl.toggleClass('is-visible', hasText);
+    this.searchClearButtonEl.disabled = !hasText;
   }
 
   getFilterNodeId() {
     if (this.searchMode !== 'filter') return null;
+    if (this.getEffectiveSearchSource() !== 'name') return null;
     return this.searchSelectedNodeId || null;
   }
 
   getFilterVisibleNodeIds() {
-    const filterNodeId = this.getFilterNodeId();
-    if (!filterNodeId) return null;
+    if (this.searchMode !== 'filter') return null;
 
-    const visibleNodeIds = new Set([filterNodeId]);
-    const neighbors = this.neighborsById.get(filterNodeId);
-    if (neighbors) {
-      for (const nodeId of neighbors) visibleNodeIds.add(nodeId);
+    const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
+    const parsed = this.parseSearchQuery(rawText);
+    if (!parsed.query) return null;
+
+    if (parsed.source === 'name') {
+      const filterNodeId = this.getFilterNodeId();
+      if (!filterNodeId) return new Set();
+      const visibleNodeIds = new Set([filterNodeId]);
+      const neighbors = this.neighborsById.get(filterNodeId);
+      if (neighbors) {
+        for (const nodeId of neighbors) visibleNodeIds.add(nodeId);
+      }
+      return visibleNodeIds;
     }
-    return visibleNodeIds;
+
+    if (this.searchMatchedNodeIds instanceof Set) return new Set(this.searchMatchedNodeIds);
+    return new Set();
   }
 
   isSearchFilled() {
-    return String(this.searchInputValue || '').trim().length > 0;
+    const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
+    const parsed = this.parseSearchQuery(rawText);
+    return parsed.query.length > 0;
   }
 
   getFindFocusNodeId() {
     if (this.searchMode !== 'find') return null;
+    if (this.getEffectiveSearchSource() !== 'name') return null;
     return this.searchSelectedNodeId || null;
   }
 
@@ -741,6 +1122,7 @@ class GraphFrontierView extends ItemView {
           value: textValue,
           description: '',
           selectable: true,
+          kind: 'default',
         });
         continue;
       }
@@ -753,6 +1135,7 @@ class GraphFrontierView extends ItemView {
         value: valueText,
         description: String(rawSuggestion?.description || '').trim(),
         selectable: rawSuggestion?.selectable !== false,
+        kind: String(rawSuggestion?.kind || 'default'),
       });
     }
     if (normalizedSuggestions.length <= 0) return;
@@ -772,6 +1155,7 @@ class GraphFrontierView extends ItemView {
       menuEl.appendChild(headerEl);
     }
 
+    const selectableEntries = [];
     for (const suggestion of normalizedSuggestions) {
       const itemEl = ownerDocument.createElement('div');
       itemEl.className = 'graphfrontier-input-menu-item';
@@ -791,15 +1175,28 @@ class GraphFrontierView extends ItemView {
 
       if (!suggestion.selectable) itemEl.classList.add('is-disabled');
       else {
+        selectableEntries.push({ itemEl, suggestion });
         itemEl.addEventListener('mousedown', (event) => {
           event.preventDefault();
           event.stopPropagation();
-          onSelect(String(suggestion.value));
+          onSelect(String(suggestion.value), suggestion);
           this.closeInputSuggestMenu();
         });
       }
       menuEl.appendChild(itemEl);
     }
+
+    const setActiveIndex = (nextIndex) => {
+      if (selectableEntries.length <= 0) return false;
+      const boundedIndex = ((nextIndex % selectableEntries.length) + selectableEntries.length)
+        % selectableEntries.length;
+      for (const entry of selectableEntries) entry.itemEl.classList.remove('is-active');
+      const activeEntry = selectableEntries[boundedIndex];
+      if (!activeEntry) return false;
+      activeEntry.itemEl.classList.add('is-active');
+      activeEntry.itemEl.scrollIntoView({ block: 'nearest' });
+      return true;
+    };
 
     const placeMenu = () => {
       if (!inputEl.isConnected || !menuEl.isConnected) {
@@ -863,7 +1260,13 @@ class GraphFrontierView extends ItemView {
       ownerWindow,
       closeHandler,
       repositionHandler,
+      selectableEntries,
+      activeIndex: selectableEntries.length > 0 ? 0 : -1,
+      setActiveIndex,
     };
+    if (this.inputSuggestMenu.activeIndex >= 0) {
+      this.inputSuggestMenu.setActiveIndex(this.inputSuggestMenu.activeIndex);
+    }
     this.inputSuggestInputEl = inputEl;
   }
 
@@ -884,6 +1287,36 @@ class GraphFrontierView extends ItemView {
     }
     this.inputSuggestMenu = null;
     this.inputSuggestInputEl = null;
+  }
+
+  moveInputSuggestSelection(delta) {
+    if (!this.inputSuggestMenu || !Array.isArray(this.inputSuggestMenu.selectableEntries)) return;
+    const itemCount = this.inputSuggestMenu.selectableEntries.length;
+    if (itemCount <= 0) return;
+    const currentIndex = Number.isInteger(this.inputSuggestMenu.activeIndex)
+      ? this.inputSuggestMenu.activeIndex
+      : 0;
+    const nextIndex = currentIndex + Number(delta || 0);
+    this.inputSuggestMenu.activeIndex = ((nextIndex % itemCount) + itemCount) % itemCount;
+    this.inputSuggestMenu.setActiveIndex(this.inputSuggestMenu.activeIndex);
+  }
+
+  selectInputSuggestActive() {
+    if (!this.inputSuggestMenu || !Array.isArray(this.inputSuggestMenu.selectableEntries)) return false;
+    const itemCount = this.inputSuggestMenu.selectableEntries.length;
+    if (itemCount <= 0) return false;
+    const currentIndex = Number.isInteger(this.inputSuggestMenu.activeIndex)
+      ? this.inputSuggestMenu.activeIndex
+      : 0;
+    const boundedIndex = ((currentIndex % itemCount) + itemCount) % itemCount;
+    const activeEntry = this.inputSuggestMenu.selectableEntries[boundedIndex];
+    if (!activeEntry || !activeEntry.suggestion) return false;
+    this.inputSuggestMenu.onSelect(
+      String(activeEntry.suggestion.value || ''),
+      activeEntry.suggestion
+    );
+    this.closeInputSuggestMenu();
+    return true;
   }
 
   // Focus blending state machine for smooth highlight transitions.
@@ -928,128 +1361,6 @@ class GraphFrontierView extends ItemView {
   isGroupRowEmpty(rowState) {
     const queryText = String(rowState.queryInput.value || '').trim();
     return !queryText;
-  }
-
-  getGroupTypeOptions(queryText = '') {
-    const allOptions = [
-      { value: 'path:', description: 'match path of the file' },
-      { value: 'file:', description: 'match file name' },
-      { value: 'tag:', description: 'search for tags' },
-      { value: 'line:', description: 'search keywords on same line' },
-      { value: 'section:', description: 'search keywords under same heading' },
-      { value: '[property]:', description: 'match property' },
-    ];
-    const cleanQuery = String(queryText || '')
-      .trim()
-      .toLowerCase();
-    if (!cleanQuery) {
-      return allOptions.map((option) => ({
-        title: option.value,
-        value: option.value,
-        description: option.description,
-      }));
-    }
-
-    const filteredOptions = [];
-    for (const option of allOptions) {
-      const valueText = String(option.value || '').toLowerCase();
-      const descriptionText = String(option.description || '').toLowerCase();
-      if (valueText.includes(cleanQuery) || descriptionText.includes(cleanQuery)) {
-        filteredOptions.push({
-          title: option.value,
-          value: option.value,
-          description: option.description,
-        });
-      }
-    }
-    return filteredOptions;
-  }
-
-  getGroupQuerySuggestions(queryText = '') {
-    const cleanQuery = String(queryText || '').trim();
-    const parsed = this.plugin.parseGroupQuery(cleanQuery);
-
-    if (!cleanQuery) {
-      return {
-        menuTitle: 'Search options',
-        items: this.getGroupTypeOptions(''),
-      };
-    }
-
-    if (!parsed) {
-      const maybeProperty = /^\[([^\]]*)$/i.exec(cleanQuery);
-      if (maybeProperty) {
-        const propertyQuery = String(maybeProperty[1] || '').trim();
-        const propertyKeys = this.plugin.getGroupPropertyKeySuggestions(propertyQuery, 2000);
-        const propertyItems = [];
-        for (const propertyKey of propertyKeys) {
-          propertyItems.push({
-            title: `[${propertyKey}]:`,
-            value: `[${propertyKey}]:`,
-          });
-        }
-        return {
-          menuTitle: 'Search options',
-          items: propertyItems,
-        };
-      }
-      return {
-        menuTitle: 'Search options',
-        items: this.getGroupTypeOptions(cleanQuery),
-      };
-    }
-
-    if (parsed.type === 'property') {
-      const propertyKey = String(parsed.propertyKey || '')
-        .trim()
-        .toLowerCase();
-      if (propertyKey === 'property' && !String(parsed.value || '').trim()) {
-        const propertyKeys = this.plugin.getGroupPropertyKeySuggestions('', 2000);
-        const propertyItems = [];
-        for (const propertyName of propertyKeys) {
-          propertyItems.push({
-            title: `[${propertyName}]:`,
-            value: `[${propertyName}]:`,
-          });
-        }
-        return {
-          menuTitle: 'Search options',
-          items: propertyItems,
-        };
-      }
-      if (!propertyKey) {
-        return {
-          menuTitle: 'Search options',
-          items: this.getGroupTypeOptions('[property]:'),
-        };
-      }
-      const valueQuery = String(parsed.value || '').trim();
-      const propertyValues = this.plugin.getGroupValueSuggestions(
-        'property',
-        valueQuery,
-        propertyKey,
-        2000
-      );
-      const propertyItems = [];
-      for (const propertyValue of propertyValues) {
-        propertyItems.push({
-          title: propertyValue,
-          value: `[${propertyKey}]:${propertyValue}`,
-        });
-      }
-      return { menuTitle: '', items: propertyItems };
-    }
-
-    const valueQuery = String(parsed.value || '').trim();
-    const values = this.plugin.getGroupValueSuggestions(parsed.type, valueQuery, '', 2000);
-    const items = [];
-    for (const value of values) {
-      items.push({
-        title: value,
-        value: `${parsed.type}:${value}`,
-      });
-    }
-    return { menuTitle: '', items };
   }
 
   refreshGroupRowState(rowState) {
@@ -1159,8 +1470,30 @@ class GraphFrontierView extends ItemView {
       openGroupSuggestMenu();
     });
     this.registerDomEvent(queryInput, 'keydown', (event) => {
+      const hasActiveMenu =
+        !!this.inputSuggestMenu && this.inputSuggestInputEl && this.inputSuggestInputEl === queryInput;
+      if (hasActiveMenu && event.key === 'ArrowDown') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'ArrowUp') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(-1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'Escape') {
+        event.preventDefault();
+        this.closeInputSuggestMenu();
+        return;
+      }
       if (event.key !== 'Enter') return;
       event.preventDefault();
+      if (hasActiveMenu && this.selectInputSuggestActive()) {
+        this.refreshGroupRowState(rowState);
+        this.persistGroupRows(sectionEl);
+        return;
+      }
       this.persistGroupRows(sectionEl);
       this.closeInputSuggestMenu();
     });
@@ -1314,9 +1647,10 @@ class GraphFrontierView extends ItemView {
 
     if (this.searchSelectedNodeId && !this.nodeById.has(this.searchSelectedNodeId)) {
       this.searchSelectedNodeId = null;
-      this.searchInputValue = '';
-      this.syncSearchClearButtonVisibility();
     }
+    this.syncSearchMatchesLive();
+    this.syncSearchClearButtonVisibility();
+    this.scheduleContentSearchIndexRebuild();
     this.updateLayoutCenter();
 
     this.cleanupDetachedData();
@@ -1327,6 +1661,34 @@ class GraphFrontierView extends ItemView {
 
     this.kickLayoutSearch();
     this.render();
+  }
+
+  scheduleContentSearchIndexRebuild() {
+    const buildToken = ++this.contentSearchBuildToken;
+    const nodesSnapshot = this.nodes.slice();
+    const appRef = this.app;
+    const nextIndex = new Map();
+
+    const buildIndexAsync = async () => {
+      for (const node of nodesSnapshot) {
+        if (buildToken !== this.contentSearchBuildToken) return;
+        if (!node || node.meta?.isAttachment) continue;
+        const file = appRef.vault.getAbstractFileByPath(node.id);
+        if (!file || typeof file.extension !== 'string' || file.extension.toLowerCase() !== 'md')
+          continue;
+        try {
+          const contentText = await appRef.vault.cachedRead(file);
+          nextIndex.set(node.id, String(contentText || '').toLowerCase());
+        } catch (_error) {
+          continue;
+        }
+      }
+      if (buildToken !== this.contentSearchBuildToken) return;
+      this.contentSearchIndex = nextIndex;
+      this.syncSearchMatchesLive();
+    };
+
+    buildIndexAsync();
   }
 
   /*
@@ -2178,7 +2540,7 @@ class GraphFrontierView extends ItemView {
           .setTitle('Add to search')
           .setIcon('search')
           .onClick(() => {
-            this.applySearchSelectionFromNode(node);
+            this.applySearchSelectionFromNode(node, { forceSource: 'name' });
           })
       );
       menu.addItem((item) =>
@@ -2196,7 +2558,7 @@ class GraphFrontierView extends ItemView {
           .setTitle('Add to search')
           .setIcon('search')
           .onClick(() => {
-            this.applySearchSelectionFromNode(node);
+            this.applySearchSelectionFromNode(node, { forceSource: 'name' });
           })
       );
       menu.addSeparator();
@@ -2494,7 +2856,7 @@ class GraphFrontierView extends ItemView {
   async commandAddToSearch() {
     const node = this.getCommandTargetNodeOrNotice();
     if (!node) return;
-    this.applySearchSelectionFromNode(node);
+    this.applySearchSelectionFromNode(node, { forceSource: 'name' });
   }
 
   async commandShowLocalGraph() {
@@ -3187,9 +3549,8 @@ class GraphFrontierView extends ItemView {
   // Hit testing and coordinate transforms between screen and world spaces.
   getNodeAtScreen(screenX, screenY) {
     const world = this.screenToWorld(screenX, screenY);
-    const filterNodeId = this.getFilterNodeId();
-    const hasFilter = !!filterNodeId;
-    const visibleNodeIds = hasFilter ? this.getFilterVisibleNodeIds() : null;
+    const visibleNodeIds = this.getFilterVisibleNodeIds();
+    const hasFilter = visibleNodeIds instanceof Set;
 
     let bestNode = null;
     let bestDist2 = Infinity;

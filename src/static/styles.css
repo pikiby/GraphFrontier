@@ -263,31 +263,58 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.graphfrontier-find-row {
+.graphfrontier-find-mode-row {
   display: grid;
-  grid-template-columns: 54px 1fr;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.graphfrontier-find-mode-controls {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
+.graphfrontier-find-mode-controls-left {
+  justify-self: start;
+}
+
+.graphfrontier-find-mode-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.graphfrontier-find-mode-label.is-active {
+  color: var(--text-normal);
+}
+
+.graphfrontier-find-row {
+  display: block;
+}
+
 .graphfrontier-search-mode-toggle {
-  width: 54px;
+  width: 34px;
+}
+
+.graphfrontier-search-clear-btn {
+  min-width: 52px;
   height: 22px;
-  box-sizing: border-box;
   border: 1px solid rgba(210, 215, 224, 0.26);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
-  color: var(--text-muted);
+  color: var(--text-normal);
   font-size: 11px;
   font-weight: 400;
-  line-height: 1;
-  padding: 0 4px;
+  padding: 0 8px;
   cursor: pointer;
 }
 
-.graphfrontier-search-mode-toggle.is-filter {
-  color: var(--text-normal);
-  border-color: rgba(210, 215, 224, 0.34);
+.graphfrontier-search-clear-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .graphfrontier-search-input-wrap {
@@ -310,28 +337,31 @@
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-normal);
-  padding-right: 20px;
+  padding: 0 24px 0 6px;
 }
 
 .graphfrontier-search-inline-clear {
   position: absolute;
-  right: 2px;
+  right: 4px;
   top: 50%;
   transform: translateY(-50%);
   display: none;
-  width: 18px;
-  height: 18px;
-  border: 0;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 10px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
+  align-items: center;
+  justify-content: center;
 }
 
 .graphfrontier-search-inline-clear.is-visible {
-  display: block;
+  display: inline-flex;
 }
 
 .graphfrontier-groups {
@@ -525,6 +555,10 @@
 
 .graphfrontier-input-menu-item:hover {
   background: rgba(255, 255, 255, 0.06);
+}
+
+.graphfrontier-input-menu-item.is-active {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .graphfrontier-input-menu-main {

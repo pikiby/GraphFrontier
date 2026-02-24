@@ -1,7 +1,7 @@
 // Core constants and defaults shared by the plugin runtime.
 const GRAPHFRONTIER_VIEW_TYPE = 'graphfrontier-view';
 const NODE_MULTIPLIER_MIN = 1;
-const NODE_MULTIPLIER_MAX = 30;
+const NODE_MULTIPLIER_MAX = 10;
 const ZOOM_STEP_FACTOR = 1.12;
 const TWO_PI = Math.PI * 2;
 
@@ -26,21 +26,21 @@ const DEFAULT_DATA = {
     search_mode: 'find',
     quick_pick_modifier: 'alt',
     node_size_scale: 1,
-    edge_width_scale: 0.2,
+    edge_width_scale: 0.32,
     painted_edge_width: 0.2,
     label_zoom_steps: 10,
     label_font_size: 9,
-    hover_dim_strength: 94,
-    strong_pull_multiplier: 2,
-    orbit_distance: 20,
+    hover_dim_strength: 65,
+    strong_pull_multiplier: 10,
+    orbit_distance: 9,
     attachment_size_multiplier: 1,
     attachment_link_distance_multiplier: 20,
-    base_link_strength: 40,
-    link_distance: 20,
-    repel_strength: 100,
-    repel_radius: 80,
-    center_strength: 10,
-    damping: 0.9,
+    base_link_strength: 92,
+    link_distance: 52,
+    repel_strength: 51,
+    repel_radius: 70,
+    center_strength: 0,
+    damping: 0.14,
     layout_autosave: false,
   },
   view_state: {

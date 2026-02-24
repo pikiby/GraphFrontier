@@ -290,7 +290,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.repel_radius = this.clampNumber(
       normalized.settings.repel_radius,
       20,
-      200,
+      300,
       DEFAULT_DATA.settings.repel_radius,
     );
     // Backward compatibility: old center strength (e.g. 0.0001 -> new scale 10).
@@ -908,6 +908,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   buildNodeMetaByPath(path, abstractFile = null, options = {}) {
     const file = abstractFile || this.app.vault.getAbstractFileByPath(path);
     const forcedAttachment = options && options.isAttachment === true;
+    const pathText = String(path || '');
+    const fallbackExtMatch = /\.([^.\/]+)$/u.exec(pathText);
+    const fallbackExt = fallbackExtMatch ? String(fallbackExtMatch[1] || '').toLowerCase() : '';
+    const fileExt = typeof file?.extension === 'string' ? file.extension.toLowerCase() : '';
     const meta = {
       path,
       fileName: typeof file?.basename === 'string' ? file.basename : (String(path).split('/').pop() || String(path)),
@@ -916,15 +920,18 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       lines: [],
       properties: new Map(),
       isAttachment: forcedAttachment,
+      fileType: fileExt || fallbackExt || (forcedAttachment ? 'attachment' : 'md'),
     };
 
     if (!file || typeof file.extension !== 'string' || file.extension.toLowerCase() !== 'md') {
       if (file && typeof file.extension === 'string' && file.extension.toLowerCase() !== 'md') {
         meta.isAttachment = true;
       }
+      if (!meta.fileType) meta.fileType = meta.isAttachment ? 'attachment' : 'file';
       return meta;
     }
     meta.isAttachment = false;
+    meta.fileType = 'md';
 
     const cache = this.app.metadataCache.getFileCache(file) || {};
     const tags = new Set();

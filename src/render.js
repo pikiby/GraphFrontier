@@ -106,8 +106,10 @@ function renderFrame(view) {
 // Draw hovered node title in a compact floating bubble.
 function drawFocusedNodeTitle(view, ctx, node) {
   const point = view.worldToScreen(node.x, node.y);
-  const labelText = String(node.label || '');
-  if (!labelText) return;
+  const labelBase = String(node.label || '');
+  if (!labelBase) return;
+  const fileType = getNodeFileTypeLabel(node);
+  const labelText = fileType ? `${labelBase} (${fileType})` : labelBase;
 
   const fontSize = 13;
   const padX = 7;
@@ -141,6 +143,19 @@ function drawFocusedNodeTitle(view, ctx, node) {
   ctx.textBaseline = 'top';
   ctx.fillText(labelText, boxX + padX, boxY + padY);
   ctx.restore();
+}
+
+// Extract node file type used in hover title (md, png, pdf, etc.).
+function getNodeFileTypeLabel(node) {
+  const metaType = String(node?.meta?.fileType || '')
+    .trim()
+    .toLowerCase();
+  if (metaType) return metaType;
+  const pathText = String(node?.id || '').trim();
+  const extMatch = /\.([^.\/]+)$/u.exec(pathText);
+  if (extMatch && extMatch[1]) return String(extMatch[1]).toLowerCase();
+  if (node?.meta?.isAttachment) return 'attachment';
+  return 'md';
 }
 
 // Node radius formula with attachment-specific size multiplier.
@@ -287,9 +302,10 @@ function drawEdges(view, ctx) {
     1,
     DEFAULT_DATA.settings.painted_edge_width
   );
-  const filterNodeId = view.getFilterNodeId();
-  const hasFilter = !!filterNodeId;
-  const visibleNodeIds = hasFilter ? view.getFilterVisibleNodeIds() : null;
+  const visibleNodeIds = view.getFilterVisibleNodeIds();
+  const hasFilter = visibleNodeIds instanceof Set;
+  const filterNodeId = hasFilter ? view.getFilterNodeId() : null;
+  const isNameFilterMode = hasFilter && view.getEffectiveSearchSource() === 'name' && !!filterNodeId;
   const focusNodeId = view.focusNodeId;
   const focusProgress = view.focusProgress;
   const hasFocus = !!focusNodeId && focusProgress > 0.001;
@@ -301,12 +317,21 @@ function drawEdges(view, ctx) {
   const hasHoverFade = !!hoverFadeNodeId && hoverFadeProgress > 0.001;
   const hasAnyFocus = hasFocus || hasHoverFocus || hasHoverFade;
   const combinedFocusProgress = Math.max(focusProgress, hoverFocusProgress, hoverFadeProgress);
+  const searchHighlightNodeIds = view.getSearchHighlightNodeIds();
+  const hasSearchHighlight =
+    !hasFilter &&
+    !hasAnyFocus &&
+    searchHighlightNodeIds instanceof Set &&
+    searchHighlightNodeIds.size > 0;
+  const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
 
   for (const edge of view.edges) {
     if (hasFilter) {
-      if (!filterNodeId || !visibleNodeIds) continue;
-      const isFilterEdge = edge.source === filterNodeId || edge.target === filterNodeId;
-      if (!isFilterEdge) continue;
+      if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) continue;
+      if (isNameFilterMode) {
+        const isFilterEdge = edge.source === filterNodeId || edge.target === filterNodeId;
+        if (!isFilterEdge) continue;
+      }
     }
     const sourceNode = view.nodeById.get(edge.source);
     const targetNode = view.nodeById.get(edge.target);
@@ -333,7 +358,11 @@ function drawEdges(view, ctx) {
       hoverFadeEdgeProgress
     );
     const dimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
-    const edgeAlpha = hasAnyFocus ? dimAlpha + (1 - dimAlpha) * focusEdgeProgress : 1;
+    const edgeAlpha = hasAnyFocus
+      ? dimAlpha + (1 - dimAlpha) * focusEdgeProgress
+      : hasSearchHighlight
+        ? searchDimAlpha
+        : 1;
     ctx.save();
     ctx.globalAlpha = edgeAlpha;
 
@@ -365,9 +394,8 @@ function drawNodes(view, ctx) {
   const labelFontSize = getLabelFontSize(view);
   const labelFadeRange = Math.max(0.001, labelMinZoom * 0.35);
   const nowMs = Date.now();
-  const filterNodeId = view.getFilterNodeId();
-  const hasFilter = !!filterNodeId;
-  const visibleNodeIds = hasFilter ? view.getFilterVisibleNodeIds() : null;
+  const visibleNodeIds = view.getFilterVisibleNodeIds();
+  const hasFilter = visibleNodeIds instanceof Set;
   const focusNodeId = view.focusNodeId;
   const focusProgress = view.focusProgress;
   const hasFocus = !!focusNodeId && focusProgress > 0.001;
@@ -387,6 +415,13 @@ function drawNodes(view, ctx) {
   const hasAnyFocus = hasFocus || hasHoverFocus || hasHoverFade;
   const combinedFocusProgress = Math.max(focusProgress, hoverFocusProgress, hoverFadeProgress);
   const hasSearchFocus = !!(view.getFilterNodeId() || view.getFindFocusNodeId());
+  const searchHighlightNodeIds = view.getSearchHighlightNodeIds();
+  const hasSearchHighlight =
+    !hasFilter &&
+    !hasAnyFocus &&
+    searchHighlightNodeIds instanceof Set &&
+    searchHighlightNodeIds.size > 0;
+  const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
 
   for (const node of view.nodes) {
     if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
@@ -440,10 +475,15 @@ function drawNodes(view, ctx) {
     const isClickFlash = view.clickFlashNodeId === node.id && nowMs < view.clickFlashUntilMs;
     const groupColor = getGroupColorForNode(view, node);
     const dimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+    const isSearchHighlightNode = hasSearchHighlight && searchHighlightNodeIds.has(node.id);
     const nodeAlpha = isClickFlash
       ? 1
       : hasAnyFocus
         ? dimAlpha + (1 - dimAlpha) * relationProgress
+        : hasSearchHighlight
+          ? isSearchHighlightNode
+            ? 1
+            : searchDimAlpha
         : 1;
 
     let fillColor = '#7aa2f7';
