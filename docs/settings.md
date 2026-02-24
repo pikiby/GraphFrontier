@@ -41,6 +41,7 @@ Group rows define color rules for nodes based on query expressions.
 
 Supported query patterns:
 
+- `name:<value>`
 - `tag:<value>`
 - `path:<value>`
 - `file:<value>`

@@ -818,7 +818,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
   parseGroupQuery(query) {
     const text = String(query || '').trim();
-    const plainMatch = /^(tag|path|file|line|section)\s*:\s*(.*)$/i.exec(text);
+    const plainMatch = /^(name|tag|path|file|line|section)\s*:\s*(.*)$/i.exec(text);
     if (plainMatch) {
       return {
         type: plainMatch[1].toLowerCase(),
@@ -845,7 +845,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       if (!cleanPropertyKey) return '';
       return `[${cleanPropertyKey}]:${cleanValue}`;
     }
-    if (!['tag', 'path', 'file', 'line', 'section'].includes(cleanType)) return '';
+    if (!['name', 'tag', 'path', 'file', 'line', 'section'].includes(cleanType)) return '';
     return `${cleanType}:${cleanValue}`;
   }
 

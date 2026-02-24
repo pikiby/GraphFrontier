@@ -898,7 +898,7 @@ class GraphFrontierView extends ItemView {
 
   getGroupQuerySuggestions(queryText = '') {
     return this.getQuerySuggestionPack(queryText, {
-      allowName: false,
+      allowName: true,
       implicitSource: '',
       showTypeSuggestionsWhenTyping: true,
       limit: 2000,
@@ -1152,7 +1152,7 @@ class GraphFrontierView extends ItemView {
         const meta = this.nodeMetaById.get(node.id) || node.meta || null;
         if (!meta) continue;
         for (const parsedRule of blacklistRules) {
-          if (this.nodeMatchesParsedGroup(meta, parsedRule)) {
+          if (this.nodeMatchesParsedGroup(meta, parsedRule, node)) {
             visibleNodeIds.delete(node.id);
             break;
           }
@@ -1167,7 +1167,7 @@ class GraphFrontierView extends ItemView {
         const meta = this.nodeMetaById.get(node.id) || node.meta || null;
         if (!meta) continue;
         for (const parsedRule of whitelistRules) {
-          if (this.nodeMatchesParsedGroup(meta, parsedRule)) {
+          if (this.nodeMatchesParsedGroup(meta, parsedRule, node)) {
             whitelistMatchedNodeIds.add(node.id);
             break;
           }
@@ -3877,8 +3877,8 @@ class GraphFrontierView extends ItemView {
     return getGroupColorForNodeRender(this, node);
   }
 
-  nodeMatchesParsedGroup(meta, parsed) {
-    return nodeMatchesParsedGroupRender(meta, parsed);
+  nodeMatchesParsedGroup(meta, parsed, node = null) {
+    return nodeMatchesParsedGroupRender(meta, parsed, node);
   }
 
   // Hit testing and coordinate transforms between screen and world spaces.

@@ -214,7 +214,7 @@ function getGroupColorForNode(view, node) {
     if (!group || group.enabled === false) continue;
     const parsed = view.plugin.parseGroupQuery(group.query);
     if (!parsed) continue;
-    if (nodeMatchesParsedGroup(meta, parsed)) {
+    if (nodeMatchesParsedGroup(meta, parsed, node)) {
       return view.plugin.normalizeGroupColor(group.color);
     }
   }
@@ -222,7 +222,7 @@ function getGroupColorForNode(view, node) {
 }
 
 // Match helper used by group-color rules (path/file/tag/line/section/property).
-function nodeMatchesParsedGroup(meta, parsed) {
+function nodeMatchesParsedGroup(meta, parsed, node = null) {
   const needle = String(parsed.value || '')
     .trim()
     .toLowerCase();
@@ -232,6 +232,10 @@ function nodeMatchesParsedGroup(meta, parsed) {
     String(value || '')
       .toLowerCase()
       .includes(needle);
+  if (parsed.type === 'name') {
+    const label = String(node?.label || meta?.fileName || '');
+    return includesCI(label);
+  }
   if (parsed.type === 'path') return includesCI(meta.path);
   if (parsed.type === 'file') return includesCI(meta.fileName);
   if (parsed.type === 'tag')
