@@ -22,9 +22,8 @@ function updateLayoutCenter(view, nodesForCenter = view.nodes, degreeById = null
   let mainCount = 0;
   for (const node of sourceNodes) {
     const isAttachment = !!node?.meta?.isAttachment;
-    const degree = degreeById instanceof Map
-      ? Number(degreeById.get(node.id) || 0)
-      : Number(node.degree || 0);
+    const degree =
+      degreeById instanceof Map ? Number(degreeById.get(node.id) || 0) : Number(node.degree || 0);
     const isOrphan = degree === 0;
     if (isAttachment || isOrphan) continue;
     sumMainX += node.x;
@@ -84,7 +83,9 @@ function stepSimulation(view) {
     }
   }
   const getNodeDegree = (node) =>
-    localDegreeById instanceof Map ? Number(localDegreeById.get(node.id) || 0) : Number(node.degree || 0);
+    localDegreeById instanceof Map
+      ? Number(localDegreeById.get(node.id) || 0)
+      : Number(node.degree || 0);
   updateLayoutCenter(view, nodes, localDegreeById);
 
   const settings = view.plugin.getSettings();
