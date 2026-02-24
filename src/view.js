@@ -116,6 +116,20 @@ class GraphFrontierView extends ItemView {
     this.quickPreviewLoadToken = 0;
     this.inputSuggestMenu = null;
     this.inputSuggestInputEl = null;
+    this.visibilityGraphVersion = 0;
+    this.visibilitySearchVersion = 0;
+    this.filterVisibilityCache = {
+      parsedRulesSignature: '',
+      parsedBlacklistRules: [],
+      parsedWhitelistRules: [],
+      queryRuleVisibleGraphVersion: -1,
+      queryRuleVisibleRulesSignature: '',
+      queryRuleVisibleNodeIds: null,
+      searchVisibleVersion: -1,
+      searchVisibleNodeIds: null,
+      finalVisibleKey: '',
+      finalVisibleNodeIds: null,
+    };
 
     this.isOpen = false;
     this.resizeObserver = null;
@@ -611,6 +625,7 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(modeToggle, 'click', () => {
       this.searchMode = this.searchMode === 'filter' ? 'find' : 'filter';
       this.plugin.data.settings.search_mode = this.searchMode;
+      this.markSearchVisibilityDirty();
       this.syncSearchModeToggleUi();
       this.kickLayoutSearch();
       this.plugin.schedulePersist();
@@ -671,6 +686,7 @@ class GraphFrontierView extends ItemView {
       this.searchInputValue = '';
       this.searchSelectedNodeId = null;
       this.searchMatchedNodeIds = new Set();
+      this.markSearchVisibilityDirty();
       if (this.searchInputEl) this.searchInputEl.value = '';
       this.syncSearchClearButtonVisibility();
       this.kickLayoutSearch();
@@ -1028,9 +1044,11 @@ class GraphFrontierView extends ItemView {
     const parsed = this.parseSearchQuery(rawText);
     if (!parsed.query || parsed.source === 'name') {
       this.searchMatchedNodeIds = new Set();
+      this.markSearchVisibilityDirty();
       return;
     }
     this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
+    this.markSearchVisibilityDirty();
   }
 
   commitSearchSelectionFromInput(rawText) {
@@ -1040,6 +1058,7 @@ class GraphFrontierView extends ItemView {
     if (!parsed.query) {
       this.searchSelectedNodeId = null;
       this.searchMatchedNodeIds = new Set();
+      this.markSearchVisibilityDirty();
       this.syncSearchClearButtonVisibility();
       return;
     }
@@ -1048,6 +1067,7 @@ class GraphFrontierView extends ItemView {
       const bestNode = this.getBestMatchingNodeByName(parsed.query);
       if (!bestNode) {
         this.searchSelectedNodeId = null;
+        this.markSearchVisibilityDirty();
         this.syncSearchClearButtonVisibility();
         return;
       }
@@ -1057,6 +1077,7 @@ class GraphFrontierView extends ItemView {
     }
     this.searchSelectedNodeId = null;
     this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
+    this.markSearchVisibilityDirty();
     this.syncSearchClearButtonVisibility();
   }
 
@@ -1084,6 +1105,7 @@ class GraphFrontierView extends ItemView {
       ? `${prefix}${String(node.label || '')}`
       : String(node.label || '');
     if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
+    this.markSearchVisibilityDirty();
     this.syncSearchClearButtonVisibility();
     this.plugin.schedulePersist();
   }
@@ -1097,6 +1119,51 @@ class GraphFrontierView extends ItemView {
     this.searchClearButtonEl.disabled = !hasText;
   }
 
+  markGraphVisibilityDirty() {
+    this.visibilityGraphVersion += 1;
+    this.filterVisibilityCache.queryRuleVisibleGraphVersion = -1;
+    this.filterVisibilityCache.queryRuleVisibleNodeIds = null;
+    this.filterVisibilityCache.finalVisibleKey = '';
+    this.filterVisibilityCache.finalVisibleNodeIds = null;
+  }
+
+  markSearchVisibilityDirty() {
+    this.visibilitySearchVersion += 1;
+    this.filterVisibilityCache.searchVisibleVersion = -1;
+    this.filterVisibilityCache.searchVisibleNodeIds = null;
+    this.filterVisibilityCache.finalVisibleKey = '';
+    this.filterVisibilityCache.finalVisibleNodeIds = null;
+  }
+
+  markQueryRuleVisibilityDirty() {
+    this.filterVisibilityCache.parsedRulesSignature = '';
+    this.filterVisibilityCache.parsedBlacklistRules = [];
+    this.filterVisibilityCache.parsedWhitelistRules = [];
+    this.filterVisibilityCache.queryRuleVisibleGraphVersion = -1;
+    this.filterVisibilityCache.queryRuleVisibleRulesSignature = '';
+    this.filterVisibilityCache.queryRuleVisibleNodeIds = null;
+    this.filterVisibilityCache.finalVisibleKey = '';
+    this.filterVisibilityCache.finalVisibleNodeIds = null;
+  }
+
+  getActiveQueryRuleSignature() {
+    const serializeRules = (rules) => {
+      if (!Array.isArray(rules) || rules.length === 0) return '';
+      const parts = [];
+      for (const rule of rules) {
+        if (!rule || typeof rule !== 'object') continue;
+        const id = String(rule.id || '').trim();
+        const query = String(rule.query || '').trim();
+        const enabled = rule.enabled !== false ? '1' : '0';
+        parts.push(`${id}|${enabled}|${query}`);
+      }
+      return parts.join('||');
+    };
+    const blacklistRules = this.plugin?.data?.blacklist;
+    const whitelistRules = this.plugin?.data?.whitelist;
+    return `b:${serializeRules(blacklistRules)}##w:${serializeRules(whitelistRules)}`;
+  }
+
   getFilterNodeId() {
     if (this.searchMode !== 'filter') return null;
     if (this.getEffectiveSearchSource() !== 'name') return null;
@@ -1106,45 +1173,102 @@ class GraphFrontierView extends ItemView {
   getFilterVisibleNodeIds() {
     const queryRuleVisibleNodeIds = this.getQueryRuleVisibleNodeIds();
     const searchVisibleNodeIds = this.getSearchModeVisibleNodeIds();
-    if (!(queryRuleVisibleNodeIds instanceof Set) && !(searchVisibleNodeIds instanceof Set)) {
-      return null;
+    const activeRuleSignature = this.filterVisibilityCache.queryRuleVisibleRulesSignature || '';
+    const finalKey = [
+      this.visibilityGraphVersion,
+      this.visibilitySearchVersion,
+      activeRuleSignature,
+      queryRuleVisibleNodeIds instanceof Set ? 'q:1' : 'q:0',
+      searchVisibleNodeIds instanceof Set ? 's:1' : 's:0',
+    ].join('|');
+    if (this.filterVisibilityCache.finalVisibleKey === finalKey) {
+      return this.filterVisibilityCache.finalVisibleNodeIds;
     }
-    if (!(queryRuleVisibleNodeIds instanceof Set)) return new Set(searchVisibleNodeIds);
-    if (!(searchVisibleNodeIds instanceof Set)) return new Set(queryRuleVisibleNodeIds);
 
-    const combined = new Set();
-    for (const nodeId of queryRuleVisibleNodeIds) {
-      if (searchVisibleNodeIds.has(nodeId)) combined.add(nodeId);
+    let finalVisibleNodeIds = null;
+    if (!(queryRuleVisibleNodeIds instanceof Set) && !(searchVisibleNodeIds instanceof Set)) {
+      finalVisibleNodeIds = null;
+    } else if (!(queryRuleVisibleNodeIds instanceof Set)) {
+      finalVisibleNodeIds = searchVisibleNodeIds;
+    } else if (!(searchVisibleNodeIds instanceof Set)) {
+      finalVisibleNodeIds = queryRuleVisibleNodeIds;
+    } else {
+      const combined = new Set();
+      for (const nodeId of queryRuleVisibleNodeIds) {
+        if (searchVisibleNodeIds.has(nodeId)) combined.add(nodeId);
+      }
+      finalVisibleNodeIds = combined;
     }
-    return combined;
+    this.filterVisibilityCache.finalVisibleKey = finalKey;
+    this.filterVisibilityCache.finalVisibleNodeIds = finalVisibleNodeIds;
+    return finalVisibleNodeIds;
   }
 
   getSearchModeVisibleNodeIds() {
-    if (this.searchMode !== 'filter') return null;
+    if (this.filterVisibilityCache.searchVisibleVersion === this.visibilitySearchVersion) {
+      return this.filterVisibilityCache.searchVisibleNodeIds;
+    }
+
+    let visibleNodeIds = null;
+    if (this.searchMode !== 'filter') {
+      this.filterVisibilityCache.searchVisibleVersion = this.visibilitySearchVersion;
+      this.filterVisibilityCache.searchVisibleNodeIds = null;
+      return null;
+    }
 
     const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
     const parsed = this.parseSearchQuery(rawText);
-    if (!parsed.query) return null;
+    if (!parsed.query) {
+      this.filterVisibilityCache.searchVisibleVersion = this.visibilitySearchVersion;
+      this.filterVisibilityCache.searchVisibleNodeIds = null;
+      return null;
+    }
 
     if (parsed.source === 'name') {
       const filterNodeId = this.getFilterNodeId();
-      if (!filterNodeId) return new Set();
-      const visibleNodeIds = new Set([filterNodeId]);
+      if (!filterNodeId) {
+        visibleNodeIds = new Set();
+      } else {
+        visibleNodeIds = new Set([filterNodeId]);
+      }
       const neighbors = this.neighborsById.get(filterNodeId);
-      if (neighbors) {
+      if (neighbors && visibleNodeIds) {
         for (const nodeId of neighbors) visibleNodeIds.add(nodeId);
       }
-      return visibleNodeIds;
+    } else if (this.searchMatchedNodeIds instanceof Set) {
+      visibleNodeIds = this.searchMatchedNodeIds;
+    } else {
+      visibleNodeIds = new Set();
     }
 
-    if (this.searchMatchedNodeIds instanceof Set) return new Set(this.searchMatchedNodeIds);
-    return new Set();
+    this.filterVisibilityCache.searchVisibleVersion = this.visibilitySearchVersion;
+    this.filterVisibilityCache.searchVisibleNodeIds = visibleNodeIds;
+    return visibleNodeIds;
   }
 
   getQueryRuleVisibleNodeIds() {
-    const blacklistRules = this.getCompleteQueryRulesByKey('blacklist');
-    const whitelistRules = this.getCompleteQueryRulesByKey('whitelist');
-    if (blacklistRules.length === 0 && whitelistRules.length === 0) return null;
+    const ruleSignature = this.getActiveQueryRuleSignature();
+    const canReuseVisibleSet =
+      this.filterVisibilityCache.queryRuleVisibleGraphVersion === this.visibilityGraphVersion &&
+      this.filterVisibilityCache.queryRuleVisibleRulesSignature === ruleSignature;
+    if (canReuseVisibleSet) {
+      return this.filterVisibilityCache.queryRuleVisibleNodeIds;
+    }
+
+    if (this.filterVisibilityCache.parsedRulesSignature !== ruleSignature) {
+      this.filterVisibilityCache.parsedBlacklistRules = this.getCompleteQueryRulesByKey('blacklist');
+      this.filterVisibilityCache.parsedWhitelistRules = this.getCompleteQueryRulesByKey('whitelist');
+      this.filterVisibilityCache.parsedRulesSignature = ruleSignature;
+    }
+
+    const blacklistRules = this.filterVisibilityCache.parsedBlacklistRules;
+    const whitelistRules = this.filterVisibilityCache.parsedWhitelistRules;
+    if (blacklistRules.length === 0 && whitelistRules.length === 0) {
+      this.filterVisibilityCache.queryRuleVisibleGraphVersion = this.visibilityGraphVersion;
+      this.filterVisibilityCache.queryRuleVisibleRulesSignature = ruleSignature;
+      this.filterVisibilityCache.queryRuleVisibleNodeIds = null;
+      return null;
+    }
 
     const visibleNodeIds = new Set(this.nodes.map((node) => node.id));
     if (blacklistRules.length > 0) {
@@ -1173,9 +1297,15 @@ class GraphFrontierView extends ItemView {
           }
         }
       }
+      this.filterVisibilityCache.queryRuleVisibleGraphVersion = this.visibilityGraphVersion;
+      this.filterVisibilityCache.queryRuleVisibleRulesSignature = ruleSignature;
+      this.filterVisibilityCache.queryRuleVisibleNodeIds = whitelistMatchedNodeIds;
       return whitelistMatchedNodeIds;
     }
 
+    this.filterVisibilityCache.queryRuleVisibleGraphVersion = this.visibilityGraphVersion;
+    this.filterVisibilityCache.queryRuleVisibleRulesSignature = ruleSignature;
+    this.filterVisibilityCache.queryRuleVisibleNodeIds = visibleNodeIds;
     return visibleNodeIds;
   }
 
@@ -1740,6 +1870,7 @@ class GraphFrontierView extends ItemView {
 
     if (ruleKey === 'blacklist') this.plugin.updateBlacklist(nextRules);
     else this.plugin.updateWhitelist(nextRules);
+    this.markQueryRuleVisibilityDirty();
 
     const hasIncompleteRow = rowStateList.some((rowState) => !this.isQueryRuleRowComplete(rowState));
     if (!hasIncompleteRow) {
@@ -1979,6 +2110,7 @@ class GraphFrontierView extends ItemView {
     const keepCamera = !!opts.keepCamera;
     const graphData = this.plugin.collectGraphData();
     this.syncGraphRuntimeState(graphData);
+    this.markGraphVisibilityDirty();
 
     if (this.searchSelectedNodeId && !this.nodeById.has(this.searchSelectedNodeId)) {
       this.searchSelectedNodeId = null;
