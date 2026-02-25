@@ -79,6 +79,7 @@ class GraphFrontierView extends ItemView {
     this.dragMovedDistance = 0;
     this.sidePanelOpen = true;
     this.sideControls = new Map();
+    this.sidePanelSectionState = {};
     this.groupEditorRows = [];
     this.draggingGroupRow = null;
     this.blacklistEditorRows = [];
@@ -267,26 +268,36 @@ class GraphFrontierView extends ItemView {
     const body = this.sidePanelEl.createDiv({ cls: 'graphfrontier-sidepanel-body' });
     if (!this.sidePanelOpen) return;
 
-    this.buildFindSection(body);
+    const searchSection = this.createSidePanelSection(body, {
+      id: 'search',
+      title: 'Search',
+      openByDefault: true,
+    });
+    this.buildFindSection(searchSection);
 
-    this.addSideToggle(body, 'Show grid', 'show_grid', 'render', {
+    const displaySection = this.createSidePanelSection(body, {
+      id: 'display',
+      title: 'Display',
+      openByDefault: true,
+    });
+    this.addSideToggle(displaySection, 'Show grid', 'show_grid', 'render', {
       hint: 'Show or hide background grid in graph area',
     });
-    this.addSideToggle(body, 'Existing files only', 'existing_files_only', 'data', {
+    this.addSideToggle(displaySection, 'Existing files only', 'existing_files_only', 'data', {
       hint: 'Show only files that currently exist in vault',
     });
-    this.addSideToggle(body, 'Show orphans', 'hide_orphans', 'data', {
+    this.addSideToggle(displaySection, 'Show orphans', 'hide_orphans', 'data', {
       inverted: true,
       hint: 'Show nodes without links (orphans)',
     });
-    this.addSideToggle(body, 'Show attachments', 'hide_attachments', 'data', {
+    this.addSideToggle(displaySection, 'Show attachments', 'hide_attachments', 'data', {
       inverted: true,
       rebuildPanelOnChange: true,
       hint: 'Show non-markdown files as attachment nodes',
     });
     if (!this.plugin.data.settings.hide_attachments) {
       this.addSideSlider(
-        body,
+        displaySection,
         'Attachment size',
         'attachment_size_multiplier',
         0.1,
@@ -298,7 +309,7 @@ class GraphFrontierView extends ItemView {
         }
       );
       this.addSideSlider(
-        body,
+        displaySection,
         'Attachment link distance',
         'attachment_link_distance_multiplier',
         1,
@@ -310,38 +321,42 @@ class GraphFrontierView extends ItemView {
         }
       );
     }
-    body.createDiv({ cls: 'graphfrontier-sidepanel-separator' });
 
-    this.addSideSlider(body, 'Grid step', 'grid_step', 5, 50, 5, 'render', {
+    this.addSideSlider(displaySection, 'Grid step', 'grid_step', 5, 50, 5, 'render', {
       hint: 'Grid cell size in world coordinates',
     });
-    this.addSideSlider(body, 'Node size', 'node_size_scale', 0.1, 2, 0.01, 'render', {
+    this.addSideSlider(displaySection, 'Node size', 'node_size_scale', 0.1, 2, 0.01, 'render', {
       hint: 'Visual node radius scale',
     });
-    this.addSideSlider(body, 'Edge width', 'edge_width_scale', 0.01, 1, 0.01, 'render', {
+    this.addSideSlider(displaySection, 'Edge width', 'edge_width_scale', 0.01, 1, 0.01, 'render', {
       hint: 'Visual thickness of regular edges',
     });
-    this.addSideSlider(body, 'Painted edge width', 'painted_edge_width', 0.01, 1, 0.01, 'render', {
+    this.addSideSlider(displaySection, 'Painted edge width', 'painted_edge_width', 0.01, 1, 0.01, 'render', {
       hint: 'Visual thickness for painted edges only',
     });
-    this.addSideSlider(body, 'Text zoom', 'label_zoom_steps', 1, 20, 1, 'render', {
+    this.addSideSlider(displaySection, 'Text zoom', 'label_zoom_steps', 1, 20, 1, 'render', {
       hint: 'How far labels stay visible when zooming out',
     });
-    this.addSideSlider(body, 'Text size', 'label_font_size', 5, 20, 1, 'render', {
+    this.addSideSlider(displaySection, 'Text size', 'label_font_size', 5, 20, 1, 'render', {
       hint: 'Base font size for node labels',
     });
-    this.addSideSlider(body, 'Hover dimming', 'hover_dim_strength', 0, 100, 1, 'render', {
+    this.addSideSlider(displaySection, 'Hover dimming', 'hover_dim_strength', 0, 100, 1, 'render', {
       hint: 'How strongly non-focused nodes/edges are dimmed',
     });
-    body.createDiv({ cls: 'graphfrontier-sidepanel-separator' });
-    this.addSideSlider(body, 'Link strength', 'base_link_strength', 1, 100, 1, 'render', {
+
+    const physicsSection = this.createSidePanelSection(body, {
+      id: 'physics',
+      title: 'Physics',
+      openByDefault: true,
+    });
+    this.addSideSlider(physicsSection, 'Link strength', 'base_link_strength', 1, 100, 1, 'render', {
       hint: 'Spring force for graph links',
     });
-    this.addSideSlider(body, 'Link distance', 'link_distance', 1, 50, 1, 'render', {
+    this.addSideSlider(physicsSection, 'Link distance', 'link_distance', 1, 50, 1, 'render', {
       hint: 'Target distance for regular links',
     });
     this.addSideSlider(
-      body,
+      physicsSection,
       'Strong pull x',
       'strong_pull_multiplier',
       NODE_MULTIPLIER_MIN,
@@ -352,34 +367,90 @@ class GraphFrontierView extends ItemView {
         hint: 'Multiplier used by Strong pull command',
       }
     );
-    this.addSideSlider(body, 'Orbit distance', 'orbit_distance', 1, 100, 1, 'render', {
+    this.addSideSlider(physicsSection, 'Orbit distance', 'orbit_distance', 1, 100, 1, 'render', {
       hint: 'Desired spacing between nodes pinned to same orbit',
     });
-    this.addSideSlider(body, 'Repel strength', 'repel_strength', 0, 100, 1, 'render', {
+    this.addSideSlider(physicsSection, 'Repel strength', 'repel_strength', 0, 100, 1, 'render', {
       hint: 'Repulsion force between nodes',
     });
-    this.addSideSlider(body, 'Repel radius', 'repel_radius', 20, 500, 5, 'render', {
+    this.addSideSlider(physicsSection, 'Repel radius', 'repel_radius', 20, 500, 5, 'render', {
       hint: 'Repulsion cutoff radius for node-to-node interactions',
     });
-    this.addSideSlider(body, 'Center strength', 'center_strength', 1, 100, 1, 'render', {
+    this.addSideSlider(physicsSection, 'Center strength', 'center_strength', 1, 100, 1, 'render', {
       hint: 'How strongly free nodes are attracted to layout center',
     });
-    this.addSideSlider(body, 'Damping', 'damping', 0.01, 0.9, 0.01, 'render', {
+    this.addSideSlider(physicsSection, 'Damping', 'damping', 0.01, 0.9, 0.01, 'render', {
       hint: 'Speed damping per frame; higher means faster stop',
     });
 
-    this.buildGroupEditorSection(body);
-    this.buildQueryRuleEditorSection(body, {
+    const groupsSection = this.createSidePanelSection(body, {
+      id: 'groups',
+      title: 'Groups',
+      openByDefault: true,
+    });
+    this.buildGroupEditorSection(groupsSection);
+
+    const listsSection = this.createSidePanelSection(body, {
+      id: 'lists',
+      title: 'Blacklist / Whitelist',
+      openByDefault: true,
+    });
+    this.buildQueryRuleEditorSection(listsSection, {
       title: 'Blacklist',
       key: 'blacklist',
       hint: 'Hide nodes that match query rules',
     });
-    this.buildQueryRuleEditorSection(body, {
+    this.buildQueryRuleEditorSection(listsSection, {
       title: 'Whitelist',
       key: 'whitelist',
       hint: 'Show only nodes that match query rules (after blacklist)',
     });
-    this.addSideSaveLayoutButton(body);
+
+    const layoutSection = this.createSidePanelSection(body, {
+      id: 'layout',
+      title: 'Layout',
+      openByDefault: true,
+    });
+    this.addSideSaveLayoutButton(layoutSection);
+  }
+
+  createSidePanelSection(parentEl, options = {}) {
+    const sectionId = String(options.id || '')
+      .trim()
+      .toLowerCase();
+    const titleText = String(options.title || '').trim() || 'Section';
+    const openByDefault = options.openByDefault !== false;
+    const hasSavedState = sectionId
+      ? Object.prototype.hasOwnProperty.call(this.sidePanelSectionState, sectionId)
+      : false;
+    let isOpen = hasSavedState ? !!this.sidePanelSectionState[sectionId] : openByDefault;
+
+    const section = parentEl.createDiv({ cls: 'graphfrontier-sidepanel-section' });
+    const toggleBtn = section.createEl('button', {
+      cls: 'graphfrontier-sidepanel-section-toggle',
+      text: titleText,
+      attr: {
+        type: 'button',
+        'aria-label': `Toggle ${titleText}`,
+      },
+    });
+    const content = section.createDiv({ cls: 'graphfrontier-sidepanel-section-content' });
+
+    const applyOpenState = (nextOpen) => {
+      isOpen = !!nextOpen;
+      section.toggleClass('is-open', isOpen);
+      toggleBtn.toggleClass('is-open', isOpen);
+      toggleBtn.setAttr('aria-expanded', isOpen ? 'true' : 'false');
+      if (sectionId) this.sidePanelSectionState[sectionId] = isOpen;
+    };
+
+    applyOpenState(isOpen);
+    this.registerDomEvent(toggleBtn, 'click', (event) => {
+      event.preventDefault();
+      applyOpenState(!isOpen);
+    });
+
+    return content;
   }
 
   addSideToggle(parentEl, label, key, refreshMode, options = {}) {

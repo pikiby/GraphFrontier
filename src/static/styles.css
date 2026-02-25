@@ -148,6 +148,98 @@
   grid-template-columns: 1fr 90px 44px;
 }
 
+.graphfrontier-sidepanel-section {
+  margin-top: 8px;
+}
+
+.graphfrontier-sidepanel-section:first-child {
+  margin-top: 0;
+}
+
+.graphfrontier-sidepanel-section-toggle {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-height: 14px;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: var(--text-muted) !important;
+  font-size: 11px;
+  line-height: 1;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.graphfrontier-sidepanel-section-toggle::before {
+  content: '▸';
+  font-size: 10px;
+  color: var(--text-faint);
+  transition: transform 120ms ease;
+}
+
+.graphfrontier-sidepanel-section-toggle.is-open::before {
+  transform: rotate(90deg);
+}
+
+.graphfrontier-sidepanel-section-toggle::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-left: 6px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.graphfrontier-sidepanel-section-toggle:hover,
+.graphfrontier-sidepanel-section-toggle:active,
+.graphfrontier-sidepanel-section-toggle:focus,
+.graphfrontier-sidepanel-section-toggle:focus-visible {
+  border: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: var(--text-muted) !important;
+  outline: none !important;
+}
+
+.graphfrontier-sidepanel-section-content {
+  display: none;
+  margin-top: 6px;
+}
+
+.graphfrontier-sidepanel-section.is-open > .graphfrontier-sidepanel-section-content {
+  display: block;
+}
+
+.graphfrontier-sidepanel-section-content .graphfrontier-find {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.graphfrontier-sidepanel-section-content .graphfrontier-sidepanel-actions {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.graphfrontier-sidepanel-section-content .graphfrontier-groups {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.graphfrontier-sidepanel-section-content .graphfrontier-groups:first-child {
+  margin-top: 0;
+}
+
 .graphfrontier-sidepanel-separator {
   height: 1px;
   margin: 6px 0 8px;
