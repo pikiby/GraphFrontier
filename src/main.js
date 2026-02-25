@@ -1158,5 +1158,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const leaf = existingLeaf || this.app.workspace.getLeaf('tab') || this.app.workspace.getLeaf(true);
     await leaf.setViewState({ type: GRAPHFRONTIER_VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
+
+    const view = leaf?.view;
+    if (!view || view.getViewType?.() !== GRAPHFRONTIER_VIEW_TYPE) return;
+    if (typeof view.centerCameraOnActiveFileNode !== 'function') return;
+    if (view.centerCameraOnActiveFileNode()) {
+      view.render?.();
+      view.persistViewState?.();
+    }
   }
 };

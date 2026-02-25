@@ -2221,6 +2221,7 @@ class GraphFrontierView extends ItemView {
 
     if (!keepCamera) {
       this.fitCameraToNodes();
+      this.centerCameraOnActiveFileNode();
     }
 
     this.kickLayoutSearch();
@@ -2500,6 +2501,22 @@ class GraphFrontierView extends ItemView {
     this.cameraTarget.x = this.camera.x;
     this.cameraTarget.y = this.camera.y;
     this.cameraTarget.zoom = this.camera.zoom;
+  }
+
+  // Keep first-open framing close to the user's current note when possible.
+  centerCameraOnActiveFileNode() {
+    const activePath = this.app?.workspace?.getActiveFile?.()?.path;
+    if (!activePath) return false;
+    const activeNode = this.nodeById.get(activePath);
+    if (!activeNode) return false;
+
+    this.camera.x = activeNode.x;
+    this.camera.y = activeNode.y;
+    this.cameraTarget.x = this.camera.x;
+    this.cameraTarget.y = this.camera.y;
+    this.camera.zoom = Math.max(this.camera.zoom, 0.85);
+    this.cameraTarget.zoom = this.camera.zoom;
+    return true;
   }
 
   updateLayoutCenter() {

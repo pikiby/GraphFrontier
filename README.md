@@ -32,9 +32,9 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.6.7/graphfrontier-0.6.7.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.6.8/graphfrontier-0.6.8.zip
 
-1. Download `graphfrontier-0.6.7.zip` from Releases
+1. Download `graphfrontier-0.6.8.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
