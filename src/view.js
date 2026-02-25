@@ -2243,7 +2243,7 @@ class GraphFrontierView extends ItemView {
         try {
           const contentText = await appRef.vault.cachedRead(file);
           nextIndex.set(node.id, String(contentText || '').toLowerCase());
-        } catch (_error) {
+        } catch {
           continue;
         }
       }
