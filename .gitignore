@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+skills/
 
 # OS/editor junk
 .DS_Store
