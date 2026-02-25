@@ -331,9 +331,18 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(displaySection, 'Edge width', 'edge_width_scale', 0.01, 1, 0.01, 'render', {
       hint: 'Visual thickness of regular edges',
     });
-    this.addSideSlider(displaySection, 'Painted edge width', 'painted_edge_width', 0.01, 1, 0.01, 'render', {
-      hint: 'Visual thickness for painted edges only',
-    });
+    this.addSideSlider(
+      displaySection,
+      'Painted edge width',
+      'painted_edge_width',
+      0.01,
+      1,
+      0.01,
+      'render',
+      {
+        hint: 'Visual thickness for painted edges only',
+      }
+    );
     this.addSideSlider(displaySection, 'Text zoom', 'label_zoom_steps', 1, 20, 1, 'render', {
       hint: 'How far labels stay visible when zooming out',
     });
@@ -1338,8 +1347,10 @@ class GraphFrontierView extends ItemView {
     }
 
     if (this.filterVisibilityCache.parsedRulesSignature !== ruleSignature) {
-      this.filterVisibilityCache.parsedBlacklistRules = this.getCompleteQueryRulesByKey('blacklist');
-      this.filterVisibilityCache.parsedWhitelistRules = this.getCompleteQueryRulesByKey('whitelist');
+      this.filterVisibilityCache.parsedBlacklistRules =
+        this.getCompleteQueryRulesByKey('blacklist');
+      this.filterVisibilityCache.parsedWhitelistRules =
+        this.getCompleteQueryRulesByKey('whitelist');
       this.filterVisibilityCache.parsedRulesSignature = ruleSignature;
     }
 
