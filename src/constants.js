@@ -6,6 +6,7 @@ const ZOOM_STEP_FACTOR = 1.12;
 const TWO_PI = Math.PI * 2;
 
 const DEFAULT_DATA = {
+  active_layout_name: 'data.json',
   pins: {},
   orbit_pins: {},
   saved_positions: {},

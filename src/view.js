@@ -95,6 +95,12 @@ class GraphFrontierView extends ItemView {
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
     this.searchSuggestSuppressUntilMs = 0;
+    this.layoutFileSearchInputValue = this.plugin.getActiveLayoutFileName();
+    this.layoutFileSelectedName = this.layoutFileSearchInputValue;
+    this.layoutFileSearchInputEl = null;
+    this.layoutFileSearchClearButtonEl = null;
+    this.layoutFileSuggestSuppressUntilMs = 0;
+    this.layoutFileSuggestRequestToken = 0;
     this.contentSearchIndex = new Map();
     this.contentSearchBuildToken = 0;
     this.focusNodeId = null;
@@ -185,6 +191,12 @@ class GraphFrontierView extends ItemView {
     this.plugin.data.view_state.pan_x = this.cameraTarget.x;
     this.plugin.data.view_state.pan_y = this.cameraTarget.y;
     this.plugin.data.view_state.zoom = this.cameraTarget.zoom;
+
+    const autosaveEnabled = !!this.plugin.data.settings.layout_autosave;
+    if (!autosaveEnabled && this.layoutAutosaveDirty) {
+      this.applySavedLayoutStateDataOnly();
+    }
+
     this.contentEl.removeClass('graphfrontier-host');
     this.clearTouchLongPressTimer();
     this.closeInputSuggestMenu();
@@ -252,6 +264,8 @@ class GraphFrontierView extends ItemView {
     this.searchModeFilterLabelEl = null;
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
+    this.layoutFileSearchInputEl = null;
+    this.layoutFileSearchClearButtonEl = null;
     this.sidePanelEl.toggleClass('is-open', this.sidePanelOpen);
 
     const header = this.sidePanelEl.createDiv({ cls: 'graphfrontier-sidepanel-header' });
@@ -420,6 +434,7 @@ class GraphFrontierView extends ItemView {
       title: 'Layout',
       openByDefault: true,
     });
+    this.addLayoutFileSearchRow(layoutSection);
     this.addSideSaveLayoutButton(layoutSection);
   }
 
@@ -616,6 +631,160 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(loadButton, 'click', async () => {
       await this.loadSavedLayout();
     });
+  }
+
+  addLayoutFileSearchRow(parentEl) {
+    this.syncLayoutFileSelectionFromPlugin();
+    const row = parentEl.createDiv({ cls: 'graphfrontier-find-row' });
+    const inputWrap = row.createDiv({
+      cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor',
+    });
+    const inputEl = inputWrap.createEl('input', {
+      cls: 'graphfrontier-find-input',
+      type: 'text',
+      placeholder: 'Select layout file...',
+    });
+    inputEl.value = this.layoutFileSearchInputValue;
+    this.layoutFileSearchInputEl = inputEl;
+
+    const clearButton = inputWrap.createEl('button', {
+      cls: 'graphfrontier-search-inline-clear',
+      text: 'x',
+      attr: { 'aria-label': 'Clear layout selection' },
+    });
+    this.layoutFileSearchClearButtonEl = clearButton;
+
+    const openLayoutSuggestionPopup = async () => {
+      if (Date.now() < this.layoutFileSuggestSuppressUntilMs) return;
+      const requestToken = ++this.layoutFileSuggestRequestToken;
+      const suggestionPack = await this.getLayoutFileSuggestionPack(String(inputEl.value || ''));
+      if (requestToken !== this.layoutFileSuggestRequestToken) return;
+      const items = Array.isArray(suggestionPack?.items) ? suggestionPack.items : [];
+      if (items.length <= 0) {
+        this.closeInputSuggestMenu();
+        return;
+      }
+      this.showInputSuggestMenu(
+        inputEl,
+        items,
+        (selectedText) => {
+          void this.selectActiveLayoutFileByName(String(selectedText || ''));
+        },
+        { title: suggestionPack?.menuTitle || '' }
+      );
+    };
+
+    this.registerDomEvent(inputEl, 'input', () => {
+      this.layoutFileSearchInputValue = String(inputEl.value || '');
+      this.layoutFileSelectedName = '';
+      this.syncLayoutFileSearchClearButtonVisibility();
+      openLayoutSuggestionPopup();
+    });
+    this.registerDomEvent(inputEl, 'keydown', (event) => {
+      const hasActiveMenu =
+        !!this.inputSuggestMenu && this.inputSuggestInputEl && this.inputSuggestInputEl === inputEl;
+      if (hasActiveMenu && event.key === 'ArrowDown') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'ArrowUp') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(-1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'Escape') {
+        event.preventDefault();
+        this.closeInputSuggestMenu();
+        return;
+      }
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      if (hasActiveMenu && this.selectInputSuggestActive()) return;
+      this.closeInputSuggestMenu();
+    });
+    this.registerDomEvent(inputEl, 'blur', () => {
+      if (!String(inputEl.value || '').trim()) {
+        this.syncLayoutFileSelectionFromPlugin();
+      }
+      this.contentEl.win.setTimeout(() => {
+        if (!this.inputSuggestInputEl || this.inputSuggestInputEl !== inputEl) return;
+        this.closeInputSuggestMenu();
+      }, 0);
+    });
+    this.registerDomEvent(inputEl, 'click', () => {
+      openLayoutSuggestionPopup();
+    });
+    this.registerDomEvent(inputEl, 'focus', () => {
+      openLayoutSuggestionPopup();
+    });
+    this.registerDomEvent(clearButton, 'click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.layoutFileSuggestSuppressUntilMs = Date.now() + 220;
+      this.syncLayoutFileSelectionFromPlugin();
+      this.syncLayoutFileSearchClearButtonVisibility();
+      this.closeInputSuggestMenu();
+      inputEl.focus();
+    });
+
+    this.syncLayoutFileSearchClearButtonVisibility();
+  }
+
+  syncLayoutFileSearchClearButtonVisibility() {
+    if (!this.layoutFileSearchClearButtonEl) return;
+    const textValue = this.layoutFileSearchInputEl
+      ? this.layoutFileSearchInputEl.value
+      : this.layoutFileSearchInputValue;
+    const isVisible = String(textValue || '').trim().length > 0;
+    this.layoutFileSearchClearButtonEl.toggleClass('is-visible', isVisible);
+  }
+
+  syncLayoutFileSelectionFromPlugin() {
+    const activeLayoutName = this.plugin.getActiveLayoutFileName();
+    this.layoutFileSearchInputValue = activeLayoutName;
+    this.layoutFileSelectedName = activeLayoutName;
+    if (this.layoutFileSearchInputEl) this.layoutFileSearchInputEl.value = activeLayoutName;
+    this.syncLayoutFileSearchClearButtonVisibility();
+  }
+
+  async getLayoutFileSuggestionPack(rawQueryText) {
+    const listPath = this.plugin.getLayoutsFolderRelativePath();
+    const names = await this.plugin.listLayoutFileNames();
+
+    const queryText = String(rawQueryText || '')
+      .trim()
+      .toLowerCase();
+    const filteredNames =
+      queryText.length <= 0
+        ? names
+        : names.filter((fileName) => fileName.toLowerCase().includes(queryText));
+    const items = filteredNames.map((fileName) => ({
+      title: fileName,
+      value: fileName,
+      description: listPath,
+      kind: 'layout-file',
+    }));
+    return {
+      menuTitle: 'Layouts',
+      items,
+    };
+  }
+
+  async selectActiveLayoutFileByName(layoutFileName) {
+    const selectedName = String(layoutFileName || '').trim();
+    if (!selectedName) return;
+    const switched = await this.plugin.setActiveLayoutFile(selectedName, { loadFromFile: true });
+    if (!switched) {
+      new Notice('Layout file not found');
+      this.syncLayoutFileSelectionFromPlugin();
+      return;
+    }
+    this.syncLayoutFileSelectionFromPlugin();
+    this.plugin.refreshAllViews({ forceSavedPositions: true });
+    this.buildSidePanel();
+    this.kickLayoutSearch();
+    this.plugin.renderAllViews();
   }
 
   // Search block: find/filter mode controls, source picker (name/content), and node suggestions.
@@ -2205,8 +2374,9 @@ class GraphFrontierView extends ItemView {
   // In-memory graph rebuild: load nodes/edges, restore positions, and recompute neighbors.
   refreshFromVault(opts = {}) {
     const keepCamera = !!opts.keepCamera;
+    const forceSavedPositions = !!opts.forceSavedPositions;
     const graphData = this.plugin.collectGraphData();
-    this.syncGraphRuntimeState(graphData);
+    this.syncGraphRuntimeState(graphData, { forceSavedPositions });
     this.markGraphVisibilityDirty();
 
     if (this.searchSelectedNodeId && !this.nodeById.has(this.searchSelectedNodeId)) {
@@ -2262,9 +2432,13 @@ class GraphFrontierView extends ItemView {
    * Runtime graph-state rebuild: create nodes, rebuild edges/neighbors, and restore constrained positions.
    * ============================================================
    */
-  syncGraphRuntimeState(graphData) {
+  syncGraphRuntimeState(graphData, options = {}) {
     const oldNodes = this.nodeById;
-    const { nextNodes, nextNodeById } = this.buildNextNodesFromGraphData(graphData.nodes, oldNodes);
+    const { nextNodes, nextNodeById } = this.buildNextNodesFromGraphData(
+      graphData.nodes,
+      oldNodes,
+      options
+    );
     const { nextEdges, nextNeighborsById } = this.buildNextEdgesAndNeighbors(
       graphData.edges,
       nextNodeById,
@@ -2282,14 +2456,14 @@ class GraphFrontierView extends ItemView {
     this.applyAutoAttachmentOrbitPositions();
   }
 
-  buildNextNodesFromGraphData(rawNodes, oldNodes) {
+  buildNextNodesFromGraphData(rawNodes, oldNodes, options = {}) {
     const nextNodes = [];
     const nextNodeById = new Map();
     let index = 0;
 
     for (const rawNode of rawNodes) {
       const oldNode = oldNodes.get(rawNode.id);
-      const node = this.createRuntimeNode(rawNode, oldNode, index);
+      const node = this.createRuntimeNode(rawNode, oldNode, index, options);
       nextNodes.push(node);
       nextNodeById.set(node.id, node);
       index += 1;
@@ -2298,7 +2472,8 @@ class GraphFrontierView extends ItemView {
     return { nextNodes, nextNodeById };
   }
 
-  createRuntimeNode(rawNode, oldNode, index) {
+  createRuntimeNode(rawNode, oldNode, index, options = {}) {
+    const forceSavedPositions = !!options.forceSavedPositions;
     const pin = this.plugin.getPin(rawNode.id);
     const savedPosition = this.plugin.data.saved_positions[rawNode.id];
 
@@ -2310,6 +2485,16 @@ class GraphFrontierView extends ItemView {
     if (pin) {
       x = pin.x;
       y = pin.y;
+    } else if (
+      forceSavedPositions &&
+      savedPosition &&
+      Number.isFinite(savedPosition.x) &&
+      Number.isFinite(savedPosition.y)
+    ) {
+      x = Number(savedPosition.x);
+      y = Number(savedPosition.y);
+      vx = 0;
+      vy = 0;
     } else if (oldNode) {
       x = oldNode.x;
       y = oldNode.y;
@@ -3947,11 +4132,27 @@ class GraphFrontierView extends ItemView {
     this.layoutAutosaveDirty = false;
     this.layoutStillFrames = 0;
     this.plugin.schedulePersist();
+    await this.plugin.persistActiveLayoutFile();
     if (!silent) new Notice(`Layout saved: ${this.nodes.length} nodes`);
   }
 
   async loadSavedLayout(options = {}) {
     const silent = !!options.silent;
+    const loaded = this.applySavedLayoutStateDataOnly();
+    if (!loaded) {
+      if (!silent) new Notice('No saved layout');
+      return;
+    }
+
+    this.refreshFromVault({ keepCamera: true, forceSavedPositions: true });
+    this.buildSidePanel();
+    this.plugin.schedulePersist();
+    this.kickLayoutSearch();
+    this.plugin.renderAllViews();
+    if (!silent) new Notice('Layout loaded');
+  }
+
+  applySavedLayoutStateDataOnly() {
     const savedPositions = this.plugin.data.saved_positions || {};
     const savedSettings = this.plugin.data.saved_layout_settings || {};
     const savedPins = this.plugin.data.saved_layout_pins || {};
@@ -3962,10 +4163,7 @@ class GraphFrontierView extends ItemView {
       Object.keys(savedSettings).length > 0 ||
       Object.keys(savedPins).length > 0 ||
       Object.keys(savedOrbitPins).length > 0;
-    if (!hasSomethingToLoad) {
-      if (!silent) new Notice('No saved layout');
-      return;
-    }
+    if (!hasSomethingToLoad) return false;
 
     this.plugin.data.settings = Object.assign({}, this.plugin.data.settings, savedSettings);
     this.plugin.data.pins = {};
@@ -3993,14 +4191,10 @@ class GraphFrontierView extends ItemView {
       };
       delete this.plugin.data.pins[nodeId];
     }
-
     this.plugin.data = this.plugin.normalizeData(this.plugin.data);
-    this.refreshFromVault({ keepCamera: true });
-    this.buildSidePanel();
-    this.plugin.schedulePersist();
-    this.kickLayoutSearch();
-    this.plugin.renderAllViews();
-    if (!silent) new Notice('Layout loaded');
+    this.layoutAutosaveDirty = false;
+    this.layoutStillFrames = 0;
+    return true;
   }
 
   // Grid occupancy utilities for collision-safe snapping.
