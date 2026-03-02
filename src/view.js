@@ -577,7 +577,9 @@ class GraphFrontierView extends ItemView {
       { value: 'meta', text: 'Meta' },
       { value: 'alt', text: 'Alt' },
     ];
-    const modifierTextByValue = new Map(modifierOptions.map((optionMeta) => [optionMeta.value, optionMeta.text]));
+    const modifierTextByValue = new Map(
+      modifierOptions.map((optionMeta) => [optionMeta.value, optionMeta.text])
+    );
     const normalize = (value) => this.normalizeModifierSetting(value, 'none');
     const updateButton = (value) => {
       const normalized = normalize(value);
@@ -4705,7 +4707,9 @@ class GraphFrontierView extends ItemView {
   }
 
   formatCopyList(items) {
-    const values = Array.isArray(items) ? items.filter((item) => String(item || '').length > 0) : [];
+    const values = Array.isArray(items)
+      ? items.filter((item) => String(item || '').length > 0)
+      : [];
     if (values.length <= 0) return '';
     return values
       .map((value, index) => (index < values.length - 1 ? `${value},` : String(value)))
