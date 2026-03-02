@@ -491,8 +491,9 @@ function drawNodes(view, ctx) {
             : searchDimAlpha
           : 1;
 
-    let fillColor = '#7aa2f7';
-    if (groupColor) fillColor = groupColor;
+    const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
+    let fillColor = isAttachmentNode ? '#f2e7a0' : '#7aa2f7';
+    if (groupColor && !isAttachmentNode) fillColor = groupColor;
     if (isClickFlash) fillColor = '#ffffff';
 
     ctx.save();
@@ -518,7 +519,6 @@ function drawNodes(view, ctx) {
     const labelAlphaRaw = (zoom - labelMinZoom) / labelFadeRange;
     const labelAlphaBase = Math.max(0, Math.min(1, labelAlphaRaw));
     const hoverLabelBoost = hoverVisualProgress;
-    const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
     const labelAlpha = isAttachmentNode ? 0 : Math.max(labelAlphaBase, hoverLabelBoost);
     if (labelAlpha > 0.01) {
       const zoomedFontSize = Math.max(1, labelFontSize * zoom);

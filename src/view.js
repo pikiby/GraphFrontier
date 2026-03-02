@@ -312,11 +312,11 @@ class GraphFrontierView extends ItemView {
     if (!this.plugin.data.settings.hide_attachments) {
       this.addSideToggle(
         displaySection,
-        'Attachments on orbits',
+        'Attachments no-physics',
         'attachments_on_orbits',
         'render',
         {
-          hint: 'Automatically place free attachments on orbits around linked nodes',
+          hint: 'Attachments interact only with their main node and other attachments',
           onChange: () => {
             this.kickLayoutSearch();
           },

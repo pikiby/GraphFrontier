@@ -89,6 +89,7 @@ function stepSimulation(view) {
   updateLayoutCenter(view, nodes, localDegreeById);
 
   const settings = view.plugin.getSettings();
+  const attachmentIsolationMode = settings.attachments_on_orbits !== false;
   const nowMs = Date.now();
   const layoutSearchMs = 3000;
   const elapsedSearchMs = nowMs - view.layoutKickAtMs;
@@ -176,6 +177,9 @@ function stepSimulation(view) {
     view,
     hasPhysicsFilter ? filterVisibleNodeIds : null
   );
+  const attachmentMainById = attachmentIsolationMode
+    ? buildAttachmentMainNodeMap(view, nodes, hasPhysicsFilter ? filterVisibleNodeIds : null)
+    : new Map();
   const autoAttachmentOrbitNodeIds = new Set(autoAttachmentOrbitById.keys());
   const freeOrphanNodes = [];
   const attachmentOnlyAnchorNodes = [];
@@ -184,7 +188,9 @@ function stepSimulation(view) {
   for (const node of nodes) {
     const nodeDegree = getNodeDegree(node);
     if (autoAttachmentOrbitNodeIds.has(node.id)) continue;
-    if (nodeDegree === 0) freeOrphanNodes.push(node);
+    if (nodeDegree === 0) {
+      if (!attachmentIsolationMode || !node?.meta?.isAttachment) freeOrphanNodes.push(node);
+    }
     if (nodeDegree > 0 && !node?.meta?.isAttachment) {
       const neighborIds = view.neighborsById.get(node.id);
       if (!neighborIds || neighborIds.size === 0) {
@@ -218,6 +224,16 @@ function stepSimulation(view) {
       const nodeA = nodes[indexA];
       for (let indexB = indexA + 1; indexB < nodeCount; indexB += 1) {
         const nodeB = nodes[indexB];
+        if (attachmentIsolationMode) {
+          const nodeAIsAttachment = !!nodeA?.meta?.isAttachment;
+          const nodeBIsAttachment = !!nodeB?.meta?.isAttachment;
+          if (nodeAIsAttachment !== nodeBIsAttachment) continue;
+          if (nodeAIsAttachment && nodeBIsAttachment) {
+            const mainA = attachmentMainById.get(nodeA.id) || '';
+            const mainB = attachmentMainById.get(nodeB.id) || '';
+            if (!mainA || !mainB || mainA !== mainB) continue;
+          }
+        }
         if (autoAttachmentOrbitNodeIds.has(nodeA.id) || autoAttachmentOrbitNodeIds.has(nodeB.id))
           continue;
         if (getNodeDegree(nodeA) === 0 || getNodeDegree(nodeB) === 0) continue;
@@ -427,6 +443,15 @@ function stepSimulation(view) {
       const sourceNode = view.nodeById.get(edge.source);
       const targetNode = view.nodeById.get(edge.target);
       if (!sourceNode || !targetNode) continue;
+      const sourceIsAttachment = !!sourceNode.meta?.isAttachment;
+      const targetIsAttachment = !!targetNode.meta?.isAttachment;
+      if (attachmentIsolationMode && (sourceIsAttachment || targetIsAttachment)) {
+        if (sourceIsAttachment && targetIsAttachment) continue;
+        const attachmentNode = sourceIsAttachment ? sourceNode : targetNode;
+        const regularNode = sourceIsAttachment ? targetNode : sourceNode;
+        const mainNodeId = attachmentMainById.get(attachmentNode.id) || '';
+        if (!mainNodeId || regularNode.id !== mainNodeId) continue;
+      }
       const sourceIsOrbitPinned = orbitNodeIds.has(sourceNode.id);
       const targetIsOrbitPinned = orbitNodeIds.has(targetNode.id);
       // Orbit-pinned nodes must remain fixed in place, but their links should still
@@ -445,9 +470,7 @@ function stepSimulation(view) {
       const sourceMultiplier = view.plugin.getNodeMultiplier(sourceNode.id);
       const targetMultiplier = view.plugin.getNodeMultiplier(targetNode.id);
       const edgeMultiplier = Math.max(sourceMultiplier, targetMultiplier);
-      const hasAttachmentInEdge = !!(
-        sourceNode.meta?.isAttachment || targetNode.meta?.isAttachment
-      );
+      const hasAttachmentInEdge = sourceIsAttachment || targetIsAttachment;
       const edgeTargetDistance = hasAttachmentInEdge ? attachmentLinkDistance : linkDistance;
       const stretch = dist - edgeTargetDistance;
       // Temporary test mode: disable degree-based normalization for link force.
@@ -460,11 +483,17 @@ function stepSimulation(view) {
 
       const sourceAccel = accelById.get(sourceNode.id);
       const targetAccel = accelById.get(targetNode.id);
-      if (!sourceIsOrbitPinned) {
+      let sourceReceivesForce = !sourceIsOrbitPinned;
+      let targetReceivesForce = !targetIsOrbitPinned;
+      if (attachmentIsolationMode && sourceIsAttachment !== targetIsAttachment) {
+        sourceReceivesForce = sourceReceivesForce && sourceIsAttachment;
+        targetReceivesForce = targetReceivesForce && targetIsAttachment;
+      }
+      if (sourceReceivesForce) {
         sourceAccel.ax += fx / sourceMass;
         sourceAccel.ay += fy / sourceMass;
       }
-      if (!targetIsOrbitPinned) {
+      if (targetReceivesForce) {
         targetAccel.ax -= fx / targetMass;
         targetAccel.ay -= fy / targetMass;
       }
@@ -477,7 +506,15 @@ function stepSimulation(view) {
     const autoAttachmentOrbit = autoAttachmentOrbitById.get(node.id) || null;
     const accel = accelById.get(node.id) || { ax: 0, ay: 0 };
 
-    if (hasCenter && !pin && !orbitPin && !autoAttachmentOrbit && node.id !== view.dragNodeId) {
+    const isAttachmentNode = !!node?.meta?.isAttachment;
+    if (
+      hasCenter &&
+      !pin &&
+      !orbitPin &&
+      !autoAttachmentOrbit &&
+      node.id !== view.dragNodeId &&
+      !(attachmentIsolationMode && isAttachmentNode)
+    ) {
       const nodeCenterScale = getNodeDegree(node) === 0 ? orphanCenterScale : 1;
       const centerFx = (0 - node.x) * centerStrength * nodeCenterScale;
       const centerFy = (0 - node.y) * centerStrength * nodeCenterScale;
@@ -609,75 +646,42 @@ function getOrbitRadiusForAnchor(plugin, orbitNodeCount) {
   return getOrbitRadiusBySpacing(plugin, orbitNodeCount, linkDistance);
 }
 
-// Build virtual orbit constraints for free attachment nodes around their nearest anchor nodes.
+// Auto attachment orbits are disabled in no-physics mode redesign.
+// Keep function for compatibility with existing call sites.
 function buildAttachmentAutoOrbitMap(view, activeNodeIds = null) {
+  void view;
+  void activeNodeIds;
   const autoOrbitMap = new Map();
-  const settings = view.plugin.getSettings();
-  if (settings.attachments_on_orbits === false) return autoOrbitMap;
-  const attachmentLinkDistance = view.plugin.clampNumber(
-    settings.attachment_link_distance_multiplier,
-    1,
-    100,
-    DEFAULT_DATA.settings.attachment_link_distance_multiplier
-  );
-
-  const attachmentNodeIdsByAnchor = new Map();
-  for (const node of view.nodes) {
-    if (activeNodeIds && !activeNodeIds.has(node.id)) continue;
-    if (!node?.meta?.isAttachment) continue;
-    if (view.plugin.isPinned(node.id) || view.plugin.isOrbitPinned(node.id)) continue;
-
-    const neighborIds = view.neighborsById.get(node.id);
-    if (!neighborIds || neighborIds.size === 0) continue;
-
-    let anchorId = null;
-    for (const candidateId of neighborIds) {
-      if (activeNodeIds && !activeNodeIds.has(candidateId)) continue;
-      const candidateNode = view.nodeById.get(candidateId);
-      if (!candidateNode) continue;
-      if (!candidateNode.meta?.isAttachment) {
-        anchorId = candidateNode.id;
-        break;
-      }
-    }
-    if (!anchorId) {
-      for (const candidateId of neighborIds) {
-        if (activeNodeIds && !activeNodeIds.has(candidateId)) continue;
-        if (view.nodeById.has(candidateId)) {
-          anchorId = candidateId;
-          break;
-        }
-      }
-    }
-    if (!anchorId || !view.nodeById.has(anchorId)) continue;
-
-    if (!attachmentNodeIdsByAnchor.has(anchorId)) attachmentNodeIdsByAnchor.set(anchorId, []);
-    attachmentNodeIdsByAnchor.get(anchorId).push(node.id);
-  }
-
-  for (const [anchorId, attachmentNodeIds] of attachmentNodeIdsByAnchor.entries()) {
-    const sortedAttachmentNodeIds = attachmentNodeIds
-      .slice()
-      .sort((leftId, rightId) => leftId.localeCompare(rightId));
-    const attachmentCount = Math.max(1, sortedAttachmentNodeIds.length);
-    const attachmentOrbitRadius = getOrbitRadiusBySpacing(
-      view.plugin,
-      attachmentCount,
-      attachmentLinkDistance
-    );
-
-    for (let index = 0; index < sortedAttachmentNodeIds.length; index++) {
-      const nodeId = sortedAttachmentNodeIds[index];
-      const angle = (Math.PI * 2 * index) / sortedAttachmentNodeIds.length;
-      autoOrbitMap.set(nodeId, {
-        anchor_id: anchorId,
-        radius: attachmentOrbitRadius,
-        angle,
-      });
-    }
-  }
-
   return autoOrbitMap;
+}
+
+function buildAttachmentMainNodeMap(view, nodes, activeNodeIds = null) {
+  const mainByAttachmentId = new Map();
+  for (const node of nodes) {
+    if (!node?.meta?.isAttachment) continue;
+    const anchorId = resolveAttachmentMainNodeId(view, node.id, activeNodeIds);
+    if (!anchorId) continue;
+    mainByAttachmentId.set(node.id, anchorId);
+  }
+  return mainByAttachmentId;
+}
+
+function resolveAttachmentMainNodeId(view, attachmentNodeId, activeNodeIds = null) {
+  const neighborIds = view.neighborsById.get(attachmentNodeId);
+  if (!neighborIds || neighborIds.size === 0) return '';
+
+  let anchorId = '';
+  for (const candidateId of neighborIds) {
+    if (activeNodeIds && !activeNodeIds.has(candidateId)) continue;
+    const candidateNode = view.nodeById.get(candidateId);
+    if (!candidateNode) continue;
+    if (!candidateNode.meta?.isAttachment) {
+      anchorId = candidateNode.id;
+      break;
+    }
+  }
+  if (!anchorId || !view.nodeById.has(anchorId)) return '';
+  return anchorId;
 }
 
 // Recompute persisted orbit radii and reposition orbit-pinned nodes after settings changes.
