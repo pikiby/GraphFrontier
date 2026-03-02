@@ -37,6 +37,9 @@ function registerGraphFrontierCommands(plugin) {
     { id: 'graphfrontier-pin-to-grid-under-cursor', name: 'Pin node to grid under cursor', method: 'commandPinToGrid' },
     { id: 'graphfrontier-unpin-node-under-cursor', name: 'Unpin node under cursor', method: 'commandUnpinNode' },
     { id: 'graphfrontier-pin-linked-to-orbit-under-cursor', name: 'Pin linked to orbit under cursor', method: 'commandPinLinkedToOrbit' },
+    { id: 'graphfrontier-toggle-selection-under-cursor', name: 'Toggle selection under cursor', method: 'commandToggleSelectionUnderCursor' },
+    { id: 'graphfrontier-arm-box-selection', name: 'Arm box selection', method: 'commandArmBoxSelection' },
+    { id: 'graphfrontier-clear-selection', name: 'Clear selection', method: 'commandClearSelection' },
     { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor', method: 'commandUnpinLinkedNodes' },
     { id: 'graphfrontier-add-to-search-under-cursor', name: 'Add to search under cursor', method: 'commandAddToSearch' },
     { id: 'graphfrontier-show-local-graph-under-cursor', name: 'Show local graph under cursor', method: 'commandShowLocalGraph' },
@@ -387,6 +390,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.quick_pick_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.quick_pick_modifier)
       ? normalized.settings.quick_pick_modifier
       : DEFAULT_DATA.settings.quick_pick_modifier;
+    normalized.settings.selection_box_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.selection_box_modifier)
+      ? normalized.settings.selection_box_modifier
+      : DEFAULT_DATA.settings.selection_box_modifier;
+    normalized.settings.selection_toggle_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.selection_toggle_modifier)
+      ? normalized.settings.selection_toggle_modifier
+      : DEFAULT_DATA.settings.selection_toggle_modifier;
     normalized.settings.layout_autosave = !!normalized.settings.layout_autosave;
     delete normalized.settings.max_multiplier;
     delete normalized.settings.label_min_zoom;

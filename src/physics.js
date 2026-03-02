@@ -181,6 +181,14 @@ function stepSimulation(view) {
     ? buildAttachmentMainNodeMap(view, nodes, hasPhysicsFilter ? filterVisibleNodeIds : null)
     : new Map();
   const autoAttachmentOrbitNodeIds = new Set(autoAttachmentOrbitById.keys());
+  const activelyDraggedNodeIds = new Set();
+  if (view.dragNodeId) activelyDraggedNodeIds.add(view.dragNodeId);
+  if (view.dragSelectionOffsets instanceof Map) {
+    for (const nodeId of view.dragSelectionOffsets.keys()) {
+      if (!nodeId) continue;
+      activelyDraggedNodeIds.add(nodeId);
+    }
+  }
   const freeOrphanNodes = [];
   const attachmentOnlyAnchorNodes = [];
   const attachmentOnlyAnchorIds = new Set();
@@ -522,7 +530,7 @@ function stepSimulation(view) {
       accel.ay += Math.max(-maxCenterForce, Math.min(maxCenterForce, centerFy));
     }
 
-    if (node.id === view.dragNodeId) {
+    if (activelyDraggedNodeIds.has(node.id)) {
       node.vx = 0;
       node.vy = 0;
       continue;
