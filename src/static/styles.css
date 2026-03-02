@@ -136,6 +136,10 @@
   margin-left: 10px;
 }
 
+.graphfrontier-sidepanel-inline-toggle {
+  margin-left: 0;
+}
+
 .graphfrontier-sidepanel-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -249,6 +253,30 @@
 .graphfrontier-sidepanel-label {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.graphfrontier-sidepanel-select {
+  width: 88px;
+  font-size: 11px;
+  padding: 1px 4px;
+}
+
+.graphfrontier-sidepanel-select.is-compact {
+  width: 66px;
+  font-size: 10px;
+  padding: 0 2px;
+  min-height: 18px !important;
+  height: 18px !important;
+  line-height: 1 !important;
+}
+
+.graphfrontier-sidepanel-row.is-compact {
+  margin: 2px 0;
+  gap: 6px;
+}
+
+.graphfrontier-sidepanel-label.is-compact {
+  font-size: 10px;
 }
 
 .graphfrontier-sidepanel-slider {
@@ -385,6 +413,10 @@
 
 .graphfrontier-find-row {
   display: block;
+}
+
+.graphfrontier-layout-file-row {
+  margin-bottom: 10px;
 }
 
 .graphfrontier-search-mode-toggle {

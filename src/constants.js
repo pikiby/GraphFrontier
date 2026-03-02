@@ -6,6 +6,7 @@ const ZOOM_STEP_FACTOR = 1.12;
 const TWO_PI = Math.PI * 2;
 
 const DEFAULT_DATA = {
+  active_layout_name: 'data.json',
   pins: {},
   orbit_pins: {},
   saved_positions: {},
@@ -24,9 +25,12 @@ const DEFAULT_DATA = {
     show_grid: true,
     hide_orphans: true,
     hide_attachments: true,
+    attachments_on_orbits: true,
     existing_files_only: true,
     search_mode: 'find',
     quick_pick_modifier: 'alt',
+    selection_box_modifier: 'shift',
+    selection_toggle_modifier: 'none',
     node_size_scale: 1,
     edge_width_scale: 0.34,
     painted_edge_width: 0.2,
@@ -73,6 +77,18 @@ const HOTKEY_COMMANDS = [
   {
     id: 'graphfrontier-pin-linked-to-orbit-under-cursor',
     name: 'Pin linked to orbit under cursor',
+  },
+  {
+    id: 'graphfrontier-toggle-selection-under-cursor',
+    name: 'Toggle selection under cursor',
+  },
+  {
+    id: 'graphfrontier-arm-box-selection',
+    name: 'Arm box selection',
+  },
+  {
+    id: 'graphfrontier-clear-selection',
+    name: 'Clear selection',
   },
   { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor' },
   { id: 'graphfrontier-paint-edges-under-cursor', name: 'Paint edges under cursor' },

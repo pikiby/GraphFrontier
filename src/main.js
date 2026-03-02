@@ -37,6 +37,9 @@ function registerGraphFrontierCommands(plugin) {
     { id: 'graphfrontier-pin-to-grid-under-cursor', name: 'Pin node to grid under cursor', method: 'commandPinToGrid' },
     { id: 'graphfrontier-unpin-node-under-cursor', name: 'Unpin node under cursor', method: 'commandUnpinNode' },
     { id: 'graphfrontier-pin-linked-to-orbit-under-cursor', name: 'Pin linked to orbit under cursor', method: 'commandPinLinkedToOrbit' },
+    { id: 'graphfrontier-toggle-selection-under-cursor', name: 'Toggle selection under cursor', method: 'commandToggleSelectionUnderCursor' },
+    { id: 'graphfrontier-arm-box-selection', name: 'Arm box selection', method: 'commandArmBoxSelection' },
+    { id: 'graphfrontier-clear-selection', name: 'Clear selection', method: 'commandClearSelection' },
     { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor', method: 'commandUnpinLinkedNodes' },
     { id: 'graphfrontier-add-to-search-under-cursor', name: 'Add to search under cursor', method: 'commandAddToSearch' },
     { id: 'graphfrontier-show-local-graph-under-cursor', name: 'Show local graph under cursor', method: 'commandShowLocalGraph' },
@@ -156,6 +159,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this.data = this.normalizeData(loadedData);
     this._persistTimer = null;
     this._refreshTimer = null;
+    await this.bootstrapActiveLayoutData();
 
     // UI entry point: ribbon icon opens GraphFrontier view.
     this.addRibbonIcon('orbit', 'Open GraphFrontier', () => this.openOrRevealGraphFrontierView());
@@ -181,6 +185,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   // Persisted-data normalization: sanitize and repair loaded state before use.
   normalizeData(data) {
     const safe = data && typeof data === 'object' ? data : {};
+    const activeLayoutName = this.normalizeLayoutFileName(safe.active_layout_name);
 
     const pins = safe.pins && typeof safe.pins === 'object' ? safe.pins : {};
     const orbitPins = safe.orbit_pins && typeof safe.orbit_pins === 'object' ? safe.orbit_pins : {};
@@ -211,6 +216,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const viewState = safe.view_state && typeof safe.view_state === 'object' ? safe.view_state : {};
 
     const normalized = {
+      active_layout_name: activeLayoutName,
       pins: {},
       orbit_pins: {},
       saved_positions: {},
@@ -384,6 +390,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.quick_pick_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.quick_pick_modifier)
       ? normalized.settings.quick_pick_modifier
       : DEFAULT_DATA.settings.quick_pick_modifier;
+    normalized.settings.selection_box_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.selection_box_modifier)
+      ? normalized.settings.selection_box_modifier
+      : DEFAULT_DATA.settings.selection_box_modifier;
+    normalized.settings.selection_toggle_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.selection_toggle_modifier)
+      ? normalized.settings.selection_toggle_modifier
+      : DEFAULT_DATA.settings.selection_toggle_modifier;
     normalized.settings.layout_autosave = !!normalized.settings.layout_autosave;
     delete normalized.settings.max_multiplier;
     delete normalized.settings.label_min_zoom;
@@ -576,8 +588,146 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   schedulePersist() {
     if (this._persistTimer) window.clearTimeout(this._persistTimer);
     this._persistTimer = window.setTimeout(() => {
-      this.saveData(this.data);
+      void this.persistPluginDataOnly();
     }, 250);
+  }
+
+  getLayoutsFolderRelativePath() {
+    const configDir = String(this.app?.vault?.configDir || '.obsidian').replace(/\/+$/u, '');
+    const pluginId = String(this.manifest?.id || 'graphfrontier').trim() || 'graphfrontier';
+    return `${configDir}/plugins/${pluginId}/layouts`;
+  }
+
+  normalizeLayoutFileName(rawLayoutFileName) {
+    const fallback = String(DEFAULT_DATA.active_layout_name || 'data.json');
+    const rawText = String(rawLayoutFileName || '').trim();
+    if (!rawText) return fallback;
+    const tail = rawText.split(/[\\/]/u).filter(Boolean).pop();
+    let fileName = String(tail || '').trim();
+    if (!fileName) return fallback;
+    fileName = fileName.replace(/[^\w.\- ]/gu, '_').trim();
+    if (!fileName) return fallback;
+    if (!/\.json$/iu.test(fileName)) fileName = `${fileName}.json`;
+    return fileName;
+  }
+
+  getActiveLayoutFileName() {
+    return this.normalizeLayoutFileName(this.data?.active_layout_name);
+  }
+
+  async ensureLayoutsFolder() {
+    const adapter = this.app?.vault?.adapter;
+    if (!adapter || typeof adapter.mkdir !== 'function') return;
+    const folderPath = this.getLayoutsFolderRelativePath();
+    try {
+      await adapter.mkdir(folderPath);
+    } catch {
+      // Folder already exists or adapter does not support this operation.
+    }
+  }
+
+  async listLayoutFileNames() {
+    const adapter = this.app?.vault?.adapter;
+    if (!adapter || typeof adapter.list !== 'function') return [];
+    const folderPath = this.getLayoutsFolderRelativePath();
+    let files = [];
+    try {
+      const listed = await adapter.list(folderPath);
+      files = Array.isArray(listed?.files) ? listed.files : [];
+    } catch {
+      return [];
+    }
+    return files
+      .map((filePath) =>
+        String(filePath || '')
+          .split(/[\\/]/u)
+          .pop()
+      )
+      .filter((fileName) => !!fileName && /\.json$/iu.test(fileName))
+      .sort((leftName, rightName) => leftName.localeCompare(rightName));
+  }
+
+  getLayoutFileRelativePath(layoutFileName) {
+    const fileName = this.normalizeLayoutFileName(layoutFileName);
+    return `${this.getLayoutsFolderRelativePath()}/${fileName}`;
+  }
+
+  async readLayoutFileData(layoutFileName) {
+    const adapter = this.app?.vault?.adapter;
+    if (!adapter || typeof adapter.read !== 'function') return null;
+    const filePath = this.getLayoutFileRelativePath(layoutFileName);
+    try {
+      const rawText = await adapter.read(filePath);
+      const parsed = JSON.parse(String(rawText || '{}'));
+      if (!parsed || typeof parsed !== 'object') return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  async writeLayoutFileData(layoutFileName, dataObject) {
+    const adapter = this.app?.vault?.adapter;
+    if (!adapter || typeof adapter.write !== 'function') return false;
+    await this.ensureLayoutsFolder();
+    const fileName = this.normalizeLayoutFileName(layoutFileName);
+    const filePath = this.getLayoutFileRelativePath(fileName);
+    const normalizedData = this.normalizeData(dataObject);
+    normalizedData.active_layout_name = fileName;
+    try {
+      await adapter.write(filePath, `${JSON.stringify(normalizedData, null, 2)}\n`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async persistPluginDataOnly() {
+    const activeLayoutName = this.getActiveLayoutFileName();
+    this.data.active_layout_name = activeLayoutName;
+    await this.saveData(this.data);
+  }
+
+  async persistActiveLayoutFile() {
+    const activeLayoutName = this.getActiveLayoutFileName();
+    this.data.active_layout_name = activeLayoutName;
+    await this.writeLayoutFileData(activeLayoutName, this.data);
+  }
+
+  async bootstrapActiveLayoutData() {
+    await this.ensureLayoutsFolder();
+    const activeLayoutName = this.getActiveLayoutFileName();
+    const loadedLayoutData = await this.readLayoutFileData(activeLayoutName);
+    if (loadedLayoutData && typeof loadedLayoutData === 'object') {
+      const normalizedLayoutData = this.normalizeData(loadedLayoutData);
+      normalizedLayoutData.active_layout_name = activeLayoutName;
+      this.data = normalizedLayoutData;
+      await this.persistPluginDataOnly();
+      return;
+    }
+    this.data.active_layout_name = activeLayoutName;
+    await this.persistPluginDataOnly();
+    await this.persistActiveLayoutFile();
+  }
+
+  async setActiveLayoutFile(layoutFileName, options = {}) {
+    if (this._persistTimer) {
+      window.clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+      await this.persistPluginDataOnly();
+    }
+    const nextLayoutName = this.normalizeLayoutFileName(layoutFileName);
+    const shouldLoadFromFile = options.loadFromFile !== false;
+    let nextData = this.normalizeData(this.data);
+    if (shouldLoadFromFile) {
+      const loadedLayoutData = await this.readLayoutFileData(nextLayoutName);
+      if (!loadedLayoutData) return false;
+      nextData = this.normalizeData(loadedLayoutData);
+    }
+    nextData.active_layout_name = nextLayoutName;
+    this.data = nextData;
+    await this.persistPluginDataOnly();
+    return true;
   }
 
   // Node-state management: pin/grid/orbit modes, strong pull, and painted edges.
@@ -735,12 +885,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     }, 300);
   }
 
-  refreshAllViews() {
+  refreshAllViews(options = {}) {
+    const viewOptions = Object.assign({ keepCamera: true }, options || {});
     const leaves = this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE);
     for (const leaf of leaves) {
       const view = leaf?.view;
       if (view && typeof view.refreshFromVault === 'function') {
-        view.refreshFromVault({ keepCamera: true });
+        view.refreshFromVault(viewOptions);
       }
     }
   }
@@ -1154,6 +1305,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   async openOrRevealGraphFrontierView() {
+    const activeLayoutName = this.getActiveLayoutFileName();
+    await this.setActiveLayoutFile(activeLayoutName, { loadFromFile: true });
     const existingLeaf = this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)[0];
     const leaf = existingLeaf || this.app.workspace.getLeaf('tab') || this.app.workspace.getLeaf(true);
     await leaf.setViewState({ type: GRAPHFRONTIER_VIEW_TYPE, active: true });

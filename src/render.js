@@ -101,6 +101,7 @@ function renderFrame(view) {
 
   drawEdges(view, ctx);
   drawNodes(view, ctx);
+  drawSelectionBox(view, ctx);
 }
 
 // Draw hovered node title in a compact floating bubble.
@@ -446,6 +447,7 @@ function drawNodes(view, ctx) {
     const isHoverFocusNode = hasHoverFocus && node.id === hoverFocusNodeId;
     const isHoverNodeRaw = view.hoverNodeId === node.id;
     const isHoverFadeNode = hasHoverFade && node.id === hoverFadeNodeId;
+    const isSelectedNode = view.selectedNodeIds instanceof Set && view.selectedNodeIds.has(node.id);
     const focusNodeProgress = isFocusNode ? focusProgress : 0;
     const hoverFocusNodeProgress = isHoverFocusNode ? hoverFocusProgress : 0;
     const hoverFadeNodeProgress = isHoverFadeNode ? hoverFadeProgress : 0;
@@ -491,8 +493,9 @@ function drawNodes(view, ctx) {
             : searchDimAlpha
           : 1;
 
-    let fillColor = '#7aa2f7';
-    if (groupColor) fillColor = groupColor;
+    const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
+    let fillColor = isAttachmentNode ? '#f2e7a0' : '#7aa2f7';
+    if (groupColor && !isAttachmentNode) fillColor = groupColor;
     if (isClickFlash) fillColor = '#ffffff';
 
     ctx.save();
@@ -503,12 +506,14 @@ function drawNodes(view, ctx) {
     ctx.fill();
     ctx.restore();
 
-    if (isHover) {
+    if (isHover || isSelectedNode) {
       const hoverStrokeAlpha = Math.max(0.12, 0.95 * hoverVisualProgress);
+      const selectedStrokeAlpha = isSelectedNode ? 0.95 : 0;
       const hoverLineWidth = 1 + hoverVisualProgress;
+      const selectedLineWidth = isSelectedNode ? 1.4 : 0;
       ctx.save();
-      ctx.strokeStyle = `rgba(255, 255, 255, ${hoverStrokeAlpha})`;
-      ctx.lineWidth = hoverLineWidth;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(hoverStrokeAlpha, selectedStrokeAlpha)})`;
+      ctx.lineWidth = Math.max(hoverLineWidth, selectedLineWidth);
       ctx.beginPath();
       ctx.arc(point.x, point.y, radius + 2, 0, Math.PI * 2);
       ctx.stroke();
@@ -518,7 +523,6 @@ function drawNodes(view, ctx) {
     const labelAlphaRaw = (zoom - labelMinZoom) / labelFadeRange;
     const labelAlphaBase = Math.max(0, Math.min(1, labelAlphaRaw));
     const hoverLabelBoost = hoverVisualProgress;
-    const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
     const labelAlpha = isAttachmentNode ? 0 : Math.max(labelAlphaBase, hoverLabelBoost);
     if (labelAlpha > 0.01) {
       const zoomedFontSize = Math.max(1, labelFontSize * zoom);
@@ -542,6 +546,25 @@ function drawNodes(view, ctx) {
   }
 }
 
+function drawSelectionBox(view, ctx) {
+  const boxSelect = view.boxSelectDrag;
+  if (!boxSelect) return;
+  const left = Math.min(boxSelect.startX, boxSelect.currentX);
+  const top = Math.min(boxSelect.startY, boxSelect.currentY);
+  const width = Math.abs(boxSelect.currentX - boxSelect.startX);
+  const height = Math.abs(boxSelect.currentY - boxSelect.startY);
+  if (width < 1 && height < 1) return;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([5, 3]);
+  ctx.fillRect(left, top, width, height);
+  ctx.strokeRect(left, top, width, height);
+  ctx.restore();
+}
+
 module.exports = {
   stepFocusSmoothing,
   renderFrame,
@@ -556,4 +579,5 @@ module.exports = {
   drawGrid,
   drawEdges,
   drawNodes,
+  drawSelectionBox,
 };

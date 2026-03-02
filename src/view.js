@@ -77,6 +77,7 @@ class GraphFrontierView extends ItemView {
     this.layoutCenter = { x: 0, y: 0 };
     this.dragStartScreen = null;
     this.dragMovedDistance = 0;
+    this.panDragMovedDistance = 0;
     this.sidePanelOpen = true;
     this.sideControls = new Map();
     this.sidePanelSectionState = {};
@@ -95,6 +96,12 @@ class GraphFrontierView extends ItemView {
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
     this.searchSuggestSuppressUntilMs = 0;
+    this.layoutFileSearchInputValue = this.plugin.getActiveLayoutFileName();
+    this.layoutFileSelectedName = this.layoutFileSearchInputValue;
+    this.layoutFileSearchInputEl = null;
+    this.layoutFileSearchClearButtonEl = null;
+    this.layoutFileSuggestSuppressUntilMs = 0;
+    this.layoutFileSuggestRequestToken = 0;
     this.contentSearchIndex = new Map();
     this.contentSearchBuildToken = 0;
     this.focusNodeId = null;
@@ -106,6 +113,10 @@ class GraphFrontierView extends ItemView {
     this.neighborsById = new Map();
     this.clickFlashNodeId = null;
     this.clickFlashUntilMs = 0;
+    this.selectedNodeIds = new Set();
+    this.boxSelectDrag = null;
+    this.boxSelectArmed = false;
+    this.dragSelectionOffsets = null;
     this.layoutKickAtMs = Date.now();
     this.layoutStillFrames = 0;
     this.layoutAutosaveDirty = false;
@@ -185,6 +196,12 @@ class GraphFrontierView extends ItemView {
     this.plugin.data.view_state.pan_x = this.cameraTarget.x;
     this.plugin.data.view_state.pan_y = this.cameraTarget.y;
     this.plugin.data.view_state.zoom = this.cameraTarget.zoom;
+
+    const autosaveEnabled = !!this.plugin.data.settings.layout_autosave;
+    if (!autosaveEnabled && this.layoutAutosaveDirty) {
+      this.applySavedLayoutStateDataOnly();
+    }
+
     this.contentEl.removeClass('graphfrontier-host');
     this.clearTouchLongPressTimer();
     this.closeInputSuggestMenu();
@@ -252,6 +269,8 @@ class GraphFrontierView extends ItemView {
     this.searchModeFilterLabelEl = null;
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
+    this.layoutFileSearchInputEl = null;
+    this.layoutFileSearchClearButtonEl = null;
     this.sidePanelEl.toggleClass('is-open', this.sidePanelOpen);
 
     const header = this.sidePanelEl.createDiv({ cls: 'graphfrontier-sidepanel-header' });
@@ -275,6 +294,23 @@ class GraphFrontierView extends ItemView {
     });
     this.buildFindSection(searchSection);
 
+    const selectionSection = this.createSidePanelSection(body, {
+      id: 'selection',
+      title: 'Selection',
+      openByDefault: true,
+    });
+    this.addSideModifierSelect(selectionSection, 'Box select', 'selection_box_modifier', {
+      hint: 'Modifier key for box selection drag on empty space',
+    });
+    this.addSideModifierSelect(
+      selectionSection,
+      'Add/remove selected',
+      'selection_toggle_modifier',
+      {
+        hint: 'Modifier key for toggling single-node selection on click',
+      }
+    );
+
     const displaySection = this.createSidePanelSection(body, {
       id: 'display',
       title: 'Display',
@@ -296,6 +332,18 @@ class GraphFrontierView extends ItemView {
       hint: 'Show non-markdown files as attachment nodes',
     });
     if (!this.plugin.data.settings.hide_attachments) {
+      this.addSideToggle(
+        displaySection,
+        'Attachments no-physics',
+        'attachments_on_orbits',
+        'render',
+        {
+          hint: 'Attachments interact only with their main node and other attachments',
+          onChange: () => {
+            this.kickLayoutSearch();
+          },
+        }
+      );
       this.addSideSlider(
         displaySection,
         'Attachment size',
@@ -321,7 +369,6 @@ class GraphFrontierView extends ItemView {
         }
       );
     }
-
     this.addSideSlider(displaySection, 'Grid step', 'grid_step', 5, 50, 5, 'render', {
       hint: 'Grid cell size in world coordinates',
     });
@@ -420,6 +467,7 @@ class GraphFrontierView extends ItemView {
       title: 'Layout',
       openByDefault: true,
     });
+    this.addLayoutFileSearchRow(layoutSection);
     this.addSideSaveLayoutButton(layoutSection);
   }
 
@@ -501,9 +549,66 @@ class GraphFrontierView extends ItemView {
       updateButton(nextUiValue);
       this.plugin.schedulePersist();
       this.applyRefreshMode(refreshMode);
+      if (typeof options.onChange === 'function') {
+        options.onChange(this.plugin.data.settings[key]);
+      }
       if (options.rebuildPanelOnChange) {
         this.buildSidePanel();
       }
+    });
+  }
+
+  addSideModifierSelect(parentEl, label, key, options = {}) {
+    const hintText = String(options.hint || label);
+    const row = parentEl.createDiv({ cls: 'graphfrontier-sidepanel-row' });
+    row.setAttr('title', hintText);
+    const labelEl = row.createSpan({ text: label, cls: 'graphfrontier-sidepanel-label' });
+    labelEl.setAttr('title', hintText);
+
+    const buttonEl = row.createEl('button', {
+      cls: 'graphfrontier-sidepanel-toggle graphfrontier-sidepanel-inline-toggle',
+    });
+    buttonEl.setAttr('title', hintText);
+
+    const modifierOptions = [
+      { value: 'none', text: 'None' },
+      { value: 'shift', text: 'Shift' },
+      { value: 'ctrl', text: 'Ctrl' },
+      { value: 'meta', text: 'Meta' },
+      { value: 'alt', text: 'Alt' },
+    ];
+    const modifierTextByValue = new Map(
+      modifierOptions.map((optionMeta) => [optionMeta.value, optionMeta.text])
+    );
+    const normalize = (value) => this.normalizeModifierSetting(value, 'none');
+    const updateButton = (value) => {
+      const normalized = normalize(value);
+      const text = modifierTextByValue.get(normalized) || 'None';
+      buttonEl.setText(text);
+      buttonEl.setAttr('aria-label', `${label}: ${text}`);
+    };
+    updateButton(this.plugin.data.settings[key]);
+
+    this.sideControls.set(key, {
+      type: 'modifier-button',
+      input: buttonEl,
+      normalize,
+      updateButton,
+    });
+
+    this.registerDomEvent(buttonEl, 'click', () => {
+      const menu = new Menu(this.app);
+      for (const optionMeta of modifierOptions) {
+        menu.addItem((item) =>
+          item.setTitle(optionMeta.text).onClick(() => {
+            this.plugin.data.settings[key] = optionMeta.value;
+            updateButton(optionMeta.value);
+            this.plugin.schedulePersist();
+          })
+        );
+      }
+      const rect = buttonEl.getBoundingClientRect();
+      this.showMenuAtPointer(menu, rect.left + rect.width / 2, rect.bottom + 2, null);
     });
   }
 
@@ -605,6 +710,19 @@ class GraphFrontierView extends ItemView {
         new Notice('Clear search field to save');
         return;
       }
+      const targetLayoutFileName = this.getLayoutFileNameFromInputValue(
+        this.layoutFileSearchInputEl
+          ? this.layoutFileSearchInputEl.value
+          : this.layoutFileSearchInputValue
+      );
+      const switched = await this.plugin.setActiveLayoutFile(targetLayoutFileName, {
+        loadFromFile: false,
+      });
+      if (!switched) {
+        new Notice('Cannot use layout name');
+        return;
+      }
+      this.syncLayoutFileSelectionFromPlugin();
       await this.saveCurrentLayout();
     });
 
@@ -616,6 +734,183 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(loadButton, 'click', async () => {
       await this.loadSavedLayout();
     });
+  }
+
+  addLayoutFileSearchRow(parentEl) {
+    this.syncLayoutFileSelectionFromPlugin();
+    const row = parentEl.createDiv({ cls: 'graphfrontier-find-row graphfrontier-layout-file-row' });
+    const inputWrap = row.createDiv({
+      cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor',
+    });
+    const inputEl = inputWrap.createEl('input', {
+      cls: 'graphfrontier-find-input',
+      type: 'text',
+      placeholder: 'Select layout file...',
+    });
+    inputEl.value = this.layoutFileSearchInputValue;
+    this.layoutFileSearchInputEl = inputEl;
+
+    const clearButton = inputWrap.createEl('button', {
+      cls: 'graphfrontier-search-inline-clear',
+      text: 'x',
+      attr: { 'aria-label': 'Clear layout selection' },
+    });
+    this.layoutFileSearchClearButtonEl = clearButton;
+
+    const openLayoutSuggestionPopup = async (rawQueryOverride = null) => {
+      if (Date.now() < this.layoutFileSuggestSuppressUntilMs) return;
+      const requestToken = ++this.layoutFileSuggestRequestToken;
+      const effectiveQuery =
+        rawQueryOverride == null ? String(inputEl.value || '') : String(rawQueryOverride || '');
+      const suggestionPack = await this.getLayoutFileSuggestionPack(effectiveQuery);
+      if (requestToken !== this.layoutFileSuggestRequestToken) return;
+      const items = Array.isArray(suggestionPack?.items) ? suggestionPack.items : [];
+      if (items.length <= 0) {
+        this.closeInputSuggestMenu();
+        return;
+      }
+      this.showInputSuggestMenu(
+        inputEl,
+        items,
+        (selectedText) => {
+          void this.selectActiveLayoutFileByName(String(selectedText || ''));
+        },
+        { title: suggestionPack?.menuTitle || '' }
+      );
+    };
+
+    this.registerDomEvent(inputEl, 'input', () => {
+      this.layoutFileSearchInputValue = String(inputEl.value || '');
+      this.layoutFileSelectedName = '';
+      this.syncLayoutFileSearchClearButtonVisibility();
+      openLayoutSuggestionPopup();
+    });
+    this.registerDomEvent(inputEl, 'keydown', (event) => {
+      const hasActiveMenu =
+        !!this.inputSuggestMenu && this.inputSuggestInputEl && this.inputSuggestInputEl === inputEl;
+      if (hasActiveMenu && event.key === 'ArrowDown') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'ArrowUp') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(-1);
+        return;
+      }
+      if (hasActiveMenu && event.key === 'Escape') {
+        event.preventDefault();
+        this.closeInputSuggestMenu();
+        return;
+      }
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      if (hasActiveMenu && this.selectInputSuggestActive()) return;
+      this.closeInputSuggestMenu();
+    });
+    this.registerDomEvent(inputEl, 'blur', () => {
+      if (!String(inputEl.value || '').trim()) {
+        this.syncLayoutFileSelectionFromPlugin();
+      }
+      this.contentEl.win.setTimeout(() => {
+        if (!this.inputSuggestInputEl || this.inputSuggestInputEl !== inputEl) return;
+        this.closeInputSuggestMenu();
+      }, 0);
+    });
+    this.registerDomEvent(inputEl, 'click', () => {
+      openLayoutSuggestionPopup('');
+    });
+    this.registerDomEvent(inputEl, 'focus', () => {
+      openLayoutSuggestionPopup('');
+    });
+    this.registerDomEvent(clearButton, 'click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.layoutFileSuggestSuppressUntilMs = Date.now() + 220;
+      this.syncLayoutFileSelectionFromPlugin();
+      this.syncLayoutFileSearchClearButtonVisibility();
+      this.closeInputSuggestMenu();
+      inputEl.focus();
+    });
+
+    this.syncLayoutFileSearchClearButtonVisibility();
+  }
+
+  syncLayoutFileSearchClearButtonVisibility() {
+    if (!this.layoutFileSearchClearButtonEl) return;
+    const textValue = this.layoutFileSearchInputEl
+      ? this.layoutFileSearchInputEl.value
+      : this.layoutFileSearchInputValue;
+    const isVisible = String(textValue || '').trim().length > 0;
+    this.layoutFileSearchClearButtonEl.toggleClass('is-visible', isVisible);
+  }
+
+  syncLayoutFileSelectionFromPlugin() {
+    const activeLayoutName = this.plugin.getActiveLayoutFileName();
+    const activeLayoutDisplayName = this.getLayoutDisplayName(activeLayoutName);
+    this.layoutFileSearchInputValue = activeLayoutDisplayName;
+    this.layoutFileSelectedName = activeLayoutName;
+    if (this.layoutFileSearchInputEl) this.layoutFileSearchInputEl.value = activeLayoutDisplayName;
+    this.syncLayoutFileSearchClearButtonVisibility();
+  }
+
+  async getLayoutFileSuggestionPack(rawQueryText) {
+    const listPath = this.plugin.getLayoutsFolderRelativePath();
+    const names = await this.plugin.listLayoutFileNames();
+
+    const queryText = String(rawQueryText || '')
+      .trim()
+      .toLowerCase();
+    const filteredNames =
+      queryText.length <= 0
+        ? names
+        : names.filter((fileName) => {
+            const lowerFileName = fileName.toLowerCase();
+            const lowerDisplayName = this.getLayoutDisplayName(fileName).toLowerCase();
+            return lowerFileName.includes(queryText) || lowerDisplayName.includes(queryText);
+          });
+    const items = filteredNames.map((fileName) => ({
+      title: this.getLayoutDisplayName(fileName),
+      value: fileName,
+      description: listPath,
+      kind: 'layout-file',
+    }));
+    return {
+      menuTitle: 'Layouts',
+      items,
+    };
+  }
+
+  async selectActiveLayoutFileByName(layoutFileName) {
+    const selectedName = String(layoutFileName || '').trim();
+    if (!selectedName) return;
+    const switched = await this.plugin.setActiveLayoutFile(selectedName, { loadFromFile: true });
+    if (!switched) {
+      new Notice('Layout file not found');
+      this.syncLayoutFileSelectionFromPlugin();
+      return;
+    }
+    this.syncLayoutFileSelectionFromPlugin();
+    this.plugin.refreshAllViews({ forceSavedPositions: true });
+    this.buildSidePanel();
+    this.kickLayoutSearch();
+    this.plugin.renderAllViews();
+  }
+
+  getLayoutDisplayName(layoutFileName) {
+    const rawName = String(layoutFileName || '').trim();
+    return rawName.replace(/\.json$/iu, '');
+  }
+
+  getLayoutFileNameFromInputValue(rawInputValue) {
+    const rawText = String(rawInputValue || '').trim();
+    if (!rawText) return this.plugin.getActiveLayoutFileName();
+    const selectedFileName = String(this.layoutFileSelectedName || '').trim();
+    if (selectedFileName) {
+      const selectedDisplay = this.getLayoutDisplayName(selectedFileName).toLowerCase();
+      if (selectedDisplay === rawText.toLowerCase()) return selectedFileName;
+    }
+    return this.plugin.normalizeLayoutFileName(rawText);
   }
 
   // Search block: find/filter mode controls, source picker (name/content), and node suggestions.
@@ -2130,6 +2425,26 @@ class GraphFrontierView extends ItemView {
     return value.toFixed(4);
   }
 
+  normalizeModifierSetting(rawModifier, fallback = 'none') {
+    const normalized = String(rawModifier || '')
+      .trim()
+      .toLowerCase();
+    if (['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized)) return normalized;
+    return String(fallback || 'none')
+      .trim()
+      .toLowerCase();
+  }
+
+  isModifierActive(event, rawModifier) {
+    const modifier = this.normalizeModifierSetting(rawModifier, 'none');
+    if (modifier === 'none') return false;
+    if (modifier === 'alt') return !!event.altKey;
+    if (modifier === 'shift') return !!event.shiftKey;
+    if (modifier === 'meta') return !!event.metaKey;
+    if (modifier === 'ctrl') return !!event.ctrlKey || !!event.metaKey;
+    return false;
+  }
+
   // UI refresh helpers: keep controls synced and canvas sized to current container.
   applyRefreshMode(refreshMode) {
     if (refreshMode === 'data') this.plugin.refreshAllViews();
@@ -2158,6 +2473,32 @@ class GraphFrontierView extends ItemView {
         const nextValue = String(clamped);
         if (meta.input.value !== nextValue) meta.input.value = nextValue;
         meta.valueEl.setText(this.formatSliderValue(clamped, meta.step));
+        continue;
+      }
+
+      if (meta.type === 'select' && activeEl !== meta.input) {
+        const normalize =
+          typeof meta.normalize === 'function'
+            ? meta.normalize
+            : (value) =>
+                String(value || '')
+                  .trim()
+                  .toLowerCase();
+        const nextValue = normalize(currentValue);
+        if (meta.input.value !== nextValue) meta.input.value = nextValue;
+        continue;
+      }
+
+      if (meta.type === 'modifier-button' && activeEl !== meta.input) {
+        const normalize =
+          typeof meta.normalize === 'function'
+            ? meta.normalize
+            : (value) =>
+                String(value || '')
+                  .trim()
+                  .toLowerCase();
+        const nextValue = normalize(currentValue);
+        if (typeof meta.updateButton === 'function') meta.updateButton(nextValue);
       }
     }
 
@@ -2205,8 +2546,9 @@ class GraphFrontierView extends ItemView {
   // In-memory graph rebuild: load nodes/edges, restore positions, and recompute neighbors.
   refreshFromVault(opts = {}) {
     const keepCamera = !!opts.keepCamera;
+    const forceSavedPositions = !!opts.forceSavedPositions;
     const graphData = this.plugin.collectGraphData();
-    this.syncGraphRuntimeState(graphData);
+    this.syncGraphRuntimeState(graphData, { forceSavedPositions });
     this.markGraphVisibilityDirty();
 
     if (this.searchSelectedNodeId && !this.nodeById.has(this.searchSelectedNodeId)) {
@@ -2262,9 +2604,13 @@ class GraphFrontierView extends ItemView {
    * Runtime graph-state rebuild: create nodes, rebuild edges/neighbors, and restore constrained positions.
    * ============================================================
    */
-  syncGraphRuntimeState(graphData) {
+  syncGraphRuntimeState(graphData, options = {}) {
     const oldNodes = this.nodeById;
-    const { nextNodes, nextNodeById } = this.buildNextNodesFromGraphData(graphData.nodes, oldNodes);
+    const { nextNodes, nextNodeById } = this.buildNextNodesFromGraphData(
+      graphData.nodes,
+      oldNodes,
+      options
+    );
     const { nextEdges, nextNeighborsById } = this.buildNextEdgesAndNeighbors(
       graphData.edges,
       nextNodeById,
@@ -2278,18 +2624,31 @@ class GraphFrontierView extends ItemView {
     this.nodeMetaById = new Map(nextNodes.map((node) => [node.id, node.meta || null]));
     this.neighborsById = nextNeighborsById;
     this.edges = nextEdges;
+    this.selectedNodeIds = new Set(
+      Array.from(this.selectedNodeIds).filter((nodeId) => this.nodeById.has(nodeId))
+    );
+    if (this.dragNodeId && !this.nodeById.has(this.dragNodeId)) this.dragNodeId = null;
+    if (this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0) {
+      const nextOffsets = new Map();
+      for (const [nodeId, offset] of this.dragSelectionOffsets.entries()) {
+        if (!this.nodeById.has(nodeId)) continue;
+        nextOffsets.set(nodeId, offset);
+      }
+      this.dragSelectionOffsets = nextOffsets.size > 0 ? nextOffsets : null;
+    }
+    this.boxSelectDrag = null;
 
     this.applyAutoAttachmentOrbitPositions();
   }
 
-  buildNextNodesFromGraphData(rawNodes, oldNodes) {
+  buildNextNodesFromGraphData(rawNodes, oldNodes, options = {}) {
     const nextNodes = [];
     const nextNodeById = new Map();
     let index = 0;
 
     for (const rawNode of rawNodes) {
       const oldNode = oldNodes.get(rawNode.id);
-      const node = this.createRuntimeNode(rawNode, oldNode, index);
+      const node = this.createRuntimeNode(rawNode, oldNode, index, options);
       nextNodes.push(node);
       nextNodeById.set(node.id, node);
       index += 1;
@@ -2298,7 +2657,8 @@ class GraphFrontierView extends ItemView {
     return { nextNodes, nextNodeById };
   }
 
-  createRuntimeNode(rawNode, oldNode, index) {
+  createRuntimeNode(rawNode, oldNode, index, options = {}) {
+    const forceSavedPositions = !!options.forceSavedPositions;
     const pin = this.plugin.getPin(rawNode.id);
     const savedPosition = this.plugin.data.saved_positions[rawNode.id];
 
@@ -2310,6 +2670,16 @@ class GraphFrontierView extends ItemView {
     if (pin) {
       x = pin.x;
       y = pin.y;
+    } else if (
+      forceSavedPositions &&
+      savedPosition &&
+      Number.isFinite(savedPosition.x) &&
+      Number.isFinite(savedPosition.y)
+    ) {
+      x = Number(savedPosition.x);
+      y = Number(savedPosition.y);
+      vx = 0;
+      vy = 0;
     } else if (oldNode) {
       x = oldNode.x;
       y = oldNode.y;
@@ -2580,6 +2950,76 @@ class GraphFrontierView extends ItemView {
     return drawFocusedNodeTitleRender(this, ctx, node);
   }
 
+  getQuickPreviewModifier() {
+    return 'ctrl';
+  }
+
+  getBoxSelectModifier() {
+    return this.normalizeModifierSetting(
+      this.plugin?.data?.settings?.selection_box_modifier,
+      'shift'
+    );
+  }
+
+  getSelectionToggleModifier() {
+    return this.normalizeModifierSetting(
+      this.plugin?.data?.settings?.selection_toggle_modifier,
+      'none'
+    );
+  }
+
+  isNodeSelected(nodeId) {
+    return this.selectedNodeIds.has(nodeId);
+  }
+
+  clearNodeSelection() {
+    if (this.selectedNodeIds.size <= 0) return;
+    this.selectedNodeIds.clear();
+    this.plugin.renderAllViews();
+  }
+
+  toggleNodeSelection(nodeId) {
+    if (!nodeId || !this.nodeById.has(nodeId)) return false;
+    if (this.selectedNodeIds.has(nodeId)) this.selectedNodeIds.delete(nodeId);
+    else this.selectedNodeIds.add(nodeId);
+    this.plugin.renderAllViews();
+    return true;
+  }
+
+  setNodeSelection(nodeIds) {
+    const nextSelectedNodeIds = new Set();
+    if (nodeIds instanceof Set || Array.isArray(nodeIds)) {
+      for (const nodeId of nodeIds) {
+        if (!this.nodeById.has(nodeId)) continue;
+        nextSelectedNodeIds.add(nodeId);
+      }
+    }
+    this.selectedNodeIds = nextSelectedNodeIds;
+    this.plugin.renderAllViews();
+  }
+
+  getDraggedNodeIds(seedNodeId) {
+    if (!seedNodeId || !this.nodeById.has(seedNodeId)) return [];
+    if (!this.selectedNodeIds.has(seedNodeId) || this.selectedNodeIds.size <= 1)
+      return [seedNodeId];
+    return Array.from(this.selectedNodeIds).filter((nodeId) => this.nodeById.has(nodeId));
+  }
+
+  getNodeIdsInScreenRect(screenRect) {
+    if (!screenRect) return [];
+    const minX = Math.min(screenRect.startX, screenRect.currentX);
+    const maxX = Math.max(screenRect.startX, screenRect.currentX);
+    const minY = Math.min(screenRect.startY, screenRect.currentY);
+    const maxY = Math.max(screenRect.startY, screenRect.currentY);
+    const selectedNodeIds = [];
+    for (const node of this.nodes) {
+      const point = this.worldToScreen(node.x, node.y);
+      if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) continue;
+      selectedNodeIds.push(node.id);
+    }
+    return selectedNodeIds;
+  }
+
   // Pointer and navigation: hover, node drag, scene pan, zoom, and node open actions.
   onMouseMove(event) {
     if (Date.now() < this.ignoreMouseUntilMs) return;
@@ -2590,10 +3030,35 @@ class GraphFrontierView extends ItemView {
 
     this.lastCursorScreen = { x: screenX, y: screenY };
 
+    if (this.boxSelectDrag) {
+      this.boxSelectDrag.currentX = screenX;
+      this.boxSelectDrag.currentY = screenY;
+      return;
+    }
+
     if (this.dragNodeId) {
+      const world = this.screenToWorld(screenX, screenY);
+      if (this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0) {
+        for (const [nodeId, offset] of this.dragSelectionOffsets.entries()) {
+          const node = this.nodeById.get(nodeId);
+          if (!node) continue;
+          node.x = world.x + offset.x;
+          node.y = world.y + offset.y;
+          node.vx = 0;
+          node.vy = 0;
+        }
+        if (this.dragStartScreen) {
+          const ddx = screenX - this.dragStartScreen.x;
+          const ddy = screenY - this.dragStartScreen.y;
+          this.dragMovedDistance = Math.max(
+            this.dragMovedDistance,
+            Math.sqrt(ddx * ddx + ddy * ddy)
+          );
+        }
+        return;
+      }
       const node = this.nodeById.get(this.dragNodeId);
       if (node) {
-        const world = this.screenToWorld(screenX, screenY);
         node.x = world.x + this.dragNodeOffset.x;
         node.y = world.y + this.dragNodeOffset.y;
         node.vx = 0;
@@ -2613,6 +3078,7 @@ class GraphFrontierView extends ItemView {
     if (this.panDrag) {
       const dx = screenX - this.panDrag.startX;
       const dy = screenY - this.panDrag.startY;
+      this.panDragMovedDistance = Math.max(this.panDragMovedDistance, Math.sqrt(dx * dx + dy * dy));
       this.cameraTarget.x = this.panDrag.startCameraX - dx / this.panDrag.startZoom;
       this.cameraTarget.y = this.panDrag.startCameraY - dy / this.panDrag.startZoom;
       this.persistViewState();
@@ -2632,22 +3098,59 @@ class GraphFrontierView extends ItemView {
     const screenY = event.clientY - rect.top;
 
     const node = this.getNodeAtScreen(screenX, screenY);
+    const selectionToggleModifier = this.getSelectionToggleModifier();
+    const quickPreviewModifier = this.getQuickPreviewModifier();
+    const boxSelectModifier = this.getBoxSelectModifier();
 
     if (node) {
-      if (event.ctrlKey) {
+      if (this.isModifierActive(event, selectionToggleModifier)) {
+        this.toggleNodeSelection(node.id);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (this.isModifierActive(event, quickPreviewModifier)) {
         this.toggleQuickPreview(node.id, event.clientX, event.clientY);
         event.preventDefault();
         event.stopPropagation();
         return;
       }
       const world = this.screenToWorld(screenX, screenY);
+      const dragNodeIds = this.getDraggedNodeIds(node.id);
       this.dragNodeId = node.id;
-      this.dragNodeOffset = {
-        x: node.x - world.x,
-        y: node.y - world.y,
-      };
+      if (dragNodeIds.length > 1) {
+        this.dragSelectionOffsets = new Map();
+        for (const dragNodeId of dragNodeIds) {
+          const dragNode = this.nodeById.get(dragNodeId);
+          if (!dragNode) continue;
+          this.dragSelectionOffsets.set(dragNodeId, {
+            x: dragNode.x - world.x,
+            y: dragNode.y - world.y,
+          });
+        }
+        this.dragNodeOffset = { x: 0, y: 0 };
+      } else {
+        this.dragSelectionOffsets = null;
+        this.dragNodeOffset = {
+          x: node.x - world.x,
+          y: node.y - world.y,
+        };
+      }
       this.dragStartScreen = { x: screenX, y: screenY };
       this.dragMovedDistance = 0;
+      this.canvasEl.addClass('is-dragging');
+      return;
+    }
+
+    if (this.boxSelectArmed || this.isModifierActive(event, boxSelectModifier)) {
+      this.boxSelectDrag = {
+        startX: screenX,
+        startY: screenY,
+        currentX: screenX,
+        currentY: screenY,
+      };
+      this.boxSelectArmed = false;
+      this.panDrag = null;
       this.canvasEl.addClass('is-dragging');
       return;
     }
@@ -2659,6 +3162,7 @@ class GraphFrontierView extends ItemView {
       startCameraY: this.cameraTarget.y,
       startZoom: this.cameraTarget.zoom,
     };
+    this.panDragMovedDistance = 0;
     this.canvasEl.addClass('is-dragging');
   }
 
@@ -2667,24 +3171,46 @@ class GraphFrontierView extends ItemView {
     const suppressClick = !!(options && options.suppressClick);
     if (!fromTouch && Date.now() < this.ignoreMouseUntilMs) return;
 
+    if (this.boxSelectDrag) {
+      const selectedNodeIds = this.getNodeIdsInScreenRect(this.boxSelectDrag);
+      this.setNodeSelection(selectedNodeIds);
+      this.boxSelectDrag = null;
+      this.dragNodeId = null;
+      this.dragSelectionOffsets = null;
+      this.dragStartScreen = null;
+      this.dragMovedDistance = 0;
+      this.panDrag = null;
+      this.canvasEl.removeClass('is-dragging');
+      return;
+    }
+
     let clickedNodeId = null;
     const hadDraggedNode = !!this.dragNodeId;
+    const hadPanDrag = !!this.panDrag;
+    const panDragMovedDistance = this.panDragMovedDistance;
     const draggedNodeId = this.dragNodeId;
+    const draggedNodeIds =
+      this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0
+        ? Array.from(this.dragSelectionOffsets.keys())
+        : draggedNodeId
+          ? [draggedNodeId]
+          : [];
     if (draggedNodeId) {
       if (this.dragMovedDistance <= 3) clickedNodeId = draggedNodeId;
-      const draggedNode = this.nodeById.get(draggedNodeId);
-      if (draggedNode && this.plugin.isPinned(draggedNodeId)) {
-        const pinMode = this.plugin.getPinMode(draggedNodeId);
+      for (const movedNodeId of draggedNodeIds) {
+        const draggedNode = this.nodeById.get(movedNodeId);
+        if (!draggedNode || !this.plugin.isPinned(movedNodeId)) continue;
+        const pinMode = this.plugin.getPinMode(movedNodeId);
         if (pinMode === 'grid') {
-          const snapped = this.snapPositionToGrid(draggedNodeId, draggedNode.x, draggedNode.y);
+          const snapped = this.snapPositionToGrid(movedNodeId, draggedNode.x, draggedNode.y);
           draggedNode.x = snapped.x;
           draggedNode.y = snapped.y;
           draggedNode.vx = 0;
           draggedNode.vy = 0;
-          this.plugin.setPin(draggedNodeId, { x: snapped.x, y: snapped.y }, { mode: 'grid' });
+          this.plugin.setPin(movedNodeId, { x: snapped.x, y: snapped.y }, { mode: 'grid' });
         } else {
           this.plugin.setPin(
-            draggedNodeId,
+            movedNodeId,
             { x: draggedNode.x, y: draggedNode.y },
             { mode: 'exact' }
           );
@@ -2693,14 +3219,28 @@ class GraphFrontierView extends ItemView {
     }
 
     this.dragNodeId = null;
+    this.dragSelectionOffsets = null;
     this.dragStartScreen = null;
     this.dragMovedDistance = 0;
     this.panDrag = null;
+    this.panDragMovedDistance = 0;
     this.canvasEl.removeClass('is-dragging');
 
     if (hadDraggedNode) this.kickLayoutSearch();
 
-    if (!suppressClick && clickedNodeId && event && event.button === 0) {
+    const isBackgroundClick = !hadDraggedNode && hadPanDrag && panDragMovedDistance <= 3;
+    if (isBackgroundClick) {
+      this.clearNodeSelection();
+      this.boxSelectArmed = false;
+    }
+
+    if (
+      !suppressClick &&
+      clickedNodeId &&
+      draggedNodeIds.length <= 1 &&
+      event &&
+      event.button === 0
+    ) {
       this.clickFlashNodeId = clickedNodeId;
       this.clickFlashUntilMs = Date.now() + 180;
       this.openNodeFile(clickedNodeId);
@@ -3118,6 +3658,23 @@ class GraphFrontierView extends ItemView {
       menu.addSeparator();
       menu.addItem((item) =>
         item
+          .setTitle('Copy linked names')
+          .setIcon('copy')
+          .onClick(async () => {
+            await this.copyLinkedNames(node.id);
+          })
+      );
+      menu.addItem((item) =>
+        item
+          .setTitle('Copy linked paths')
+          .setIcon('copy')
+          .onClick(async () => {
+            await this.copyLinkedPaths(node.id);
+          })
+      );
+      menu.addSeparator();
+      menu.addItem((item) =>
+        item
           .setTitle('Add to search')
           .setIcon('search')
           .onClick(() => {
@@ -3134,6 +3691,23 @@ class GraphFrontierView extends ItemView {
       );
       menu.addSeparator();
     } else {
+      menu.addItem((item) =>
+        item
+          .setTitle('Copy linked names')
+          .setIcon('copy')
+          .onClick(async () => {
+            await this.copyLinkedNames(node.id);
+          })
+      );
+      menu.addItem((item) =>
+        item
+          .setTitle('Copy linked paths')
+          .setIcon('copy')
+          .onClick(async () => {
+            await this.copyLinkedPaths(node.id);
+          })
+      );
+      menu.addSeparator();
       menu.addItem((item) =>
         item
           .setTitle('Add to search')
@@ -3235,40 +3809,136 @@ class GraphFrontierView extends ItemView {
 
     menu.addItem((item) =>
       item
-        .setTitle('Pin linked nodes')
-        .setIcon('pin')
-        .onClick(async () => {
-          await this.pinLinkedNodes(node.id);
+        .setTitle('Select linked nodes')
+        .setIcon('check-square')
+        .onClick(() => {
+          this.selectLinkedNodes(node.id);
         })
     );
 
+    this.addContextSubmenuItem(menu, {
+      title: 'Pin/unpin linked',
+      icon: 'git-branch',
+      clientX,
+      clientY,
+      fillSubmenu: (submenu) => {
+        this.addLinkedNodesActionsToMenu(submenu, node.id);
+      },
+    });
+    this.addContextSubmenuItem(menu, {
+      title: 'Pin/unpin attachments',
+      icon: 'paperclip',
+      clientX,
+      clientY,
+      fillSubmenu: (submenu) => {
+        this.addAttachmentNodesActionsToMenu(submenu, node.id);
+      },
+    });
+
+    this.showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent);
+  }
+
+  addContextSubmenuItem(menu, options) {
+    menu.addItem((item) => item.setTitle(options.title).setIcon(options.icon || 'chevron-right'));
+    const menuItem = menu.items[menu.items.length - 1];
+    if (menuItem && typeof menuItem.setSubmenu === 'function') {
+      const submenu = menuItem.setSubmenu();
+      options.fillSubmenu(submenu);
+      return;
+    }
+    if (!menuItem) return;
+    menuItem.onClick(() => {
+      const submenu = new Menu(this.app);
+      options.fillSubmenu(submenu);
+      this.contentEl.win.setTimeout(() => {
+        this.showMenuAtPointer(submenu, options.clientX, options.clientY, null);
+      }, 0);
+    });
+  }
+
+  addLinkedNodesActionsToMenu(menu, nodeId) {
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin linked nodes')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinLinkedNodes(nodeId);
+        })
+    );
     menu.addItem((item) =>
       item
         .setTitle('Pin linked nodes to grid')
         .setIcon('pin')
         .onClick(async () => {
-          await this.pinLinkedNodesToGrid(node.id);
+          await this.pinLinkedNodesToGrid(nodeId);
         })
     );
-
     menu.addItem((item) =>
       item
-        .setTitle('Pin linked to orbit')
+        .setTitle('Pin linked nodes to orbit')
         .setIcon('orbit')
         .onClick(async () => {
-          await this.pinLinkedNodesToOrbit(node.id);
+          await this.pinLinkedNodesToOrbit(nodeId);
         })
     );
-
     menu.addItem((item) =>
       item
         .setTitle('Unpin linked nodes')
         .setIcon('pin-off')
         .onClick(async () => {
-          await this.unpinLinkedNodes(node.id);
+          await this.unpinLinkedNodes(nodeId);
         })
     );
+  }
 
+  addAttachmentNodesActionsToMenu(menu, nodeId) {
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin attachments')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinLinkedNodes(nodeId, {
+            targetKind: 'attachment',
+            targetLabel: 'attachments',
+          });
+        })
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin attachments to grid')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinLinkedNodesToGrid(nodeId, {
+            targetKind: 'attachment',
+            targetLabel: 'attachments',
+          });
+        })
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin attachments to orbit')
+        .setIcon('orbit')
+        .onClick(async () => {
+          await this.pinLinkedNodesToOrbit(nodeId, {
+            targetKind: 'attachment',
+            targetLabel: 'attachments',
+          });
+        })
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle('Unpin attachments')
+        .setIcon('pin-off')
+        .onClick(async () => {
+          await this.unpinLinkedNodes(nodeId, {
+            targetKind: 'attachment',
+            targetLabel: 'attachments',
+          });
+        })
+    );
+  }
+
+  showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent = null) {
     if (sourceMouseEvent && typeof menu.showAtMouseEvent === 'function') {
       menu.showAtMouseEvent(sourceMouseEvent);
       return;
@@ -3404,6 +4074,26 @@ class GraphFrontierView extends ItemView {
     if (!node) return;
     await this.pinNodeExact(node.id, { x: node.x, y: node.y });
     new Notice(`Pinned: ${node.id}`);
+  }
+
+  async commandToggleSelectionUnderCursor() {
+    const node = this.getCommandTargetNodeOrNotice();
+    if (!node) return;
+    this.toggleNodeSelection(node.id);
+  }
+
+  async commandArmBoxSelection() {
+    this.boxSelectArmed = !this.boxSelectArmed;
+    new Notice(this.boxSelectArmed ? 'Box selection armed' : 'Box selection disarmed');
+  }
+
+  async commandClearSelection() {
+    if (this.selectedNodeIds.size <= 0) {
+      new Notice('Selection is empty');
+      return;
+    }
+    this.clearNodeSelection();
+    new Notice('Selection cleared');
   }
 
   async commandPinToGrid() {
@@ -3693,10 +4383,28 @@ class GraphFrontierView extends ItemView {
   }
 
   // Linked-node bulk actions: pin, unpin, and pin-to-grid for neighbor nodes.
-  async pinLinkedNodes(nodeId) {
-    const linkedNodeIds = this.getLinkedRegularNodeIds(nodeId);
+  getLinkedTargetOptions(options = {}) {
+    const targetKind = options.targetKind === 'attachment' ? 'attachment' : 'regular';
+    const targetLabel =
+      typeof options.targetLabel === 'string' && options.targetLabel.trim()
+        ? options.targetLabel.trim()
+        : targetKind === 'attachment'
+          ? 'attachments'
+          : 'linked nodes';
+    const noPinsLabel =
+      typeof options.noPinsLabel === 'string' && options.noPinsLabel.trim()
+        ? options.noPinsLabel.trim()
+        : targetKind === 'attachment'
+          ? 'attachment pins'
+          : 'linked pins';
+    return { targetKind, targetLabel, noPinsLabel };
+  }
+
+  async pinLinkedNodes(nodeId, options = {}) {
+    const { targetKind, targetLabel } = this.getLinkedTargetOptions(options);
+    const linkedNodeIds = this.getLinkedNodeIdsByKind(nodeId, targetKind);
     if (linkedNodeIds.length === 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
@@ -3711,19 +4419,20 @@ class GraphFrontierView extends ItemView {
     }
 
     if (pinnedCount <= 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Pinned linked nodes: ${pinnedCount}`);
+    new Notice(`Pinned ${targetLabel}: ${pinnedCount}`);
   }
 
-  async pinLinkedNodesToGrid(nodeId) {
-    const linkedNodeIds = this.getLinkedRegularNodeIds(nodeId);
+  async pinLinkedNodesToGrid(nodeId, options = {}) {
+    const { targetKind, targetLabel } = this.getLinkedTargetOptions(options);
+    const linkedNodeIds = this.getLinkedNodeIdsByKind(nodeId, targetKind);
     if (linkedNodeIds.length === 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
@@ -3752,19 +4461,20 @@ class GraphFrontierView extends ItemView {
     }
 
     if (pinnedCount <= 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Pinned linked nodes to grid: ${pinnedCount}`);
+    new Notice(`Pinned ${targetLabel} to grid: ${pinnedCount}`);
   }
 
-  async unpinLinkedNodes(nodeId) {
-    const linkedNodeIds = this.getLinkedNodeIds(nodeId);
+  async unpinLinkedNodes(nodeId, options = {}) {
+    const { targetKind, targetLabel, noPinsLabel } = this.getLinkedTargetOptions(options);
+    const linkedNodeIds = this.getLinkedNodeIdsByKind(nodeId, targetKind);
     if (linkedNodeIds.length === 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
@@ -3783,13 +4493,13 @@ class GraphFrontierView extends ItemView {
     }
 
     if (unpinnedCount <= 0) {
-      new Notice('No linked pins');
+      new Notice(`No ${noPinsLabel}`);
       return;
     }
 
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Unpinned linked nodes: ${unpinnedCount}`);
+    new Notice(`Unpinned ${targetLabel}: ${unpinnedCount}`);
   }
 
   // Orbit geometry and auto-orbit rules for linked nodes and attachments.
@@ -3802,6 +4512,7 @@ class GraphFrontierView extends ItemView {
   }
 
   buildAttachmentAutoOrbitMap() {
+    if (this.plugin.data.settings.attachments_on_orbits === false) return new Map();
     return buildAttachmentAutoOrbitMapPhysics(this);
   }
 
@@ -3809,13 +4520,14 @@ class GraphFrontierView extends ItemView {
     return recomputeOrbitRadiiPhysics(this);
   }
 
-  async pinLinkedNodesToOrbit(nodeId) {
+  async pinLinkedNodesToOrbit(nodeId, options = {}) {
     const anchorNode = this.nodeById.get(nodeId);
     if (!anchorNode) return;
 
-    const linkedNodeIds = this.getLinkedRegularNodeIds(nodeId);
+    const { targetKind, targetLabel } = this.getLinkedTargetOptions(options);
+    const linkedNodeIds = this.getLinkedNodeIdsByKind(nodeId, targetKind);
     if (linkedNodeIds.length === 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
@@ -3845,13 +4557,13 @@ class GraphFrontierView extends ItemView {
     }
 
     if (orbitPinnedCount <= 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Orbit pinned linked nodes: ${orbitPinnedCount}`);
+    new Notice(`Orbit pinned ${targetLabel}: ${orbitPinnedCount}`);
   }
 
   async unpinLinkedNodesFromOrbit(nodeId) {
@@ -3892,13 +4604,128 @@ class GraphFrontierView extends ItemView {
     return result;
   }
 
-  getLinkedRegularNodeIds(nodeId) {
+  selectLinkedNodes(nodeId) {
+    if (!nodeId || !this.nodeById.has(nodeId)) return;
+    const selectedNodeIds = new Set([nodeId, ...this.getLinkedNodeIds(nodeId)]);
+    this.setNodeSelection(selectedNodeIds);
+    new Notice(`Selected linked nodes: ${selectedNodeIds.size}`);
+  }
+
+  getLinkedNodeDisplayName(node) {
+    if (!node) return '';
+    const label = String(node.label || '').trim();
+    if (label) return label;
+    const meta = this.nodeMetaById.get(node.id) || node.meta || null;
+    const fileName = String(meta?.fileName || '').trim();
+    if (fileName) return fileName;
+    return String(node.id || '').trim();
+  }
+
+  getLinkedNodeDisplayPath(node) {
+    if (!node) return '';
+    const meta = this.nodeMetaById.get(node.id) || node.meta || null;
+    const path = String(meta?.path || '').trim();
+    if (path) return path;
+    return String(node.id || '').trim();
+  }
+
+  async copyTextToClipboard(text) {
+    const normalizedText = String(text || '');
+    if (!normalizedText) return false;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(normalizedText);
+        return true;
+      }
+    } catch {
+      // Fall through to textarea copy fallback for older environments.
+    }
+
+    try {
+      const textareaEl = document.createElement('textarea');
+      textareaEl.value = normalizedText;
+      textareaEl.setAttribute('readonly', '');
+      textareaEl.style.position = 'fixed';
+      textareaEl.style.top = '-10000px';
+      textareaEl.style.opacity = '0';
+      document.body.appendChild(textareaEl);
+      textareaEl.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textareaEl);
+      return !!copied;
+    } catch {
+      return false;
+    }
+  }
+
+  async copyLinkedNames(nodeId) {
     const linkedNodeIds = this.getLinkedNodeIds(nodeId);
+    if (linkedNodeIds.length <= 0) {
+      new Notice('No linked nodes');
+      return;
+    }
+
+    const linkedNames = linkedNodeIds
+      .map((linkedNodeId) => this.nodeById.get(linkedNodeId))
+      .filter((linkedNode) => !!linkedNode)
+      .map((linkedNode) => this.getLinkedNodeDisplayName(linkedNode))
+      .filter((value) => value.length > 0)
+      .sort((leftValue, rightValue) => leftValue.localeCompare(rightValue));
+    if (linkedNames.length <= 0) {
+      new Notice('No linked nodes');
+      return;
+    }
+
+    const copied = await this.copyTextToClipboard(this.formatCopyList(linkedNames));
+    new Notice(
+      copied ? `Copied linked names: ${linkedNames.length}` : 'Failed to copy linked names'
+    );
+  }
+
+  async copyLinkedPaths(nodeId) {
+    const linkedNodeIds = this.getLinkedNodeIds(nodeId);
+    if (linkedNodeIds.length <= 0) {
+      new Notice('No linked nodes');
+      return;
+    }
+
+    const linkedPaths = linkedNodeIds
+      .map((linkedNodeId) => this.nodeById.get(linkedNodeId))
+      .filter((linkedNode) => !!linkedNode)
+      .map((linkedNode) => this.getLinkedNodeDisplayPath(linkedNode))
+      .filter((value) => value.length > 0)
+      .sort((leftValue, rightValue) => leftValue.localeCompare(rightValue));
+    if (linkedPaths.length <= 0) {
+      new Notice('No linked nodes');
+      return;
+    }
+
+    const copied = await this.copyTextToClipboard(this.formatCopyList(linkedPaths));
+    new Notice(
+      copied ? `Copied linked paths: ${linkedPaths.length}` : 'Failed to copy linked paths'
+    );
+  }
+
+  formatCopyList(items) {
+    const values = Array.isArray(items)
+      ? items.filter((item) => String(item || '').length > 0)
+      : [];
+    if (values.length <= 0) return '';
+    return values
+      .map((value, index) => (index < values.length - 1 ? `${value},` : String(value)))
+      .join('\n');
+  }
+
+  getLinkedNodeIdsByKind(nodeId, targetKind = 'all') {
+    const linkedNodeIds = this.getLinkedNodeIds(nodeId);
+    if (targetKind !== 'regular' && targetKind !== 'attachment') return linkedNodeIds;
     const result = [];
     for (const linkedNodeId of linkedNodeIds) {
       const linkedNode = this.nodeById.get(linkedNodeId);
       if (!linkedNode) continue;
-      if (linkedNode.meta?.isAttachment) continue;
+      const isAttachment = !!linkedNode.meta?.isAttachment;
+      if (targetKind === 'regular' && isAttachment) continue;
+      if (targetKind === 'attachment' && !isAttachment) continue;
       result.push(linkedNodeId);
     }
     return result;
@@ -3947,11 +4774,27 @@ class GraphFrontierView extends ItemView {
     this.layoutAutosaveDirty = false;
     this.layoutStillFrames = 0;
     this.plugin.schedulePersist();
+    await this.plugin.persistActiveLayoutFile();
     if (!silent) new Notice(`Layout saved: ${this.nodes.length} nodes`);
   }
 
   async loadSavedLayout(options = {}) {
     const silent = !!options.silent;
+    const loaded = this.applySavedLayoutStateDataOnly();
+    if (!loaded) {
+      if (!silent) new Notice('No saved layout');
+      return;
+    }
+
+    this.refreshFromVault({ keepCamera: true, forceSavedPositions: true });
+    this.buildSidePanel();
+    this.plugin.schedulePersist();
+    this.kickLayoutSearch();
+    this.plugin.renderAllViews();
+    if (!silent) new Notice('Layout loaded');
+  }
+
+  applySavedLayoutStateDataOnly() {
     const savedPositions = this.plugin.data.saved_positions || {};
     const savedSettings = this.plugin.data.saved_layout_settings || {};
     const savedPins = this.plugin.data.saved_layout_pins || {};
@@ -3962,10 +4805,7 @@ class GraphFrontierView extends ItemView {
       Object.keys(savedSettings).length > 0 ||
       Object.keys(savedPins).length > 0 ||
       Object.keys(savedOrbitPins).length > 0;
-    if (!hasSomethingToLoad) {
-      if (!silent) new Notice('No saved layout');
-      return;
-    }
+    if (!hasSomethingToLoad) return false;
 
     this.plugin.data.settings = Object.assign({}, this.plugin.data.settings, savedSettings);
     this.plugin.data.pins = {};
@@ -3993,14 +4833,10 @@ class GraphFrontierView extends ItemView {
       };
       delete this.plugin.data.pins[nodeId];
     }
-
     this.plugin.data = this.plugin.normalizeData(this.plugin.data);
-    this.refreshFromVault({ keepCamera: true });
-    this.buildSidePanel();
-    this.plugin.schedulePersist();
-    this.kickLayoutSearch();
-    this.plugin.renderAllViews();
-    if (!silent) new Notice('Layout loaded');
+    this.layoutAutosaveDirty = false;
+    this.layoutStillFrames = 0;
+    return true;
   }
 
   // Grid occupancy utilities for collision-safe snapping.
