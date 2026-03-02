@@ -613,6 +613,7 @@ function getOrbitRadiusForAnchor(plugin, orbitNodeCount) {
 function buildAttachmentAutoOrbitMap(view, activeNodeIds = null) {
   const autoOrbitMap = new Map();
   const settings = view.plugin.getSettings();
+  if (settings.attachments_on_orbits === false) return autoOrbitMap;
   const attachmentLinkDistance = view.plugin.clampNumber(
     settings.attachment_link_distance_multiplier,
     1,

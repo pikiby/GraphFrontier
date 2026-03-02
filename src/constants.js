@@ -25,6 +25,7 @@ const DEFAULT_DATA = {
     show_grid: true,
     hide_orphans: true,
     hide_attachments: true,
+    attachments_on_orbits: true,
     existing_files_only: true,
     search_mode: 'find',
     quick_pick_modifier: 'alt',

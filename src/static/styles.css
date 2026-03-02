@@ -387,6 +387,10 @@
   display: block;
 }
 
+.graphfrontier-layout-file-row {
+  margin-bottom: 10px;
+}
+
 .graphfrontier-search-mode-toggle {
   width: 34px;
 }

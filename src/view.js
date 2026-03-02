@@ -310,6 +310,18 @@ class GraphFrontierView extends ItemView {
       hint: 'Show non-markdown files as attachment nodes',
     });
     if (!this.plugin.data.settings.hide_attachments) {
+      this.addSideToggle(
+        displaySection,
+        'Attachments on orbits',
+        'attachments_on_orbits',
+        'render',
+        {
+          hint: 'Automatically place free attachments on orbits around linked nodes',
+          onChange: () => {
+            this.kickLayoutSearch();
+          },
+        }
+      );
       this.addSideSlider(
         displaySection,
         'Attachment size',
@@ -516,6 +528,9 @@ class GraphFrontierView extends ItemView {
       updateButton(nextUiValue);
       this.plugin.schedulePersist();
       this.applyRefreshMode(refreshMode);
+      if (typeof options.onChange === 'function') {
+        options.onChange(this.plugin.data.settings[key]);
+      }
       if (options.rebuildPanelOnChange) {
         this.buildSidePanel();
       }
@@ -620,6 +635,19 @@ class GraphFrontierView extends ItemView {
         new Notice('Clear search field to save');
         return;
       }
+      const targetLayoutFileName = this.getLayoutFileNameFromInputValue(
+        this.layoutFileSearchInputEl
+          ? this.layoutFileSearchInputEl.value
+          : this.layoutFileSearchInputValue
+      );
+      const switched = await this.plugin.setActiveLayoutFile(targetLayoutFileName, {
+        loadFromFile: false,
+      });
+      if (!switched) {
+        new Notice('Cannot use layout name');
+        return;
+      }
+      this.syncLayoutFileSelectionFromPlugin();
       await this.saveCurrentLayout();
     });
 
@@ -635,7 +663,7 @@ class GraphFrontierView extends ItemView {
 
   addLayoutFileSearchRow(parentEl) {
     this.syncLayoutFileSelectionFromPlugin();
-    const row = parentEl.createDiv({ cls: 'graphfrontier-find-row' });
+    const row = parentEl.createDiv({ cls: 'graphfrontier-find-row graphfrontier-layout-file-row' });
     const inputWrap = row.createDiv({
       cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor',
     });
@@ -654,10 +682,12 @@ class GraphFrontierView extends ItemView {
     });
     this.layoutFileSearchClearButtonEl = clearButton;
 
-    const openLayoutSuggestionPopup = async () => {
+    const openLayoutSuggestionPopup = async (rawQueryOverride = null) => {
       if (Date.now() < this.layoutFileSuggestSuppressUntilMs) return;
       const requestToken = ++this.layoutFileSuggestRequestToken;
-      const suggestionPack = await this.getLayoutFileSuggestionPack(String(inputEl.value || ''));
+      const effectiveQuery =
+        rawQueryOverride == null ? String(inputEl.value || '') : String(rawQueryOverride || '');
+      const suggestionPack = await this.getLayoutFileSuggestionPack(effectiveQuery);
       if (requestToken !== this.layoutFileSuggestRequestToken) return;
       const items = Array.isArray(suggestionPack?.items) ? suggestionPack.items : [];
       if (items.length <= 0) {
@@ -713,10 +743,10 @@ class GraphFrontierView extends ItemView {
       }, 0);
     });
     this.registerDomEvent(inputEl, 'click', () => {
-      openLayoutSuggestionPopup();
+      openLayoutSuggestionPopup('');
     });
     this.registerDomEvent(inputEl, 'focus', () => {
-      openLayoutSuggestionPopup();
+      openLayoutSuggestionPopup('');
     });
     this.registerDomEvent(clearButton, 'click', (event) => {
       event.preventDefault();
@@ -742,9 +772,10 @@ class GraphFrontierView extends ItemView {
 
   syncLayoutFileSelectionFromPlugin() {
     const activeLayoutName = this.plugin.getActiveLayoutFileName();
-    this.layoutFileSearchInputValue = activeLayoutName;
+    const activeLayoutDisplayName = this.getLayoutDisplayName(activeLayoutName);
+    this.layoutFileSearchInputValue = activeLayoutDisplayName;
     this.layoutFileSelectedName = activeLayoutName;
-    if (this.layoutFileSearchInputEl) this.layoutFileSearchInputEl.value = activeLayoutName;
+    if (this.layoutFileSearchInputEl) this.layoutFileSearchInputEl.value = activeLayoutDisplayName;
     this.syncLayoutFileSearchClearButtonVisibility();
   }
 
@@ -758,9 +789,13 @@ class GraphFrontierView extends ItemView {
     const filteredNames =
       queryText.length <= 0
         ? names
-        : names.filter((fileName) => fileName.toLowerCase().includes(queryText));
+        : names.filter((fileName) => {
+            const lowerFileName = fileName.toLowerCase();
+            const lowerDisplayName = this.getLayoutDisplayName(fileName).toLowerCase();
+            return lowerFileName.includes(queryText) || lowerDisplayName.includes(queryText);
+          });
     const items = filteredNames.map((fileName) => ({
-      title: fileName,
+      title: this.getLayoutDisplayName(fileName),
       value: fileName,
       description: listPath,
       kind: 'layout-file',
@@ -785,6 +820,22 @@ class GraphFrontierView extends ItemView {
     this.buildSidePanel();
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
+  }
+
+  getLayoutDisplayName(layoutFileName) {
+    const rawName = String(layoutFileName || '').trim();
+    return rawName.replace(/\.json$/iu, '');
+  }
+
+  getLayoutFileNameFromInputValue(rawInputValue) {
+    const rawText = String(rawInputValue || '').trim();
+    if (!rawText) return this.plugin.getActiveLayoutFileName();
+    const selectedFileName = String(this.layoutFileSelectedName || '').trim();
+    if (selectedFileName) {
+      const selectedDisplay = this.getLayoutDisplayName(selectedFileName).toLowerCase();
+      if (selectedDisplay === rawText.toLowerCase()) return selectedFileName;
+    }
+    return this.plugin.normalizeLayoutFileName(rawText);
   }
 
   // Search block: find/filter mode controls, source picker (name/content), and node suggestions.
@@ -3418,42 +3469,129 @@ class GraphFrontierView extends ItemView {
     }
     menu.addSeparator();
 
+    this.addContextSubmenuItem(menu, {
+      title: 'Pin/unpin linked',
+      icon: 'links',
+      clientX,
+      clientY,
+      fillSubmenu: (submenu) => {
+        this.addLinkedNodesActionsToMenu(submenu, node.id);
+      },
+    });
+    this.addContextSubmenuItem(menu, {
+      title: 'Pin/unpin attachments',
+      icon: 'paperclip',
+      clientX,
+      clientY,
+      fillSubmenu: (submenu) => {
+        this.addAttachmentNodesActionsToMenu(submenu, node.id);
+      },
+    });
+
+    this.showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent);
+  }
+
+  addContextSubmenuItem(menu, options) {
+    menu.addItem((item) => item.setTitle(options.title).setIcon(options.icon || 'chevron-right'));
+    const menuItem = menu.items[menu.items.length - 1];
+    if (menuItem && typeof menuItem.setSubmenu === 'function') {
+      const submenu = menuItem.setSubmenu();
+      options.fillSubmenu(submenu);
+      return;
+    }
+    if (!menuItem) return;
+    menuItem.onClick(() => {
+      const submenu = new Menu(this.app);
+      options.fillSubmenu(submenu);
+      this.contentEl.win.setTimeout(() => {
+        this.showMenuAtPointer(submenu, options.clientX, options.clientY, null);
+      }, 0);
+    });
+  }
+
+  addLinkedNodesActionsToMenu(menu, nodeId) {
     menu.addItem((item) =>
       item
         .setTitle('Pin linked nodes')
         .setIcon('pin')
         .onClick(async () => {
-          await this.pinLinkedNodes(node.id);
+          await this.pinLinkedNodes(nodeId);
         })
     );
-
     menu.addItem((item) =>
       item
         .setTitle('Pin linked nodes to grid')
         .setIcon('pin')
         .onClick(async () => {
-          await this.pinLinkedNodesToGrid(node.id);
+          await this.pinLinkedNodesToGrid(nodeId);
         })
     );
-
     menu.addItem((item) =>
       item
-        .setTitle('Pin linked to orbit')
+        .setTitle('Pin linked nodes to orbit')
         .setIcon('orbit')
         .onClick(async () => {
-          await this.pinLinkedNodesToOrbit(node.id);
+          await this.pinLinkedNodesToOrbit(nodeId);
         })
     );
-
     menu.addItem((item) =>
       item
         .setTitle('Unpin linked nodes')
         .setIcon('pin-off')
         .onClick(async () => {
-          await this.unpinLinkedNodes(node.id);
+          await this.unpinLinkedNodes(nodeId);
         })
     );
+  }
 
+  addAttachmentNodesActionsToMenu(menu, nodeId) {
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin attachments')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinLinkedNodes(nodeId, {
+            targetKind: 'attachment',
+            targetLabel: 'attachments',
+          });
+        })
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin attachments to grid')
+        .setIcon('pin')
+        .onClick(async () => {
+          await this.pinLinkedNodesToGrid(nodeId, {
+            targetKind: 'attachment',
+            targetLabel: 'attachments',
+          });
+        })
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle('Pin attachments to orbit')
+        .setIcon('orbit')
+        .onClick(async () => {
+          await this.pinLinkedNodesToOrbit(nodeId, {
+            targetKind: 'attachment',
+            targetLabel: 'attachments',
+          });
+        })
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle('Unpin attachments')
+        .setIcon('pin-off')
+        .onClick(async () => {
+          await this.unpinLinkedNodes(nodeId, {
+            targetKind: 'attachment',
+            targetLabel: 'attachments',
+          });
+        })
+    );
+  }
+
+  showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent = null) {
     if (sourceMouseEvent && typeof menu.showAtMouseEvent === 'function') {
       menu.showAtMouseEvent(sourceMouseEvent);
       return;
@@ -3878,10 +4016,28 @@ class GraphFrontierView extends ItemView {
   }
 
   // Linked-node bulk actions: pin, unpin, and pin-to-grid for neighbor nodes.
-  async pinLinkedNodes(nodeId) {
-    const linkedNodeIds = this.getLinkedRegularNodeIds(nodeId);
+  getLinkedTargetOptions(options = {}) {
+    const targetKind = options.targetKind === 'attachment' ? 'attachment' : 'regular';
+    const targetLabel =
+      typeof options.targetLabel === 'string' && options.targetLabel.trim()
+        ? options.targetLabel.trim()
+        : targetKind === 'attachment'
+          ? 'attachments'
+          : 'linked nodes';
+    const noPinsLabel =
+      typeof options.noPinsLabel === 'string' && options.noPinsLabel.trim()
+        ? options.noPinsLabel.trim()
+        : targetKind === 'attachment'
+          ? 'attachment pins'
+          : 'linked pins';
+    return { targetKind, targetLabel, noPinsLabel };
+  }
+
+  async pinLinkedNodes(nodeId, options = {}) {
+    const { targetKind, targetLabel } = this.getLinkedTargetOptions(options);
+    const linkedNodeIds = this.getLinkedNodeIdsByKind(nodeId, targetKind);
     if (linkedNodeIds.length === 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
@@ -3896,19 +4052,20 @@ class GraphFrontierView extends ItemView {
     }
 
     if (pinnedCount <= 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Pinned linked nodes: ${pinnedCount}`);
+    new Notice(`Pinned ${targetLabel}: ${pinnedCount}`);
   }
 
-  async pinLinkedNodesToGrid(nodeId) {
-    const linkedNodeIds = this.getLinkedRegularNodeIds(nodeId);
+  async pinLinkedNodesToGrid(nodeId, options = {}) {
+    const { targetKind, targetLabel } = this.getLinkedTargetOptions(options);
+    const linkedNodeIds = this.getLinkedNodeIdsByKind(nodeId, targetKind);
     if (linkedNodeIds.length === 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
@@ -3937,19 +4094,20 @@ class GraphFrontierView extends ItemView {
     }
 
     if (pinnedCount <= 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Pinned linked nodes to grid: ${pinnedCount}`);
+    new Notice(`Pinned ${targetLabel} to grid: ${pinnedCount}`);
   }
 
-  async unpinLinkedNodes(nodeId) {
-    const linkedNodeIds = this.getLinkedNodeIds(nodeId);
+  async unpinLinkedNodes(nodeId, options = {}) {
+    const { targetKind, targetLabel, noPinsLabel } = this.getLinkedTargetOptions(options);
+    const linkedNodeIds = this.getLinkedNodeIdsByKind(nodeId, targetKind);
     if (linkedNodeIds.length === 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
@@ -3968,13 +4126,13 @@ class GraphFrontierView extends ItemView {
     }
 
     if (unpinnedCount <= 0) {
-      new Notice('No linked pins');
+      new Notice(`No ${noPinsLabel}`);
       return;
     }
 
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Unpinned linked nodes: ${unpinnedCount}`);
+    new Notice(`Unpinned ${targetLabel}: ${unpinnedCount}`);
   }
 
   // Orbit geometry and auto-orbit rules for linked nodes and attachments.
@@ -3987,6 +4145,7 @@ class GraphFrontierView extends ItemView {
   }
 
   buildAttachmentAutoOrbitMap() {
+    if (this.plugin.data.settings.attachments_on_orbits === false) return new Map();
     return buildAttachmentAutoOrbitMapPhysics(this);
   }
 
@@ -3994,13 +4153,14 @@ class GraphFrontierView extends ItemView {
     return recomputeOrbitRadiiPhysics(this);
   }
 
-  async pinLinkedNodesToOrbit(nodeId) {
+  async pinLinkedNodesToOrbit(nodeId, options = {}) {
     const anchorNode = this.nodeById.get(nodeId);
     if (!anchorNode) return;
 
-    const linkedNodeIds = this.getLinkedRegularNodeIds(nodeId);
+    const { targetKind, targetLabel } = this.getLinkedTargetOptions(options);
+    const linkedNodeIds = this.getLinkedNodeIdsByKind(nodeId, targetKind);
     if (linkedNodeIds.length === 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
@@ -4030,13 +4190,13 @@ class GraphFrontierView extends ItemView {
     }
 
     if (orbitPinnedCount <= 0) {
-      new Notice('No linked nodes');
+      new Notice(`No ${targetLabel}`);
       return;
     }
 
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Orbit pinned linked nodes: ${orbitPinnedCount}`);
+    new Notice(`Orbit pinned ${targetLabel}: ${orbitPinnedCount}`);
   }
 
   async unpinLinkedNodesFromOrbit(nodeId) {
@@ -4077,13 +4237,16 @@ class GraphFrontierView extends ItemView {
     return result;
   }
 
-  getLinkedRegularNodeIds(nodeId) {
+  getLinkedNodeIdsByKind(nodeId, targetKind = 'all') {
     const linkedNodeIds = this.getLinkedNodeIds(nodeId);
+    if (targetKind !== 'regular' && targetKind !== 'attachment') return linkedNodeIds;
     const result = [];
     for (const linkedNodeId of linkedNodeIds) {
       const linkedNode = this.nodeById.get(linkedNodeId);
       if (!linkedNode) continue;
-      if (linkedNode.meta?.isAttachment) continue;
+      const isAttachment = !!linkedNode.meta?.isAttachment;
+      if (targetKind === 'regular' && isAttachment) continue;
+      if (targetKind === 'attachment' && !isAttachment) continue;
       result.push(linkedNodeId);
     }
     return result;

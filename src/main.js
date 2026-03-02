@@ -1296,6 +1296,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   async openOrRevealGraphFrontierView() {
+    const activeLayoutName = this.getActiveLayoutFileName();
+    await this.setActiveLayoutFile(activeLayoutName, { loadFromFile: true });
     const existingLeaf = this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)[0];
     const leaf = existingLeaf || this.app.workspace.getLeaf('tab') || this.app.workspace.getLeaf(true);
     await leaf.setViewState({ type: GRAPHFRONTIER_VIEW_TYPE, active: true });
