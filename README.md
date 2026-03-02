@@ -32,13 +32,25 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.6.8/graphfrontier-0.6.8.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.6.10/graphfrontier-0.6.10.zip
 
-1. Download `graphfrontier-0.6.8.zip` from Releases
+1. Download `graphfrontier-0.6.10.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
    - `Settings -> Community plugins -> GraphFrontier -> Enable`
+
+## Recent Updates (0.6.10)
+
+- New right-click actions for linked nodes:
+  - `Select linked nodes`
+  - `Copy linked names`
+  - `Copy linked paths`
+- Linked copy output format:
+  - one item per line
+  - commas on each line except the last
+- Multi-selection controls moved to a dedicated `Selection` section above `Display`
+- `Box select` and `Add/remove selected` controls restyled to match the side panel `Hide` button style
 
 ## Features
 
