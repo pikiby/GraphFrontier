@@ -81,7 +81,7 @@ https://github.com/pikiby/GraphFrontier/releases/download/0.6.10/graphfrontier-0
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/pin_orbit.gif" alt="Pin linked nodes to orbit demo" width="100%">
+      <img src="docs/media/moving.gif" alt="Pin linked nodes to orbit demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Place linked nodes on another node orbit with one click</strong></p>
     </td>
