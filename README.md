@@ -135,9 +135,9 @@ https://github.com/pikiby/GraphFrontier/releases/download/0.6.10/graphfrontier-0
       <p style="font-size: 1.05em;"><strong>Hotkey support</strong></p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/commands.gif" alt="Command support demo" width="100%">
+      <img src="docs/media/copy_linked_names.gif" alt="Copy linked names and paths demo" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Command support</strong></p>
+      <p style="font-size: 1.05em;"><strong>Copy linked names and paths in one click</strong></p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
