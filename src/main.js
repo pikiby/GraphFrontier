@@ -40,6 +40,7 @@ function registerGraphFrontierCommands(plugin) {
     { id: 'graphfrontier-toggle-selection-under-cursor', name: 'Toggle selection under cursor', method: 'commandToggleSelectionUnderCursor' },
     { id: 'graphfrontier-arm-box-selection', name: 'Arm box selection', method: 'commandArmBoxSelection' },
     { id: 'graphfrontier-clear-selection', name: 'Clear selection', method: 'commandClearSelection' },
+    { id: 'graphfrontier-export-static-html', name: 'Export static graph to HTML', method: 'commandExportStaticHtml' },
     { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor', method: 'commandUnpinLinkedNodes' },
     { id: 'graphfrontier-add-to-search-under-cursor', name: 'Add to search under cursor', method: 'commandAddToSearch' },
     { id: 'graphfrontier-show-local-graph-under-cursor', name: 'Show local graph under cursor', method: 'commandShowLocalGraph' },
@@ -75,7 +76,12 @@ function registerGraphFrontierCommands(plugin) {
 
 // Register all data/layout change listeners that trigger a graph refresh.
 function registerGraphFrontierRefreshEvents(plugin) {
-  plugin.registerEvent(plugin.app.metadataCache.on('resolved', () => plugin.scheduleRefreshAllViews()));
+  plugin.registerEvent(
+    plugin.app.metadataCache.on('resolved', () => {
+      plugin.metadataResolvedOnce = true;
+      plugin.scheduleRefreshAllViews({ metadataResolved: true });
+    })
+  );
   plugin.registerEvent(plugin.app.vault.on('create', () => plugin.scheduleRefreshAllViews()));
   plugin.registerEvent(plugin.app.vault.on('modify', () => plugin.scheduleRefreshAllViews()));
   plugin.registerEvent(plugin.app.vault.on('delete', () => plugin.scheduleRefreshAllViews()));
@@ -159,6 +165,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this.data = this.normalizeData(loadedData);
     this._persistTimer = null;
     this._refreshTimer = null;
+    this._pendingRefreshOptions = {};
+    const resolvedLinks = this.app?.metadataCache?.resolvedLinks;
+    this.metadataResolvedOnce =
+      !!resolvedLinks &&
+      typeof resolvedLinks === 'object' &&
+      Object.keys(resolvedLinks).length > 0;
     await this.bootstrapActiveLayoutData();
 
     // UI entry point: ribbon icon opens GraphFrontier view.
@@ -180,6 +192,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   onunload() {
     if (this._persistTimer) window.clearTimeout(this._persistTimer);
     if (this._refreshTimer) window.clearTimeout(this._refreshTimer);
+    this._pendingRefreshOptions = {};
   }
 
   // Persisted-data normalization: sanitize and repair loaded state before use.
@@ -397,6 +410,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       ? normalized.settings.selection_toggle_modifier
       : DEFAULT_DATA.settings.selection_toggle_modifier;
     normalized.settings.layout_autosave = !!normalized.settings.layout_autosave;
+    normalized.settings.export_static_html_path =
+      typeof normalized.settings.export_static_html_path === 'string'
+        ? normalized.settings.export_static_html_path.trim()
+        : '';
     delete normalized.settings.max_multiplier;
     delete normalized.settings.label_min_zoom;
     delete normalized.settings.orbit_distance_multiplier;
@@ -475,6 +492,20 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.view_state.pan_x = this.clampNumber(normalized.view_state.pan_x, -1e7, 1e7, 0);
     normalized.view_state.pan_y = this.clampNumber(normalized.view_state.pan_y, -1e7, 1e7, 0);
     normalized.view_state.zoom = this.clampNumber(normalized.view_state.zoom, MIN_ZOOM, MAX_ZOOM, 1);
+    const rawSidePanelSections =
+      normalized.view_state.side_panel_sections
+      && typeof normalized.view_state.side_panel_sections === 'object'
+        ? normalized.view_state.side_panel_sections
+        : {};
+    const nextSidePanelSections = {};
+    for (const [rawSectionId, rawState] of Object.entries(rawSidePanelSections)) {
+      const sectionId = String(rawSectionId || '')
+        .trim()
+        .toLowerCase();
+      if (!sectionId) continue;
+      nextSidePanelSections[sectionId] = !!rawState;
+    }
+    normalized.view_state.side_panel_sections = nextSidePanelSections;
 
     return normalized;
   }
@@ -507,6 +538,36 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const num = Number(value);
     if (!Number.isFinite(num)) return fallback;
     return Math.min(max, Math.max(min, num));
+  }
+
+  getSidePanelSectionsState() {
+    const rawSidePanelSections =
+      this.data?.view_state?.side_panel_sections
+      && typeof this.data.view_state.side_panel_sections === 'object'
+        ? this.data.view_state.side_panel_sections
+        : {};
+    const nextSidePanelSections = {};
+    for (const [rawSectionId, rawState] of Object.entries(rawSidePanelSections)) {
+      const sectionId = String(rawSectionId || '')
+        .trim()
+        .toLowerCase();
+      if (!sectionId) continue;
+      nextSidePanelSections[sectionId] = !!rawState;
+    }
+    return nextSidePanelSections;
+  }
+
+  applySidePanelSectionsState(targetData, sidePanelSectionsState = null) {
+    if (!targetData || typeof targetData !== 'object') return targetData;
+    if (!targetData.view_state || typeof targetData.view_state !== 'object') {
+      targetData.view_state = Object.assign({}, DEFAULT_DATA.view_state);
+    }
+    const normalizedSections =
+      sidePanelSectionsState && typeof sidePanelSectionsState === 'object'
+        ? sidePanelSectionsState
+        : this.getSidePanelSectionsState();
+    targetData.view_state.side_panel_sections = Object.assign({}, normalizedSections);
+    return targetData;
   }
 
   // Hotkey handling: normalize combos, detect conflicts, and intercept key events.
@@ -674,12 +735,88 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const filePath = this.getLayoutFileRelativePath(fileName);
     const normalizedData = this.normalizeData(dataObject);
     normalizedData.active_layout_name = fileName;
+    // Side panel section state is global UI state, not layout-specific.
+    if (!normalizedData.view_state || typeof normalizedData.view_state !== 'object') {
+      normalizedData.view_state = Object.assign({}, DEFAULT_DATA.view_state);
+    }
+    normalizedData.view_state.side_panel_sections = {};
     try {
       await adapter.write(filePath, `${JSON.stringify(normalizedData, null, 2)}\n`);
       return true;
     } catch {
       return false;
     }
+  }
+
+  async deleteLayoutFile(layoutFileName) {
+    const fileName = this.normalizeLayoutFileName(layoutFileName);
+    const existingLayoutNames = await this.listLayoutFileNames();
+    if (!existingLayoutNames.includes(fileName)) {
+      return { ok: false, reason: 'not-found' };
+    }
+    if (existingLayoutNames.length <= 1) {
+      return { ok: false, reason: 'last-layout' };
+    }
+
+    const filePath = this.getLayoutFileRelativePath(fileName);
+    const adapter = this.app?.vault?.adapter;
+    let removed = false;
+
+    if (adapter && typeof adapter.remove === 'function') {
+      try {
+        await adapter.remove(filePath);
+        removed = true;
+      } catch {
+        removed = false;
+      }
+    }
+
+    if (!removed) {
+      const abstractFile = this.app?.vault?.getAbstractFileByPath(filePath);
+      if (abstractFile && typeof this.app?.vault?.trash === 'function') {
+        try {
+          await this.app.vault.trash(abstractFile, false);
+          removed = true;
+        } catch {
+          removed = false;
+        }
+      }
+    }
+
+    if (!removed) {
+      return { ok: false, reason: 'delete-failed' };
+    }
+
+    const wasActiveLayout = this.getActiveLayoutFileName() === fileName;
+    if (!wasActiveLayout) {
+      return {
+        ok: true,
+        deletedLayoutName: fileName,
+        activeLayoutName: this.getActiveLayoutFileName(),
+        activeChanged: false,
+      };
+    }
+
+    const remainingLayoutNames = existingLayoutNames.filter((name) => name !== fileName);
+    const preferredFallback = this.normalizeLayoutFileName(DEFAULT_DATA.active_layout_name);
+    const nextActiveLayoutName = remainingLayoutNames.includes(preferredFallback)
+      ? preferredFallback
+      : remainingLayoutNames[0];
+    if (!nextActiveLayoutName) {
+      return { ok: false, reason: 'no-fallback' };
+    }
+
+    const switched = await this.setActiveLayoutFile(nextActiveLayoutName, { loadFromFile: true });
+    if (!switched) {
+      return { ok: false, reason: 'active-switch-failed' };
+    }
+
+    return {
+      ok: true,
+      deletedLayoutName: fileName,
+      activeLayoutName: this.getActiveLayoutFileName(),
+      activeChanged: true,
+    };
   }
 
   async persistPluginDataOnly() {
@@ -696,16 +833,19 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
   async bootstrapActiveLayoutData() {
     await this.ensureLayoutsFolder();
+    const preservedSidePanelSections = this.getSidePanelSectionsState();
     const activeLayoutName = this.getActiveLayoutFileName();
     const loadedLayoutData = await this.readLayoutFileData(activeLayoutName);
     if (loadedLayoutData && typeof loadedLayoutData === 'object') {
       const normalizedLayoutData = this.normalizeData(loadedLayoutData);
       normalizedLayoutData.active_layout_name = activeLayoutName;
+      this.applySidePanelSectionsState(normalizedLayoutData, preservedSidePanelSections);
       this.data = normalizedLayoutData;
       await this.persistPluginDataOnly();
       return;
     }
     this.data.active_layout_name = activeLayoutName;
+    this.applySidePanelSectionsState(this.data, preservedSidePanelSections);
     await this.persistPluginDataOnly();
     await this.persistActiveLayoutFile();
   }
@@ -716,6 +856,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       this._persistTimer = null;
       await this.persistPluginDataOnly();
     }
+    const preservedSidePanelSections = this.getSidePanelSectionsState();
     const nextLayoutName = this.normalizeLayoutFileName(layoutFileName);
     const shouldLoadFromFile = options.loadFromFile !== false;
     let nextData = this.normalizeData(this.data);
@@ -725,6 +866,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       nextData = this.normalizeData(loadedLayoutData);
     }
     nextData.active_layout_name = nextLayoutName;
+    this.applySidePanelSectionsState(nextData, preservedSidePanelSections);
     this.data = nextData;
     await this.persistPluginDataOnly();
     return true;
@@ -878,10 +1020,17 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     return this.data.settings;
   }
 
-  scheduleRefreshAllViews() {
+  scheduleRefreshAllViews(options = {}) {
+    if (!this._pendingRefreshOptions || typeof this._pendingRefreshOptions !== 'object') {
+      this._pendingRefreshOptions = {};
+    }
+    const safeOptions = options && typeof options === 'object' ? options : {};
+    this._pendingRefreshOptions = Object.assign({}, this._pendingRefreshOptions, safeOptions);
     if (this._refreshTimer) window.clearTimeout(this._refreshTimer);
     this._refreshTimer = window.setTimeout(() => {
-      this.refreshAllViews();
+      const nextOptions = Object.assign({}, this._pendingRefreshOptions);
+      this._pendingRefreshOptions = {};
+      this.refreshAllViews(nextOptions);
     }, 300);
   }
 

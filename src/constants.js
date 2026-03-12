@@ -48,11 +48,13 @@ const DEFAULT_DATA = {
     center_strength: 52,
     damping: 0.18,
     layout_autosave: false,
+    export_static_html_path: '',
   },
   view_state: {
     pan_x: 0,
     pan_y: 0,
     zoom: 1,
+    side_panel_sections: {},
   },
 };
 
@@ -89,6 +91,10 @@ const HOTKEY_COMMANDS = [
   {
     id: 'graphfrontier-clear-selection',
     name: 'Clear selection',
+  },
+  {
+    id: 'graphfrontier-export-static-html',
+    name: 'Export static graph to HTML',
   },
   { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor' },
   { id: 'graphfrontier-paint-edges-under-cursor', name: 'Paint edges under cursor' },

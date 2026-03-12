@@ -1,6 +1,7 @@
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
 
 const {
+  DEFAULT_DATA,
   GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
   NODE_MULTIPLIER_MAX,
@@ -80,7 +81,12 @@ class GraphFrontierView extends ItemView {
     this.panDragMovedDistance = 0;
     this.sidePanelOpen = true;
     this.sideControls = new Map();
-    this.sidePanelSectionState = {};
+    const savedSidePanelSections =
+      plugin.data?.view_state?.side_panel_sections &&
+      typeof plugin.data.view_state.side_panel_sections === 'object'
+        ? plugin.data.view_state.side_panel_sections
+        : {};
+    this.sidePanelSectionState = Object.assign({}, savedSidePanelSections);
     this.groupEditorRows = [];
     this.draggingGroupRow = null;
     this.blacklistEditorRows = [];
@@ -121,6 +127,7 @@ class GraphFrontierView extends ItemView {
     this.layoutStillFrames = 0;
     this.layoutAutosaveDirty = false;
     this.layoutPaused = false;
+    this.hasSeenMetadataResolvedRefresh = !!this.plugin.metadataResolvedOnce;
     this.quickPreviewEl = null;
     this.quickPreviewTitleEl = null;
     this.quickPreviewBodyEl = null;
@@ -493,18 +500,30 @@ class GraphFrontierView extends ItemView {
     });
     const content = section.createDiv({ cls: 'graphfrontier-sidepanel-section-content' });
 
-    const applyOpenState = (nextOpen) => {
+    const applyOpenState = (nextOpen, persist = true) => {
       isOpen = !!nextOpen;
       section.toggleClass('is-open', isOpen);
       toggleBtn.toggleClass('is-open', isOpen);
       toggleBtn.setAttr('aria-expanded', isOpen ? 'true' : 'false');
-      if (sectionId) this.sidePanelSectionState[sectionId] = isOpen;
+      if (!sectionId) return;
+      const previousState = this.sidePanelSectionState[sectionId];
+      this.sidePanelSectionState[sectionId] = isOpen;
+      if (!persist) return;
+      if (previousState === isOpen) return;
+      if (!this.plugin.data.view_state || typeof this.plugin.data.view_state !== 'object') {
+        this.plugin.data.view_state = Object.assign({}, DEFAULT_DATA.view_state);
+      }
+      this.plugin.data.view_state.side_panel_sections = Object.assign(
+        {},
+        this.sidePanelSectionState
+      );
+      this.plugin.schedulePersist();
     };
 
-    applyOpenState(isOpen);
+    applyOpenState(isOpen, false);
     this.registerDomEvent(toggleBtn, 'click', (event) => {
       event.preventDefault();
-      applyOpenState(!isOpen);
+      applyOpenState(!isOpen, true);
     });
 
     return content;
@@ -734,6 +753,15 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(loadButton, 'click', async () => {
       await this.loadSavedLayout();
     });
+
+    const exportButton = buttonsWrap.createEl('button', {
+      cls: 'graphfrontier-sidepanel-save',
+      text: 'Export to',
+    });
+    exportButton.setAttr('title', 'Export static graph HTML to selected path');
+    this.registerDomEvent(exportButton, 'click', async () => {
+      await this.commandExportStaticHtml();
+    });
   }
 
   addLayoutFileSearchRow(parentEl) {
@@ -750,12 +778,37 @@ class GraphFrontierView extends ItemView {
     inputEl.value = this.layoutFileSearchInputValue;
     this.layoutFileSearchInputEl = inputEl;
 
-    const clearButton = inputWrap.createEl('button', {
-      cls: 'graphfrontier-search-inline-clear',
-      text: 'x',
-      attr: { 'aria-label': 'Clear layout selection' },
-    });
-    this.layoutFileSearchClearButtonEl = clearButton;
+    this.layoutFileSearchClearButtonEl = null;
+
+    const deleteLayoutByName = async (layoutFileName) => {
+      const normalizedName = this.plugin.normalizeLayoutFileName(layoutFileName);
+      if (!normalizedName) return;
+      const result = await this.plugin.deleteLayoutFile(normalizedName);
+      if (!result || result.ok !== true) {
+        const reason = String(result?.reason || '');
+        if (reason === 'last-layout') new Notice('Cannot delete the last layout');
+        else if (reason === 'not-found') new Notice('Layout file not found');
+        else new Notice('Failed to delete layout');
+        return;
+      }
+
+      if (result.activeChanged) {
+        this.syncLayoutFileSelectionFromPlugin();
+        this.plugin.refreshAllViews({ forceSavedPositions: true });
+        this.buildSidePanel();
+        this.kickLayoutSearch();
+        this.plugin.renderAllViews();
+        return;
+      }
+
+      this.layoutFileSuggestSuppressUntilMs = Date.now() + 220;
+      this.closeInputSuggestMenu();
+      inputEl.focus();
+      this.contentEl.win.setTimeout(() => {
+        this.layoutFileSuggestSuppressUntilMs = 0;
+        void openLayoutSuggestionPopup('');
+      }, 0);
+    };
 
     const openLayoutSuggestionPopup = async (rawQueryOverride = null) => {
       if (Date.now() < this.layoutFileSuggestSuppressUntilMs) return;
@@ -769,9 +822,20 @@ class GraphFrontierView extends ItemView {
         this.closeInputSuggestMenu();
         return;
       }
+      const itemsWithDeleteAction = items.map((item) =>
+        String(item?.kind || '') === 'layout-file'
+          ? Object.assign({}, item, {
+              actionLabel: 'x',
+              actionTitle: `Delete layout "${String(item?.title || item?.value || '').trim()}"`,
+              onAction: () => {
+                void deleteLayoutByName(String(item?.value || ''));
+              },
+            })
+          : item
+      );
       this.showInputSuggestMenu(
         inputEl,
-        items,
+        itemsWithDeleteAction,
         (selectedText) => {
           void this.selectActiveLayoutFileByName(String(selectedText || ''));
         },
@@ -823,16 +887,6 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(inputEl, 'focus', () => {
       openLayoutSuggestionPopup('');
     });
-    this.registerDomEvent(clearButton, 'click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.layoutFileSuggestSuppressUntilMs = Date.now() + 220;
-      this.syncLayoutFileSelectionFromPlugin();
-      this.syncLayoutFileSearchClearButtonVisibility();
-      this.closeInputSuggestMenu();
-      inputEl.focus();
-    });
-
     this.syncLayoutFileSearchClearButtonVisibility();
   }
 
@@ -1754,12 +1808,19 @@ class GraphFrontierView extends ItemView {
       const titleText = String(rawSuggestion?.title || rawSuggestion?.value || '').trim();
       const valueText = String(rawSuggestion?.value || rawSuggestion?.title || '').trim();
       if (!titleText || !valueText) continue;
+      const onAction =
+        rawSuggestion && typeof rawSuggestion.onAction === 'function'
+          ? rawSuggestion.onAction
+          : null;
       normalizedSuggestions.push({
         title: titleText,
         value: valueText,
         description: String(rawSuggestion?.description || '').trim(),
         selectable: rawSuggestion?.selectable !== false,
         kind: String(rawSuggestion?.kind || 'default'),
+        onAction,
+        actionLabel: onAction ? String(rawSuggestion?.actionLabel || '').trim() || 'x' : '',
+        actionTitle: onAction ? String(rawSuggestion?.actionTitle || '').trim() : '',
       });
     }
     if (normalizedSuggestions.length <= 0) return;
@@ -1784,17 +1845,46 @@ class GraphFrontierView extends ItemView {
       const itemEl = ownerDocument.createElement('div');
       itemEl.className = 'graphfrontier-input-menu-item';
       itemEl.setAttribute('role', 'option');
+      const hasAction = typeof suggestion.onAction === 'function';
+
+      let textContainerEl = itemEl;
+      if (hasAction) {
+        itemEl.style.display = 'flex';
+        itemEl.style.alignItems = 'flex-start';
+        itemEl.style.justifyContent = 'space-between';
+        itemEl.style.gap = '8px';
+        textContainerEl = ownerDocument.createElement('div');
+        textContainerEl.style.minWidth = '0';
+        textContainerEl.style.flex = '1 1 auto';
+        itemEl.appendChild(textContainerEl);
+      }
 
       const mainTextEl = ownerDocument.createElement('div');
       mainTextEl.className = 'graphfrontier-input-menu-main';
       mainTextEl.textContent = suggestion.title;
-      itemEl.appendChild(mainTextEl);
+      textContainerEl.appendChild(mainTextEl);
 
       if (suggestion.description) {
         const descEl = ownerDocument.createElement('div');
         descEl.className = 'graphfrontier-input-menu-desc';
         descEl.textContent = suggestion.description;
-        itemEl.appendChild(descEl);
+        textContainerEl.appendChild(descEl);
+      }
+
+      if (hasAction) {
+        const actionBtnEl = ownerDocument.createElement('button');
+        actionBtnEl.className = 'graphfrontier-group-remove';
+        actionBtnEl.setAttribute('type', 'button');
+        const actionTitle = suggestion.actionTitle || 'Delete';
+        actionBtnEl.setAttribute('aria-label', actionTitle);
+        actionBtnEl.setAttribute('title', actionTitle);
+        actionBtnEl.textContent = suggestion.actionLabel || 'x';
+        actionBtnEl.addEventListener('mousedown', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          suggestion.onAction(suggestion);
+        });
+        itemEl.appendChild(actionBtnEl);
       }
 
       if (!suggestion.selectable) itemEl.classList.add('is-disabled');
@@ -2547,6 +2637,12 @@ class GraphFrontierView extends ItemView {
   refreshFromVault(opts = {}) {
     const keepCamera = !!opts.keepCamera;
     const forceSavedPositions = !!opts.forceSavedPositions;
+    const metadataResolved = !!opts.metadataResolved;
+    if (metadataResolved) {
+      this.hasSeenMetadataResolvedRefresh = true;
+    } else if (this.plugin.metadataResolvedOnce) {
+      this.hasSeenMetadataResolvedRefresh = true;
+    }
     const graphData = this.plugin.collectGraphData();
     this.syncGraphRuntimeState(graphData, { forceSavedPositions });
     this.markGraphVisibilityDirty();
@@ -2559,7 +2655,9 @@ class GraphFrontierView extends ItemView {
     this.scheduleContentSearchIndexRebuild();
     this.updateLayoutCenter();
 
-    this.cleanupDetachedData();
+    this.cleanupDetachedData({
+      allowDestructivePrune: this.hasSeenMetadataResolvedRefresh,
+    });
 
     if (!keepCamera) {
       this.fitCameraToNodes();
@@ -2765,7 +2863,9 @@ class GraphFrontierView extends ItemView {
   }
 
   // Data cleanup and initial framing after graph rebuild.
-  cleanupDetachedData() {
+  cleanupDetachedData(options = {}) {
+    const allowDestructivePrune = !!options.allowDestructivePrune;
+    if (!allowDestructivePrune) return;
     const nodeIds = new Set(this.nodes.map((node) => node.id));
 
     let changed = false;
@@ -4096,6 +4196,891 @@ class GraphFrontierView extends ItemView {
     new Notice('Selection cleared');
   }
 
+  async commandExportStaticHtml(options = {}) {
+    const preselectedPath = String(options?.exportPath || '').trim();
+    const savedPath = String(this.plugin.data?.settings?.export_static_html_path || '').trim();
+    let exportPath = preselectedPath;
+    if (!exportPath) {
+      exportPath = await ExportStaticHtmlPathModal.openFor(this.app, savedPath);
+      if (!exportPath) return;
+    }
+    if (!this.canvasEl || !this.ctx) {
+      new Notice('Graph canvas is not ready');
+      return;
+    }
+
+    let nodeRequire = null;
+    if (this.contentEl?.win && typeof this.contentEl.win.require === 'function') {
+      nodeRequire = this.contentEl.win.require.bind(this.contentEl.win);
+    } else if (typeof window !== 'undefined' && typeof window.require === 'function') {
+      nodeRequire = window.require.bind(window);
+    }
+    if (!nodeRequire) {
+      new Notice('Static HTML export is available only in desktop app');
+      return;
+    }
+
+    let fs = null;
+    let path = null;
+    try {
+      fs = nodeRequire('fs');
+      path = nodeRequire('path');
+    } catch {
+      new Notice('Cannot access filesystem APIs for export');
+      return;
+    }
+    const normalizedExportPath = String(exportPath || '').trim();
+    if (!normalizedExportPath) {
+      new Notice('Export path is empty');
+      return;
+    }
+    if (!path.isAbsolute(normalizedExportPath)) {
+      new Notice('Use absolute path for export');
+      return;
+    }
+    if (this.plugin.data.settings.export_static_html_path !== normalizedExportPath) {
+      this.plugin.data.settings.export_static_html_path = normalizedExportPath;
+      this.plugin.schedulePersist();
+    }
+
+    const visibleNodeIds = this.getFilterVisibleNodeIds();
+    const hasFilter = visibleNodeIds instanceof Set;
+    const sourceNodes = hasFilter
+      ? this.nodes.filter((node) => visibleNodeIds.has(node.id))
+      : this.nodes.slice();
+    const sourceNodeIdSet = new Set(sourceNodes.map((node) => node.id));
+    const sourceEdges = this.edges.filter(
+      (edge) => sourceNodeIdSet.has(edge.source) && sourceNodeIdSet.has(edge.target)
+    );
+
+    const maxPreviewLines = 220;
+    const maxPreviewChars = 12000;
+    const normalizePreviewText = (text) => {
+      const rawText = String(text || '');
+      if (!rawText) return '';
+      const lines = rawText.split(/\r?\n/);
+      let preview = lines.slice(0, maxPreviewLines).join('\n');
+      if (preview.length > maxPreviewChars) preview = preview.slice(0, maxPreviewChars);
+      if (lines.length > maxPreviewLines || rawText.length > maxPreviewChars) preview += '\n\n...';
+      return preview;
+    };
+    const exportedNodes = await Promise.all(
+      sourceNodes.map(async (node) => {
+        const meta = this.nodeMetaById.get(node.id) || node.meta || null;
+        const isAttachment = !!meta?.isAttachment;
+        const fileType =
+          String(meta?.fileType || '').trim() || (isAttachment ? 'attachment' : 'md');
+        const nodePath = String(meta?.path || node.id || '');
+        const fileName =
+          String(meta?.fileName || '').trim() || String(node.label || '').trim() || nodePath;
+
+        const properties = {};
+        if (meta?.properties instanceof Map) {
+          for (const [propertyKey, values] of meta.properties.entries()) {
+            if (!propertyKey) continue;
+            properties[propertyKey] = Array.isArray(values)
+              ? values.map((value) => String(value || ''))
+              : [];
+          }
+        }
+
+        let contentPreview = '';
+        if (!isAttachment) {
+          const abstractFile = this.app.vault.getAbstractFileByPath(node.id);
+          const isMarkdownFile =
+            !!abstractFile &&
+            typeof abstractFile.extension === 'string' &&
+            abstractFile.extension.toLowerCase() === 'md';
+          if (isMarkdownFile) {
+            try {
+              const rawText = await this.app.vault.cachedRead(abstractFile);
+              contentPreview = normalizePreviewText(rawText);
+            } catch {
+              contentPreview = '';
+            }
+          }
+        }
+
+        const groupColor = this.getGroupColorForNode(node);
+        const fillColor = isAttachment ? '#f2e7a0' : groupColor || '#7aa2f7';
+
+        return {
+          id: node.id,
+          label: String(node.label || ''),
+          x: Number(node.x) || 0,
+          y: Number(node.y) || 0,
+          degree: Number(node.degree) || 0,
+          radius: Number(this.getNodeRadius(node)) || 1,
+          color: fillColor,
+          isAttachment,
+          fileType,
+          path: nodePath,
+          fileName,
+          tags: Array.isArray(meta?.tags) ? meta.tags.map((tag) => String(tag || '')) : [],
+          sections: Array.isArray(meta?.sections)
+            ? meta.sections.map((section) => String(section || ''))
+            : [],
+          lines: Array.isArray(meta?.lines) ? meta.lines.map((line) => String(line || '')) : [],
+          properties,
+          contentPreview,
+        };
+      })
+    );
+
+    const exportedEdges = sourceEdges.map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+      paintedColor:
+        this.plugin.getPaintedEdgeColor(edge.source) ||
+        this.plugin.getPaintedEdgeColor(edge.target) ||
+        null,
+    }));
+
+    const width = Math.max(1, Math.floor(this.viewWidth || this.canvasEl.clientWidth || 1));
+    const height = Math.max(1, Math.floor(this.viewHeight || this.canvasEl.clientHeight || 1));
+    const computedStyles = getComputedStyle(this.contentEl);
+    const bgColor = computedStyles.getPropertyValue('--background-primary').trim() || '#111418';
+    const textColor = computedStyles.getPropertyValue('--text-normal').trim() || '#e6e8ed';
+    const mutedTextColor = computedStyles.getPropertyValue('--text-muted').trim() || '#9ea4af';
+    const exportedAt = new Date().toISOString();
+    const payload = {
+      exportPath: normalizedExportPath,
+      exportedAt,
+      camera: {
+        x: Number(this.camera.x) || 0,
+        y: Number(this.camera.y) || 0,
+        zoom: Number(this.camera.zoom) || 1,
+      },
+      canvas: { width, height },
+      theme: {
+        background: bgColor,
+        text: textColor,
+        mutedText: mutedTextColor,
+      },
+      settings: {
+        showGrid: !!this.plugin.getSettings().show_grid,
+        gridStep: this.plugin.clampGridStep(this.plugin.getSettings().grid_step),
+        edgeWidth: this.plugin.clampNumber(
+          this.plugin.getSettings().edge_width_scale,
+          0.01,
+          1,
+          DEFAULT_DATA.settings.edge_width_scale
+        ),
+        paintedEdgeWidth: this.plugin.clampNumber(
+          this.plugin.getSettings().painted_edge_width,
+          0.01,
+          1,
+          DEFAULT_DATA.settings.painted_edge_width
+        ),
+        labelMinZoom: this.getLabelZoomThreshold(),
+        labelFontSize: this.getLabelFontSize(),
+        zoomStepFactor: ZOOM_STEP_FACTOR,
+        minZoom: MIN_ZOOM,
+        maxZoom: MAX_ZOOM,
+      },
+      nodes: exportedNodes,
+      edges: exportedEdges,
+    };
+    const payloadJson = JSON.stringify(payload)
+      .replace(/</g, '\\u003c')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029');
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GraphFrontier Static Interactive Export</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      min-height: 100vh;
+      background: ${bgColor};
+      color: ${textColor};
+      font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+    }
+    .app {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      grid-template-columns: 1fr 430px;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .graph-wrap {
+      position: relative;
+      overflow: hidden;
+      min-height: 0;
+    }
+    #graph {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: ${bgColor};
+      cursor: grab;
+    }
+    #graph.is-dragging {
+      cursor: grabbing;
+    }
+    .hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(8, 11, 16, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 6px 8px;
+      color: ${mutedTextColor};
+      backdrop-filter: blur(2px);
+      pointer-events: none;
+    }
+    .panel {
+      background: rgba(12, 16, 23, 0.95);
+      border-left: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .panel-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+    .panel-meta {
+      color: ${mutedTextColor};
+      word-break: break-word;
+    }
+    .panel-body {
+      padding: 12px;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      overflow: hidden;
+      gap: 10px;
+    }
+    .hint {
+      color: ${mutedTextColor};
+    }
+    .content-html {
+      padding: 10px 0 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      flex: 1 1 0;
+      height: 100%;
+      overflow: auto;
+      min-height: 0;
+      line-height: 1.45;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .content-html :is(h1, h2, h3, h4, h5, h6) {
+      margin: 0.2em 0 0.45em;
+    }
+    .content-html p {
+      margin: 0.35em 0;
+    }
+    .content-html pre {
+      margin: 0.4em 0;
+      padding: 8px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.32);
+      max-width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    @media (max-width: 1000px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+      .panel {
+        position: absolute;
+        right: 8px;
+        top: 8px;
+        bottom: 8px;
+        width: min(94vw, 430px);
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="graph-wrap">
+      <canvas id="graph"></canvas>
+      <div class="hud" id="hud"></div>
+    </section>
+    <aside class="panel">
+      <header class="panel-header">
+        <div class="panel-title" id="panel-title">No node selected</div>
+        <div class="panel-meta" id="panel-meta">Click a node to see file content preview</div>
+      </header>
+      <div class="panel-body">
+        <div class="hint">Drag to pan, wheel to zoom, hover for labels.</div>
+        <div class="content-html" id="panel-content-html">Select a node…</div>
+      </div>
+    </aside>
+  </div>
+  <script>
+    const EXPORT_DATA = ${payloadJson};
+    (() => {
+      const canvas = document.getElementById('graph');
+      const hud = document.getElementById('hud');
+      const panelTitle = document.getElementById('panel-title');
+      const panelMeta = document.getElementById('panel-meta');
+      const panelContentHtml = document.getElementById('panel-content-html');
+      const ctx = canvas.getContext('2d');
+      const nodeById = new Map(EXPORT_DATA.nodes.map((node) => [node.id, node]));
+      const neighborsById = new Map(EXPORT_DATA.nodes.map((node) => [node.id, new Set()]));
+      for (const edge of EXPORT_DATA.edges) {
+        neighborsById.get(edge.source)?.add(edge.target);
+        neighborsById.get(edge.target)?.add(edge.source);
+      }
+
+      const camera = {
+        x: Number(EXPORT_DATA.camera?.x) || 0,
+        y: Number(EXPORT_DATA.camera?.y) || 0,
+        zoom: Number(EXPORT_DATA.camera?.zoom) || 1,
+      };
+      const edgeWidth = Number(EXPORT_DATA.settings?.edgeWidth) || 0.34;
+      const paintedEdgeWidth = Number(EXPORT_DATA.settings?.paintedEdgeWidth) || 0.2;
+      const labelMinZoom = Number(EXPORT_DATA.settings?.labelMinZoom) || 0.4;
+      const labelFontSize = Number(EXPORT_DATA.settings?.labelFontSize) || 1.8;
+      const showGrid = !!EXPORT_DATA.settings?.showGrid;
+      const gridStep = Number(EXPORT_DATA.settings?.gridStep) || 20;
+      const minZoom = Number(EXPORT_DATA.settings?.minZoom) || 0.1;
+      const maxZoom = Number(EXPORT_DATA.settings?.maxZoom) || 12;
+      const zoomStepFactor = Number(EXPORT_DATA.settings?.zoomStepFactor) || 1.12;
+
+      let dpr = 1;
+      let viewWidth = 1;
+      let viewHeight = 1;
+      let hoveredNodeId = null;
+      let selectedNodeId = null;
+      let panDrag = null;
+
+      const worldToScreen = (x, y) => ({
+        x: (x - camera.x) * camera.zoom + viewWidth / 2,
+        y: (y - camera.y) * camera.zoom + viewHeight / 2,
+      });
+      const screenToWorld = (x, y) => ({
+        x: (x - viewWidth / 2) / camera.zoom + camera.x,
+        y: (y - viewHeight / 2) / camera.zoom + camera.y,
+      });
+      const clampZoom = (value) => Math.min(maxZoom, Math.max(minZoom, value));
+
+      function getCanvasPoint(event) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+          inside:
+            event.clientX >= rect.left &&
+            event.clientX <= rect.right &&
+            event.clientY >= rect.top &&
+            event.clientY <= rect.bottom,
+        };
+      }
+
+      function getNodeAtScreen(screenX, screenY) {
+        const world = screenToWorld(screenX, screenY);
+        let bestNode = null;
+        let bestDist2 = Infinity;
+        for (const node of EXPORT_DATA.nodes) {
+          const dx = node.x - world.x;
+          const dy = node.y - world.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestDist2) {
+            bestDist2 = d2;
+            bestNode = node;
+          }
+        }
+        if (!bestNode) return null;
+        const maxDist = Math.max(1, Number(bestNode.radius || 1) + 2 / Math.max(camera.zoom, 0.0001));
+        if (bestDist2 > maxDist * maxDist) return null;
+        return bestNode;
+      }
+
+      function drawGrid() {
+        if (!showGrid) return;
+        const scaledStep = gridStep * camera.zoom;
+        if (scaledStep < 8) return;
+        const leftWorld = screenToWorld(0, 0).x;
+        const rightWorld = screenToWorld(viewWidth, 0).x;
+        const topWorld = screenToWorld(0, 0).y;
+        const bottomWorld = screenToWorld(0, viewHeight).y;
+        const startX = Math.floor(leftWorld / gridStep) * gridStep;
+        const endX = Math.ceil(rightWorld / gridStep) * gridStep;
+        const startY = Math.floor(topWorld / gridStep) * gridStep;
+        const endY = Math.ceil(bottomWorld / gridStep) * gridStep;
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = startX; x <= endX; x += gridStep) {
+          const sx = Math.round(worldToScreen(x, 0).x) + 0.5;
+          ctx.moveTo(sx, 0);
+          ctx.lineTo(sx, viewHeight);
+        }
+        for (let y = startY; y <= endY; y += gridStep) {
+          const sy = Math.round(worldToScreen(0, y).y) + 0.5;
+          ctx.moveTo(0, sy);
+          ctx.lineTo(viewWidth, sy);
+        }
+        ctx.stroke();
+      }
+
+      function drawEdges() {
+        const selectedNeighbors = selectedNodeId ? neighborsById.get(selectedNodeId) || new Set() : null;
+        for (const edge of EXPORT_DATA.edges) {
+          const sourceNode = nodeById.get(edge.source);
+          const targetNode = nodeById.get(edge.target);
+          if (!sourceNode || !targetNode) continue;
+          const sourcePoint = worldToScreen(sourceNode.x, sourceNode.y);
+          const targetPoint = worldToScreen(targetNode.x, targetNode.y);
+          const isActive = !!selectedNodeId && (edge.source === selectedNodeId || edge.target === selectedNodeId);
+
+          ctx.save();
+          ctx.globalAlpha = selectedNodeId ? (isActive ? 1 : 0.24) : 1;
+          ctx.strokeStyle = edge.paintedColor || 'rgba(145,160,187,0.7)';
+          ctx.lineWidth = edge.paintedColor ? paintedEdgeWidth : edgeWidth;
+          ctx.beginPath();
+          ctx.moveTo(sourcePoint.x, sourcePoint.y);
+          ctx.lineTo(targetPoint.x, targetPoint.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      function drawNodes() {
+        const selectedNeighbors = selectedNodeId ? neighborsById.get(selectedNodeId) || new Set() : new Set();
+        const labelFadeRange = Math.max(0.001, labelMinZoom * 0.35);
+        for (const node of EXPORT_DATA.nodes) {
+          const point = worldToScreen(node.x, node.y);
+          if (point.x < -80 || point.x > viewWidth + 80 || point.y < -80 || point.y > viewHeight + 80) continue;
+          const radius = Math.max(0.6, Number(node.radius || 1) * camera.zoom);
+          const isHovered = hoveredNodeId === node.id;
+          const isSelected = selectedNodeId === node.id;
+          const isNeighbor = selectedNodeId && selectedNeighbors.has(node.id);
+          const alpha = selectedNodeId ? (isSelected || isNeighbor ? 1 : 0.32) : 1;
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = node.color || '#7aa2f7';
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          if (isHovered || isSelected) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+            ctx.lineWidth = isSelected ? 1.8 : 1.3;
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, radius + 2, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          if (camera.zoom >= labelMinZoom) {
+            const labelAlpha = Math.min(1, 0.15 + (camera.zoom - labelMinZoom) / labelFadeRange);
+            ctx.save();
+            ctx.globalAlpha = alpha * labelAlpha;
+            ctx.fillStyle = 'rgba(235,241,250,0.96)';
+            const fontPx = Math.max(8, labelFontSize * camera.zoom);
+            ctx.font = fontPx + 'px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(String(node.label || ''), point.x, point.y - radius - 4);
+            ctx.restore();
+          }
+        }
+      }
+
+      function drawHoverTooltip() {
+        if (!hoveredNodeId) return;
+        const node = nodeById.get(hoveredNodeId);
+        if (!node) return;
+        const point = worldToScreen(node.x, node.y);
+        const label = String(node.label || '');
+        if (!label) return;
+        const type = String(node.fileType || '').trim();
+        const text = type ? label + ' (' + type + ')' : label;
+
+        ctx.save();
+        ctx.font = '13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+        const textWidth = ctx.measureText(text).width;
+        const padX = 7;
+        const padY = 4;
+        const boxWidth = textWidth + padX * 2;
+        const boxHeight = 13 + padY * 2;
+        const radius = Math.min(8, boxHeight / 2);
+        const boxX = Math.max(6, Math.min(viewWidth - boxWidth - 6, point.x - boxWidth / 2));
+        const boxY = Math.max(6, point.y - boxHeight - 10);
+
+        ctx.fillStyle = 'rgba(9,12,17,0.75)';
+        ctx.beginPath();
+        ctx.moveTo(boxX + radius, boxY);
+        ctx.lineTo(boxX + boxWidth - radius, boxY);
+        ctx.arcTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius, radius);
+        ctx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
+        ctx.arcTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight, radius);
+        ctx.lineTo(boxX + radius, boxY + boxHeight);
+        ctx.arcTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius, radius);
+        ctx.lineTo(boxX, boxY + radius);
+        ctx.arcTo(boxX, boxY, boxX + radius, boxY, radius);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,1)';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(text, boxX + padX, boxY + padY);
+        ctx.restore();
+      }
+
+      function escapeHtml(text) {
+        return String(text || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function renderInlineMarkdown(text) {
+        const safeText = escapeHtml(text);
+        if (!safeText) return '';
+        const tick = String.fromCharCode(96);
+        const chunks = safeText.split(tick);
+        if (chunks.length <= 1) return safeText;
+        let html = '';
+        for (let index = 0; index < chunks.length; index += 1) {
+          const chunk = chunks[index];
+          html += index % 2 === 1 ? '<code>' + chunk + '</code>' : chunk;
+        }
+        return html;
+      }
+
+      function startsWithOrderedListItem(text) {
+        const dotIndex = text.indexOf('. ');
+        if (dotIndex <= 0) return false;
+        for (let index = 0; index < dotIndex; index += 1) {
+          const code = text.charCodeAt(index);
+          if (code < 48 || code > 57) return false;
+        }
+        return true;
+      }
+
+      function isHorizontalRule(text) {
+        if (text.length < 3) return false;
+        const firstChar = text.charAt(0);
+        if (firstChar !== '-' && firstChar !== '*') return false;
+        for (let index = 1; index < text.length; index += 1) {
+          if (text.charAt(index) !== firstChar) return false;
+        }
+        return true;
+      }
+
+      function renderSimpleMarkdown(markdownText) {
+        const text = String(markdownText || '').split(String.fromCharCode(13)).join('');
+        if (!text.trim()) return '';
+        const lines = text.split(String.fromCharCode(10));
+        const codeFence = String.fromCharCode(96).repeat(3);
+        const out = [];
+        let inCode = false;
+        let codeLang = '';
+        let inUl = false;
+        let inOl = false;
+        let paragraph = [];
+
+        const flushParagraph = () => {
+          if (paragraph.length <= 0) return;
+          out.push('<p>' + paragraph.map((line) => renderInlineMarkdown(line)).join('<br>') + '</p>');
+          paragraph = [];
+        };
+        const closeLists = () => {
+          if (inUl) {
+            out.push('</ul>');
+            inUl = false;
+          }
+          if (inOl) {
+            out.push('</ol>');
+            inOl = false;
+          }
+        };
+
+        for (const rawLine of lines) {
+          const line = String(rawLine || '');
+          const trimmed = line.trim();
+
+          if (trimmed.startsWith(codeFence)) {
+            flushParagraph();
+            closeLists();
+            if (!inCode) {
+              codeLang = trimmed.slice(3).trim();
+              out.push('<pre><code' + (codeLang ? ' class="language-' + escapeHtml(codeLang) + '"' : '') + '>');
+              inCode = true;
+            } else {
+              out.push('</code></pre>');
+              inCode = false;
+              codeLang = '';
+            }
+            continue;
+          }
+          if (inCode) {
+            out.push(escapeHtml(line));
+            continue;
+          }
+
+          if (!trimmed) {
+            flushParagraph();
+            closeLists();
+            continue;
+          }
+
+          let headingLevel = 0;
+          while (headingLevel < 6 && trimmed.charAt(headingLevel) === '#') headingLevel += 1;
+          if (headingLevel > 0 && trimmed.charAt(headingLevel) === ' ') {
+            flushParagraph();
+            closeLists();
+            const headingText = trimmed.slice(headingLevel + 1);
+            out.push(
+              '<h' +
+                headingLevel +
+                '>' +
+                renderInlineMarkdown(headingText) +
+                '</h' +
+                headingLevel +
+                '>'
+            );
+            continue;
+          }
+
+          if (trimmed.startsWith('>')) {
+            flushParagraph();
+            closeLists();
+            const quoteText = trimmed.startsWith('> ') ? trimmed.slice(2) : trimmed.slice(1);
+            out.push('<blockquote><p>' + renderInlineMarkdown(quoteText) + '</p></blockquote>');
+            continue;
+          }
+
+          const isUnorderedList =
+            trimmed.length > 2 &&
+            (trimmed.charAt(0) === '-' || trimmed.charAt(0) === '*' || trimmed.charAt(0) === '+') &&
+            trimmed.charAt(1) === ' ';
+          if (isUnorderedList) {
+            flushParagraph();
+            if (inOl) {
+              out.push('</ol>');
+              inOl = false;
+            }
+            if (!inUl) {
+              out.push('<ul>');
+              inUl = true;
+            }
+            out.push('<li>' + renderInlineMarkdown(trimmed.slice(2)) + '</li>');
+            continue;
+          }
+
+          if (startsWithOrderedListItem(trimmed)) {
+            flushParagraph();
+            if (inUl) {
+              out.push('</ul>');
+              inUl = false;
+            }
+            if (!inOl) {
+              out.push('<ol>');
+              inOl = true;
+            }
+            const itemText = trimmed.slice(trimmed.indexOf('. ') + 2);
+            out.push('<li>' + renderInlineMarkdown(itemText) + '</li>');
+            continue;
+          }
+
+          if (isHorizontalRule(trimmed)) {
+            flushParagraph();
+            closeLists();
+            out.push('<hr>');
+            continue;
+          }
+
+          closeLists();
+          paragraph.push(line);
+        }
+
+        flushParagraph();
+        closeLists();
+        if (inCode) out.push('</code></pre>');
+        return out.join('');
+      }
+
+      function updatePanel(nodeId) {
+        if (!nodeId) {
+          panelTitle.textContent = 'No node selected';
+          panelMeta.textContent = 'Click a node to see file content preview';
+          panelContentHtml.textContent = 'Select a node…';
+          return;
+        }
+        const node = nodeById.get(nodeId);
+        if (!node) return;
+        panelTitle.textContent = node.label || node.fileName || node.path || node.id;
+        const tagsText = node.tags && node.tags.length ? ' · #' + node.tags.join(' #') : '';
+        panelMeta.textContent = (node.path || node.id) + ' · ' + (node.fileType || 'file') + tagsText;
+        if (node.contentPreview) {
+          const rendered = renderSimpleMarkdown(node.contentPreview);
+          panelContentHtml.innerHTML = rendered || '<p>No readable content</p>';
+        } else if (node.isAttachment) {
+          panelContentHtml.innerHTML = '<p>Attachment node (no markdown content)</p>';
+        } else {
+          panelContentHtml.innerHTML = '<p>No readable content</p>';
+        }
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, viewWidth, viewHeight);
+        ctx.fillStyle = EXPORT_DATA.theme.background || '#111418';
+        ctx.fillRect(0, 0, viewWidth, viewHeight);
+        drawGrid();
+        drawEdges();
+        drawNodes();
+        drawHoverTooltip();
+        const selectedText = selectedNodeId
+          ? nodeById.get(selectedNodeId)?.label || selectedNodeId
+          : 'none';
+        hud.textContent =
+          'GraphFrontier static export · ' +
+          EXPORT_DATA.exportedAt +
+          ' · nodes ' +
+          EXPORT_DATA.nodes.length +
+          ' · edges ' +
+          EXPORT_DATA.edges.length +
+          '\\nSelected: ' +
+          selectedText +
+          ' · zoom ' +
+          camera.zoom.toFixed(2);
+      }
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        dpr = window.devicePixelRatio || 1;
+        viewWidth = Math.max(1, Math.floor(rect.width));
+        viewHeight = Math.max(1, Math.floor(rect.height));
+        canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        draw();
+      }
+
+      canvas.addEventListener('mousedown', (event) => {
+        if (event.button !== 0) return;
+        const point = getCanvasPoint(event);
+        panDrag = {
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startCameraX: camera.x,
+          startCameraY: camera.y,
+          startZoom: camera.zoom,
+          moved: 0,
+          startedInside: point.inside,
+        };
+        canvas.classList.add('is-dragging');
+      });
+
+      window.addEventListener('mousemove', (event) => {
+        const point = getCanvasPoint(event);
+        if (!panDrag) {
+          const nextHover = point.inside ? getNodeAtScreen(point.x, point.y)?.id || null : null;
+          if (nextHover !== hoveredNodeId) {
+            hoveredNodeId = nextHover;
+            draw();
+          }
+          return;
+        }
+        const dx = event.clientX - panDrag.startClientX;
+        const dy = event.clientY - panDrag.startClientY;
+        panDrag.moved = Math.max(panDrag.moved, Math.sqrt(dx * dx + dy * dy));
+        camera.x = panDrag.startCameraX - dx / panDrag.startZoom;
+        camera.y = panDrag.startCameraY - dy / panDrag.startZoom;
+        hoveredNodeId = point.inside ? getNodeAtScreen(point.x, point.y)?.id || null : null;
+        draw();
+      });
+
+      window.addEventListener('mouseup', (event) => {
+        if (!panDrag) return;
+        const point = getCanvasPoint(event);
+        const isClick = panDrag.moved <= 3;
+        const startedInside = panDrag.startedInside;
+        panDrag = null;
+        canvas.classList.remove('is-dragging');
+        if (isClick && startedInside && point.inside) {
+          const clickedNode = getNodeAtScreen(point.x, point.y);
+          selectedNodeId = clickedNode ? clickedNode.id : null;
+          updatePanel(selectedNodeId);
+        }
+        draw();
+      });
+
+      canvas.addEventListener(
+        'wheel',
+        (event) => {
+          event.preventDefault();
+          const point = getCanvasPoint(event);
+          if (!point.inside) return;
+          const before = screenToWorld(point.x, point.y);
+          const factor = event.deltaY < 0 ? zoomStepFactor : 1 / zoomStepFactor;
+          camera.zoom = clampZoom(camera.zoom * factor);
+          const after = screenToWorld(point.x, point.y);
+          camera.x += before.x - after.x;
+          camera.y += before.y - after.y;
+          hoveredNodeId = getNodeAtScreen(point.x, point.y)?.id || null;
+          draw();
+        },
+        { passive: false }
+      );
+
+      window.addEventListener('resize', resize);
+      updatePanel(null);
+      resize();
+    })();
+  </script>
+</body>
+</html>
+`;
+
+    try {
+      await fs.promises.mkdir(path.dirname(normalizedExportPath), { recursive: true });
+      await fs.promises.writeFile(normalizedExportPath, html, 'utf8');
+      new Notice(
+        `Static HTML exported: ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} edges)`
+      );
+    } catch {
+      new Notice('Failed to write static HTML export');
+    }
+  }
+
   async commandPinToGrid() {
     const node = this.getCommandTargetNodeOrNotice();
     if (!node) return;
@@ -5009,6 +5994,74 @@ class GraphFrontierView extends ItemView {
       x: (worldX - this.camera.x) * this.camera.zoom + this.viewWidth / 2,
       y: (worldY - this.camera.y) * this.camera.zoom + this.viewHeight / 2,
     };
+  }
+}
+
+// Modal block for choosing export target path for static HTML graph.
+class ExportStaticHtmlPathModal extends Modal {
+  constructor(app, initialPath, resolve) {
+    super(app);
+    this.initialPath = String(initialPath || '');
+    this.resolve = resolve;
+  }
+
+  static openFor(app, initialPath = '') {
+    return new Promise((resolve) => {
+      const modal = new ExportStaticHtmlPathModal(app, initialPath, resolve);
+      modal.open();
+    });
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl('h3', {
+      text: 'Write the folder path and the file name for saving.',
+    });
+
+    const form = contentEl.createDiv({ cls: 'graphfrontier-coord-form' });
+    const pathInput = form.createEl('input', {
+      type: 'text',
+      cls: 'graphfrontier-coord-input',
+    });
+    pathInput.value = this.initialPath;
+
+    const submit = () => {
+      const targetPath = String(pathInput.value || '').trim();
+      if (!targetPath) {
+        new Notice('Export path is required');
+        return;
+      }
+      const done = this.resolve;
+      this.resolve = null;
+      done(targetPath);
+      this.close();
+    };
+
+    const actions = contentEl.createDiv({ cls: 'graphfrontier-coord-actions' });
+    const exportBtn = actions.createEl('button', { text: 'Export' });
+    const cancelBtn = actions.createEl('button', { text: 'Cancel' });
+
+    exportBtn.addEventListener('click', submit);
+    cancelBtn.addEventListener('click', () => {
+      const done = this.resolve;
+      this.resolve = null;
+      done(null);
+      this.close();
+    });
+    pathInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') submit();
+    });
+    pathInput.focus();
+    pathInput.select();
+  }
+
+  onClose() {
+    if (this.resolve) {
+      this.resolve(null);
+      this.resolve = null;
+    }
+    this.contentEl.empty();
   }
 }
 
