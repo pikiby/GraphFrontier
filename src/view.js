@@ -138,12 +138,6 @@ class GraphFrontierView extends ItemView {
     this.layoutStillFrames = 0;
     this.layoutAutosaveDirty = false;
     this.layoutPaused = false;
-    this.perfStats = new Map();
-    this.perfSpikes = [];
-    this.perfLastReportAt = 0;
-    this.perfReportEveryMs = 2500;
-    this.perfSpikeThresholdMs = 30;
-    this.perfWasEnabled = false;
     this.hasSeenMetadataResolvedRefresh = !!this.plugin.metadataResolvedOnce;
     this.quickPreviewEl = null;
     this.quickPreviewTitleEl = null;
@@ -1651,39 +1645,37 @@ class GraphFrontierView extends ItemView {
   }
 
   getFilterVisibleNodeIds() {
-    return this.measurePerf('filterVisible', () => {
-      const queryRuleVisibleNodeIds = this.getQueryRuleVisibleNodeIds();
-      const searchVisibleNodeIds = this.getSearchModeVisibleNodeIds();
-      const activeRuleSignature = this.filterVisibilityCache.queryRuleVisibleRulesSignature || '';
-      const finalKey = [
-        this.visibilityGraphVersion,
-        this.visibilitySearchVersion,
-        activeRuleSignature,
-        queryRuleVisibleNodeIds instanceof Set ? 'q:1' : 'q:0',
-        searchVisibleNodeIds instanceof Set ? 's:1' : 's:0',
-      ].join('|');
-      if (this.filterVisibilityCache.finalVisibleKey === finalKey) {
-        return this.filterVisibilityCache.finalVisibleNodeIds;
-      }
+    const queryRuleVisibleNodeIds = this.getQueryRuleVisibleNodeIds();
+    const searchVisibleNodeIds = this.getSearchModeVisibleNodeIds();
+    const activeRuleSignature = this.filterVisibilityCache.queryRuleVisibleRulesSignature || '';
+    const finalKey = [
+      this.visibilityGraphVersion,
+      this.visibilitySearchVersion,
+      activeRuleSignature,
+      queryRuleVisibleNodeIds instanceof Set ? 'q:1' : 'q:0',
+      searchVisibleNodeIds instanceof Set ? 's:1' : 's:0',
+    ].join('|');
+    if (this.filterVisibilityCache.finalVisibleKey === finalKey) {
+      return this.filterVisibilityCache.finalVisibleNodeIds;
+    }
 
-      let finalVisibleNodeIds = null;
-      if (!(queryRuleVisibleNodeIds instanceof Set) && !(searchVisibleNodeIds instanceof Set)) {
-        finalVisibleNodeIds = null;
-      } else if (!(queryRuleVisibleNodeIds instanceof Set)) {
-        finalVisibleNodeIds = searchVisibleNodeIds;
-      } else if (!(searchVisibleNodeIds instanceof Set)) {
-        finalVisibleNodeIds = queryRuleVisibleNodeIds;
-      } else {
-        const combined = new Set();
-        for (const nodeId of queryRuleVisibleNodeIds) {
-          if (searchVisibleNodeIds.has(nodeId)) combined.add(nodeId);
-        }
-        finalVisibleNodeIds = combined;
+    let finalVisibleNodeIds = null;
+    if (!(queryRuleVisibleNodeIds instanceof Set) && !(searchVisibleNodeIds instanceof Set)) {
+      finalVisibleNodeIds = null;
+    } else if (!(queryRuleVisibleNodeIds instanceof Set)) {
+      finalVisibleNodeIds = searchVisibleNodeIds;
+    } else if (!(searchVisibleNodeIds instanceof Set)) {
+      finalVisibleNodeIds = queryRuleVisibleNodeIds;
+    } else {
+      const combined = new Set();
+      for (const nodeId of queryRuleVisibleNodeIds) {
+        if (searchVisibleNodeIds.has(nodeId)) combined.add(nodeId);
       }
-      this.filterVisibilityCache.finalVisibleKey = finalKey;
-      this.filterVisibilityCache.finalVisibleNodeIds = finalVisibleNodeIds;
-      return finalVisibleNodeIds;
-    });
+      finalVisibleNodeIds = combined;
+    }
+    this.filterVisibilityCache.finalVisibleKey = finalKey;
+    this.filterVisibilityCache.finalVisibleNodeIds = finalVisibleNodeIds;
+    return finalVisibleNodeIds;
   }
 
   getSearchModeVisibleNodeIds() {
@@ -2078,128 +2070,8 @@ class GraphFrontierView extends ItemView {
   }
 
   // Focus blending state machine for smooth highlight transitions.
-  getPerfWindow() {
-    if (this.contentEl?.win) return this.contentEl.win;
-    if (typeof window !== 'undefined') return window;
-    return null;
-  }
-
-  getPerfNow() {
-    const perfWindow = this.getPerfWindow();
-    if (perfWindow?.performance && typeof perfWindow.performance.now === 'function') {
-      return perfWindow.performance.now();
-    }
-    return Date.now();
-  }
-
-  isPerfEnabled() {
-    const perfWindow = this.getPerfWindow();
-    const enabled = !!perfWindow?.GRAPHFRONTIER_PERF;
-    if (enabled && !this.perfWasEnabled) {
-      this.perfWasEnabled = true;
-      this.perfStats.clear();
-      this.perfSpikes = [];
-      this.perfLastReportAt = this.getPerfNow();
-      this.getPerfConsole()?.info?.(
-        '[GraphFrontier perf] enabled. Set window.GRAPHFRONTIER_PERF = false to stop.'
-      );
-    } else if (!enabled && this.perfWasEnabled) {
-      this.perfWasEnabled = false;
-      this.perfStats.clear();
-      this.perfSpikes = [];
-    }
-    return enabled;
-  }
-
-  getPerfConsole() {
-    const perfWindow = this.getPerfWindow();
-    if (perfWindow?.console) return perfWindow.console;
-    if (typeof console !== 'undefined') return console;
-    return null;
-  }
-
-  getPerfContext() {
-    if (this.dragNodeId) return 'node-drag';
-    if (this.panDrag) return 'camera-pan';
-    if (this.boxSelectDrag) return 'box-select';
-    if (this.touchGesture?.mode === 'pinch') return 'pinch';
-    if (this.touchGesture?.mode === 'single') return 'touch';
-    if (!this.layoutPaused) return 'physics-active';
-    return 'idle';
-  }
-
-  measurePerf(label, callback) {
-    if (!this.isPerfEnabled()) return callback();
-    const startedAt = this.getPerfNow();
-    try {
-      return callback();
-    } finally {
-      this.recordPerf(label, this.getPerfNow() - startedAt);
-    }
-  }
-
-  recordPerf(label, durationMs) {
-    if (!this.perfWasEnabled) return;
-    const safeLabel = String(label || 'unknown');
-    const safeDuration = Number(durationMs) || 0;
-    const stat = this.perfStats.get(safeLabel) || {
-      count: 0,
-      total: 0,
-      max: 0,
-    };
-    stat.count += 1;
-    stat.total += safeDuration;
-    stat.max = Math.max(stat.max, safeDuration);
-    this.perfStats.set(safeLabel, stat);
-
-    if (safeDuration >= this.perfSpikeThresholdMs) {
-      this.perfSpikes.push({
-        label: safeLabel,
-        ms: Number(safeDuration.toFixed(1)),
-        context: this.getPerfContext(),
-        nodes: this.nodes.length,
-        edges: this.edges.length,
-      });
-      if (this.perfSpikes.length > 12) this.perfSpikes.shift();
-    }
-
-    const now = this.getPerfNow();
-    if (!this.perfLastReportAt) this.perfLastReportAt = now;
-    if (now - this.perfLastReportAt >= this.perfReportEveryMs) {
-      this.flushPerfReport(now);
-    }
-  }
-
-  flushPerfReport(now = this.getPerfNow()) {
-    const rows = Array.from(this.perfStats.entries())
-      .map(([label, stat]) => ({
-        label,
-        count: stat.count,
-        avgMs: Number((stat.total / Math.max(1, stat.count)).toFixed(2)),
-        maxMs: Number(stat.max.toFixed(2)),
-      }))
-      .sort((left, right) => right.maxMs - left.maxMs);
-    const spikes = this.perfSpikes.slice();
-    this.perfStats.clear();
-    this.perfSpikes = [];
-    this.perfLastReportAt = now;
-
-    const perfConsole = this.getPerfConsole();
-    if (!perfConsole || rows.length === 0) return;
-    perfConsole.info?.(
-      `[GraphFrontier perf] context=${this.getPerfContext()} nodes=${this.nodes.length} edges=${this.edges.length}`
-    );
-    if (typeof perfConsole.table === 'function') {
-      perfConsole.table(rows);
-      if (spikes.length > 0) perfConsole.table(spikes);
-    } else {
-      perfConsole.info?.(rows);
-      if (spikes.length > 0) perfConsole.info?.('[GraphFrontier perf spikes]', spikes);
-    }
-  }
-
   stepFocusSmoothing() {
-    return this.measurePerf('focus', () => stepFocusSmoothingRender(this));
+    return stepFocusSmoothingRender(this);
   }
 
   // Simulation restart marker: called when settings or node positions change.
@@ -2212,32 +2084,30 @@ class GraphFrontierView extends ItemView {
   }
 
   getNodeSpatialIndex() {
-    return this.measurePerf('spatialIndex', () => {
-      if (
-        this.nodeSpatialIndex &&
-        this.nodeSpatialIndexBuildVersion === this.nodeSpatialIndexVersion
-      ) {
-        return this.nodeSpatialIndex;
-      }
-
-      const cellSize = Math.max(1, Number(this.nodeSpatialIndexCellSize) || 64);
-      const buckets = new Map();
-      for (const node of this.nodes) {
-        const gx = Math.floor(node.x / cellSize);
-        const gy = Math.floor(node.y / cellSize);
-        const key = `${gx}:${gy}`;
-        let bucket = buckets.get(key);
-        if (!bucket) {
-          bucket = [];
-          buckets.set(key, bucket);
-        }
-        bucket.push(node);
-      }
-
-      this.nodeSpatialIndex = { buckets, cellSize };
-      this.nodeSpatialIndexBuildVersion = this.nodeSpatialIndexVersion;
+    if (
+      this.nodeSpatialIndex &&
+      this.nodeSpatialIndexBuildVersion === this.nodeSpatialIndexVersion
+    ) {
       return this.nodeSpatialIndex;
-    });
+    }
+
+    const cellSize = Math.max(1, Number(this.nodeSpatialIndexCellSize) || 64);
+    const buckets = new Map();
+    for (const node of this.nodes) {
+      const gx = Math.floor(node.x / cellSize);
+      const gy = Math.floor(node.y / cellSize);
+      const key = `${gx}:${gy}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = [];
+        buckets.set(key, bucket);
+      }
+      bucket.push(node);
+    }
+
+    this.nodeSpatialIndex = { buckets, cellSize };
+    this.nodeSpatialIndexBuildVersion = this.nodeSpatialIndexVersion;
+    return this.nodeSpatialIndex;
   }
 
   // Groups block: color-rule rows, drag-and-drop priority, and settings persistence.
@@ -2830,51 +2700,47 @@ class GraphFrontierView extends ItemView {
 
   // In-memory graph rebuild: load nodes/edges, restore positions, and recompute neighbors.
   refreshFromVault(opts = {}) {
-    return this.measurePerf('refreshFromVault', () => {
-      const keepCamera = !!opts.keepCamera;
-      const forceSavedPositions = !!opts.forceSavedPositions;
-      const skipLayoutKick = !!opts.skipLayoutKick;
-      const metadataResolved = !!opts.metadataResolved;
-      if (metadataResolved) {
-        this.hasSeenMetadataResolvedRefresh = true;
-      } else if (this.plugin.metadataResolvedOnce) {
-        this.hasSeenMetadataResolvedRefresh = true;
-      }
-      const graphData = this.measurePerf('collectGraphData', () => this.plugin.collectGraphData());
-      this.measurePerf('syncGraphRuntimeState', () => {
-        this.syncGraphRuntimeState(graphData, { forceSavedPositions });
-      });
-      this.markGraphVisibilityDirty();
+    const keepCamera = !!opts.keepCamera;
+    const forceSavedPositions = !!opts.forceSavedPositions;
+    const skipLayoutKick = !!opts.skipLayoutKick;
+    const metadataResolved = !!opts.metadataResolved;
+    if (metadataResolved) {
+      this.hasSeenMetadataResolvedRefresh = true;
+    } else if (this.plugin.metadataResolvedOnce) {
+      this.hasSeenMetadataResolvedRefresh = true;
+    }
+    const graphData = this.plugin.collectGraphData();
+    this.syncGraphRuntimeState(graphData, { forceSavedPositions });
+    this.markGraphVisibilityDirty();
 
-      if (this.searchSelectedNodeId && !this.nodeById.has(this.searchSelectedNodeId)) {
-        this.searchSelectedNodeId = null;
-      }
-      this.syncSearchMatchesLive();
-      this.syncSearchClearButtonVisibility();
-      if (!this.shouldUseContentSearchIndex()) {
-        this.cancelContentSearchIndexBuild();
-      }
-      this.getNodeSpatialIndex();
-      this.updateLayoutCenter();
+    if (this.searchSelectedNodeId && !this.nodeById.has(this.searchSelectedNodeId)) {
+      this.searchSelectedNodeId = null;
+    }
+    this.syncSearchMatchesLive();
+    this.syncSearchClearButtonVisibility();
+    if (!this.shouldUseContentSearchIndex()) {
+      this.cancelContentSearchIndexBuild();
+    }
+    this.getNodeSpatialIndex();
+    this.updateLayoutCenter();
 
-      this.cleanupDetachedData({
-        allowDestructivePrune: this.hasSeenMetadataResolvedRefresh,
-      });
-
-      if (!keepCamera) {
-        this.fitCameraToNodes();
-        this.centerCameraOnActiveFileNode();
-      }
-
-      if (skipLayoutKick) {
-        this.layoutPaused = true;
-        this.layoutStillFrames = 0;
-        this.layoutAutosaveDirty = false;
-      } else {
-        this.kickLayoutSearch();
-      }
-      this.render();
+    this.cleanupDetachedData({
+      allowDestructivePrune: this.hasSeenMetadataResolvedRefresh,
     });
+
+    if (!keepCamera) {
+      this.fitCameraToNodes();
+      this.centerCameraOnActiveFileNode();
+    }
+
+    if (skipLayoutKick) {
+      this.layoutPaused = true;
+      this.layoutStillFrames = 0;
+      this.layoutAutosaveDirty = false;
+    } else {
+      this.kickLayoutSearch();
+    }
+    this.render();
   }
 
   scheduleContentSearchIndexRebuild() {
@@ -3230,21 +3096,19 @@ class GraphFrontierView extends ItemView {
    */
   runFrame() {
     if (!this.isOpen) return;
-    this.measurePerf('frame', () => {
-      this.stepCameraSmoothing();
-      this.stepSimulation();
-      this.stepFocusSmoothing();
-      this.render();
-    });
+    this.stepCameraSmoothing();
+    this.stepSimulation();
+    this.stepFocusSmoothing();
+    this.render();
     this.frameHandle = this.contentEl.win.requestAnimationFrame(() => this.runFrame());
   }
 
   stepCameraSmoothing() {
-    return this.measurePerf('camera', () => stepCameraSmoothingPhysics(this));
+    return stepCameraSmoothingPhysics(this);
   }
 
   stepSimulation() {
-    return this.measurePerf('physics', () => stepSimulationPhysics(this));
+    return stepSimulationPhysics(this);
   }
 
   /*
@@ -3254,7 +3118,7 @@ class GraphFrontierView extends ItemView {
    * ============================================================
    */
   render() {
-    return this.measurePerf('render', () => renderFrameRender(this));
+    return renderFrameRender(this);
   }
 
   drawGrid(ctx) {
@@ -6193,46 +6057,44 @@ class GraphFrontierView extends ItemView {
 
   // Hit testing and coordinate transforms between screen and world spaces.
   getNodeAtScreen(screenX, screenY) {
-    return this.measurePerf('hitTest', () => {
-      const world = this.screenToWorld(screenX, screenY);
-      const visibleNodeIds = this.getFilterVisibleNodeIds();
-      const hasFilter = visibleNodeIds instanceof Set;
-      const spatialIndex = this.getNodeSpatialIndex();
-      const zoom = Math.max(this.camera.zoom, 0.0001);
-      const maxCandidateRadius = 4 + 2 / zoom;
-      const cellSize = spatialIndex.cellSize;
-      const centerGX = Math.floor(world.x / cellSize);
-      const centerGY = Math.floor(world.y / cellSize);
-      const bucketRange = Math.max(1, Math.ceil(maxCandidateRadius / cellSize));
+    const world = this.screenToWorld(screenX, screenY);
+    const visibleNodeIds = this.getFilterVisibleNodeIds();
+    const hasFilter = visibleNodeIds instanceof Set;
+    const spatialIndex = this.getNodeSpatialIndex();
+    const zoom = Math.max(this.camera.zoom, 0.0001);
+    const maxCandidateRadius = 4 + 2 / zoom;
+    const cellSize = spatialIndex.cellSize;
+    const centerGX = Math.floor(world.x / cellSize);
+    const centerGY = Math.floor(world.y / cellSize);
+    const bucketRange = Math.max(1, Math.ceil(maxCandidateRadius / cellSize));
 
-      let bestNode = null;
-      let bestDist2 = Infinity;
+    let bestNode = null;
+    let bestDist2 = Infinity;
 
-      for (let offsetX = -bucketRange; offsetX <= bucketRange; offsetX += 1) {
-        for (let offsetY = -bucketRange; offsetY <= bucketRange; offsetY += 1) {
-          const bucket = spatialIndex.buckets.get(`${centerGX + offsetX}:${centerGY + offsetY}`);
-          if (!bucket) continue;
-          for (const node of bucket) {
-            if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
-            const dx = node.x - world.x;
-            const dy = node.y - world.y;
-            const dist2 = dx * dx + dy * dy;
-            if (dist2 < bestDist2) {
-              bestDist2 = dist2;
-              bestNode = node;
-            }
+    for (let offsetX = -bucketRange; offsetX <= bucketRange; offsetX += 1) {
+      for (let offsetY = -bucketRange; offsetY <= bucketRange; offsetY += 1) {
+        const bucket = spatialIndex.buckets.get(`${centerGX + offsetX}:${centerGY + offsetY}`);
+        if (!bucket) continue;
+        for (const node of bucket) {
+          if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
+          const dx = node.x - world.x;
+          const dy = node.y - world.y;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 < bestDist2) {
+            bestDist2 = dist2;
+            bestNode = node;
           }
         }
       }
+    }
 
-      if (!bestNode) return null;
+    if (!bestNode) return null;
 
-      const baseRadius = this.getNodeRadius(bestNode);
-      const maxDist = Math.max(1, baseRadius + 2 / zoom);
-      if (bestDist2 > maxDist * maxDist) return null;
+    const baseRadius = this.getNodeRadius(bestNode);
+    const maxDist = Math.max(1, baseRadius + 2 / zoom);
+    if (bestDist2 > maxDist * maxDist) return null;
 
-      return bestNode;
-    });
+    return bestNode;
   }
 
   screenToWorld(screenX, screenY) {
