@@ -96,12 +96,12 @@ function renderFrame(view) {
   ctx.fillRect(0, 0, width, height);
 
   if (view.plugin.getSettings().show_grid) {
-    drawGrid(view, ctx);
+    view.measurePerf('drawGrid', () => drawGrid(view, ctx));
   }
 
-  drawEdges(view, ctx);
-  drawNodes(view, ctx);
-  drawSelectionBox(view, ctx);
+  view.measurePerf('drawEdges', () => drawEdges(view, ctx));
+  view.measurePerf('drawNodes', () => drawNodes(view, ctx));
+  view.measurePerf('drawSelectionBox', () => drawSelectionBox(view, ctx));
 }
 
 // Draw hovered node title in a compact floating bubble.
