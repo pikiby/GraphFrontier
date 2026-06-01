@@ -231,6 +231,11 @@ function stepSimulation(view) {
 
   const accelById = new Map();
   for (const node of nodes) accelById.set(node.id, { ax: 0, ay: 0 });
+  const pinsById = new Map();
+  for (const node of nodes) {
+    const pin = view.plugin.getPin(node.id);
+    if (pin) pinsById.set(node.id, pin);
+  }
   const orbitPinsById = new Map();
   for (const node of nodes) {
     const orbitPin = view.plugin.getOrbitPin(node.id);
@@ -240,6 +245,7 @@ function stepSimulation(view) {
     orbitPinsById.set(node.id, orbitPin);
   }
   const orbitNodeIds = new Set(orbitPinsById.keys());
+  const fixedNodeIds = new Set([...pinsById.keys(), ...orbitNodeIds]);
   const autoAttachmentOrbitById = buildAttachmentAutoOrbitMap(
     view,
     hasPhysicsFilter ? filterVisibleNodeIds : null
@@ -256,11 +262,24 @@ function stepSimulation(view) {
       activelyDraggedNodeIds.add(nodeId);
     }
   }
+  const hasMovableNodes = nodes.some(
+    (node) =>
+      !fixedNodeIds.has(node.id) &&
+      !autoAttachmentOrbitNodeIds.has(node.id) &&
+      !activelyDraggedNodeIds.has(node.id)
+  );
+  if (!view.dragNodeId && !hasMovableNodes) {
+    view.layoutPaused = true;
+    view.layoutStillFrames = 0;
+    view.layoutAutosaveDirty = false;
+    return;
+  }
   const freeOrphanNodes = [];
   const attachmentOnlyAnchorNodes = [];
   const attachmentOnlyAnchorIds = new Set();
   const mainNodesForOrphanRepel = [];
   for (const node of nodes) {
+    if (fixedNodeIds.has(node.id)) continue;
     const nodeDegree = getNodeDegree(node);
     if (autoAttachmentOrbitNodeIds.has(node.id)) continue;
     if (nodeDegree === 0) {
@@ -309,6 +328,7 @@ function stepSimulation(view) {
       }
       if (autoAttachmentOrbitNodeIds.has(nodeA.id) || autoAttachmentOrbitNodeIds.has(nodeB.id))
         return;
+      if (fixedNodeIds.has(nodeA.id) || fixedNodeIds.has(nodeB.id)) return;
       if (getNodeDegree(nodeA) === 0 || getNodeDegree(nodeB) === 0) return;
       if (attachmentOnlyAnchorIds.has(nodeA.id) || attachmentOnlyAnchorIds.has(nodeB.id)) return;
       const nodeAIsOrbitPinned = orbitNodeIds.has(nodeA.id);
@@ -532,6 +552,9 @@ function stepSimulation(view) {
       const sourceNode = view.nodeById.get(edge.source);
       const targetNode = view.nodeById.get(edge.target);
       if (!sourceNode || !targetNode) continue;
+      const sourceIsFixed = fixedNodeIds.has(sourceNode.id);
+      const targetIsFixed = fixedNodeIds.has(targetNode.id);
+      if (sourceIsFixed || targetIsFixed) continue;
       const sourceIsAttachment = !!sourceNode.meta?.isAttachment;
       const targetIsAttachment = !!targetNode.meta?.isAttachment;
       if (attachmentIsolationMode && (sourceIsAttachment || targetIsAttachment)) {
@@ -590,7 +613,7 @@ function stepSimulation(view) {
   }
 
   for (const node of nodes) {
-    const pin = view.plugin.getPin(node.id);
+    const pin = pinsById.get(node.id) || null;
     const orbitPin = orbitPinsById.get(node.id) || null;
     const autoAttachmentOrbit = autoAttachmentOrbitById.get(node.id) || null;
     const accel = accelById.get(node.id) || { ax: 0, ay: 0 };
@@ -686,7 +709,7 @@ function stepSimulation(view) {
     node.y += node.vy;
   }
 
-  if (typeof view.markNodeSpatialIndexDirty === 'function') {
+  if (movingNodeCount > 0 && typeof view.markNodeSpatialIndexDirty === 'function') {
     view.markNodeSpatialIndexDirty();
   }
 
