@@ -1819,7 +1819,7 @@ class GraphFrontierView extends ItemView {
     if (filterFocusNodeId) return filterFocusNodeId;
     const findFocusNodeId = this.getFindFocusNodeId();
     if (findFocusNodeId) return findFocusNodeId;
-    return this.hoverNodeId || null;
+    return null;
   }
 
   // Shared input suggestion popup used by both search and group editor inputs.
