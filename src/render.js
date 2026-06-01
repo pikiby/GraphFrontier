@@ -198,8 +198,8 @@ function getLabelFontSize(view) {
   return baseSize / 5;
 }
 
-// Resolve first matching group color for a node, according to current row priority.
-function getGroupColorForNode(view, node) {
+// Resolve group colors once per graph/groups version; drawing can then do cheap map lookups.
+function getGroupColorMap(view) {
   const groups = Array.isArray(view.plugin.data.groups) ? view.plugin.data.groups : [];
   if (groups.length === 0) return null;
   const signature = groups
@@ -221,7 +221,7 @@ function getGroupColorForNode(view, node) {
     cache.groupsSignature === signature &&
     cache.colorByNodeId instanceof Map
   ) {
-    return cache.colorByNodeId.get(node.id) || null;
+    return cache.colorByNodeId;
   }
 
   const parsedGroups = [];
@@ -250,7 +250,13 @@ function getGroupColorForNode(view, node) {
     groupsSignature: signature,
     colorByNodeId,
   };
-  return colorByNodeId.get(node.id) || null;
+  return colorByNodeId;
+}
+
+// Resolve first matching group color for a node, according to current row priority.
+function getGroupColorForNode(view, node) {
+  const colorByNodeId = getGroupColorMap(view);
+  return colorByNodeId instanceof Map ? colorByNodeId.get(node.id) || null : null;
 }
 
 // Match helper used by group-color rules (path/file/tag/line/section/property).
@@ -371,7 +377,25 @@ function drawEdges(view, ctx) {
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
+  const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+  const normalEdgeAlpha = hasAnyFocus ? focusDimAlpha : hasSearchHighlight ? searchDimAlpha : 1;
   const paintedEdgeColors = view.plugin.data?.painted_edge_colors || {};
+  let hasNormalEdgeBatch = false;
+
+  const beginNormalEdgeBatch = () => {
+    if (hasNormalEdgeBatch) return;
+    ctx.globalAlpha = normalEdgeAlpha;
+    ctx.strokeStyle = 'rgba(145, 160, 187, 0.35)';
+    ctx.lineWidth = edgeScale;
+    ctx.beginPath();
+    hasNormalEdgeBatch = true;
+  };
+
+  const flushNormalEdgeBatch = () => {
+    if (!hasNormalEdgeBatch) return;
+    ctx.stroke();
+    hasNormalEdgeBatch = false;
+  };
 
   for (const edge of view.edges) {
     if (hasFilter) {
@@ -416,9 +440,17 @@ function drawEdges(view, ctx) {
       hoverFocusEdgeProgress,
       hoverFadeEdgeProgress
     );
-    const dimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+
+    if (!paintedColor && focusEdgeProgress <= 0.001) {
+      beginNormalEdgeBatch();
+      ctx.moveTo(sourcePointX, sourcePointY);
+      ctx.lineTo(targetPointX, targetPointY);
+      continue;
+    }
+
+    flushNormalEdgeBatch();
     const edgeAlpha = hasAnyFocus
-      ? dimAlpha + (1 - dimAlpha) * focusEdgeProgress
+      ? focusDimAlpha + (1 - focusDimAlpha) * focusEdgeProgress
       : hasSearchHighlight
         ? searchDimAlpha
         : 1;
@@ -442,6 +474,7 @@ function drawEdges(view, ctx) {
     ctx.lineTo(targetPointX, targetPointY);
     ctx.stroke();
   }
+  flushNormalEdgeBatch();
   ctx.globalAlpha = 1;
 }
 
@@ -488,6 +521,9 @@ function drawNodes(view, ctx) {
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
+  const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+  const groupColorByNodeId = getGroupColorMap(view);
+  const selectedNodeIds = view.selectedNodeIds instanceof Set ? view.selectedNodeIds : null;
 
   for (const node of view.nodes) {
     if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
@@ -503,7 +539,7 @@ function drawNodes(view, ctx) {
     const isHoverFocusNode = hasHoverFocus && node.id === hoverFocusNodeId;
     const isHoverNodeRaw = view.hoverNodeId === node.id;
     const isHoverFadeNode = hasHoverFade && node.id === hoverFadeNodeId;
-    const isSelectedNode = view.selectedNodeIds instanceof Set && view.selectedNodeIds.has(node.id);
+    const isSelectedNode = selectedNodeIds ? selectedNodeIds.has(node.id) : false;
     const focusNodeProgress = isFocusNode ? focusProgress : 0;
     const hoverFocusNodeProgress = isHoverFocusNode ? hoverFocusProgress : 0;
     const hoverFadeNodeProgress = isHoverFadeNode ? hoverFadeProgress : 0;
@@ -534,13 +570,12 @@ function drawNodes(view, ctx) {
     );
     const isHover = hoverVisualProgress > 0.001;
     const isClickFlash = view.clickFlashNodeId === node.id && nowMs < view.clickFlashUntilMs;
-    const groupColor = getGroupColorForNode(view, node);
-    const dimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+    const groupColor = groupColorByNodeId instanceof Map ? groupColorByNodeId.get(node.id) : null;
     const isSearchHighlightNode = hasSearchHighlight && searchHighlightNodeIds.has(node.id);
     const nodeAlpha = isClickFlash
       ? 1
       : hasAnyFocus
-        ? dimAlpha + (1 - dimAlpha) * relationProgress
+        ? focusDimAlpha + (1 - focusDimAlpha) * relationProgress
         : hasSearchHighlight
           ? isSearchHighlightNode
             ? 1
@@ -552,26 +587,23 @@ function drawNodes(view, ctx) {
     if (groupColor && !isAttachmentNode) fillColor = groupColor;
     if (isClickFlash) fillColor = '#ffffff';
 
-    ctx.save();
     ctx.globalAlpha = nodeAlpha;
     ctx.fillStyle = fillColor;
     ctx.beginPath();
     ctx.arc(pointX, pointY, radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.restore();
 
     if (isHover || isSelectedNode) {
       const hoverStrokeAlpha = Math.max(0.12, 0.95 * hoverVisualProgress);
       const selectedStrokeAlpha = isSelectedNode ? 0.95 : 0;
       const hoverLineWidth = 1 + hoverVisualProgress;
       const selectedLineWidth = isSelectedNode ? 1.4 : 0;
-      ctx.save();
+      ctx.globalAlpha = 1;
       ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(hoverStrokeAlpha, selectedStrokeAlpha)})`;
       ctx.lineWidth = Math.max(hoverLineWidth, selectedLineWidth);
       ctx.beginPath();
       ctx.arc(pointX, pointY, radius + 2, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.restore();
     }
 
     const labelAlphaRaw = (zoom - labelMinZoom) / labelFadeRange;
@@ -580,7 +612,6 @@ function drawNodes(view, ctx) {
     const labelAlpha = isAttachmentNode ? 0 : Math.max(labelAlphaBase, hoverLabelBoost);
     if (labelAlpha > 0.01) {
       const zoomedFontSize = Math.max(1, labelFontSize * zoom);
-      ctx.save();
       ctx.globalAlpha = labelAlpha * nodeAlpha;
       ctx.fillStyle =
         hoverLabelBoost > 0.001 ? 'rgba(255, 235, 164, 1)' : 'rgba(238, 243, 252, 0.95)';
@@ -588,9 +619,9 @@ function drawNodes(view, ctx) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillText(node.label, pointX, pointY + radius + 8);
-      ctx.restore();
     }
   }
+  ctx.globalAlpha = 1;
 
   const hoverTitleNode = view.hoverNodeId ? view.nodeById.get(view.hoverNodeId) || null : null;
   if (hoverTitleNode) drawFocusedNodeTitle(view, ctx, hoverTitleNode);
