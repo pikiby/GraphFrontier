@@ -119,6 +119,8 @@ class GraphFrontierView extends ItemView {
     this.layoutFileSuggestRequestToken = 0;
     this.contentSearchIndex = new Map();
     this.contentSearchBuildToken = 0;
+    this.contentSearchIndexGraphVersion = -1;
+    this.contentSearchBuildGraphVersion = -1;
     this.focusNodeId = null;
     this.focusProgress = 0;
     this.hoverFocusNodeId = null;
@@ -1459,6 +1461,7 @@ class GraphFrontierView extends ItemView {
     if (!queryText) return matches;
 
     if (parsed.source === 'content') {
+      if (!this.ensureContentSearchIndexForCurrentGraph(parsed)) return matches;
       for (const node of this.nodes) {
         if (node?.meta?.isAttachment) continue;
         const contentText = this.contentSearchIndex.get(node.id);
@@ -1477,14 +1480,36 @@ class GraphFrontierView extends ItemView {
     return matches;
   }
 
+  shouldUseContentSearchIndex(parsed = null) {
+    const safeParsed =
+      parsed ||
+      this.parseSearchQuery(this.searchInputEl ? this.searchInputEl.value : this.searchInputValue);
+    return safeParsed && safeParsed.source === 'content' && !!String(safeParsed.query || '').trim();
+  }
+
+  ensureContentSearchIndexForCurrentGraph(parsed = null) {
+    if (!this.shouldUseContentSearchIndex(parsed)) return false;
+    if (this.contentSearchIndexGraphVersion === this.visibilityGraphVersion) return true;
+    this.scheduleContentSearchIndexRebuild();
+    return false;
+  }
+
+  cancelContentSearchIndexBuild() {
+    if (this.contentSearchBuildGraphVersion === -1) return;
+    this.contentSearchBuildToken += 1;
+    this.contentSearchBuildGraphVersion = -1;
+  }
+
   syncSearchMatchesLive() {
     const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
     const parsed = this.parseSearchQuery(rawText);
     if (!parsed.query || parsed.source === 'name') {
+      this.cancelContentSearchIndexBuild();
       this.searchMatchedNodeIds = new Set();
       this.markSearchVisibilityDirty();
       return;
     }
+    if (parsed.source !== 'content') this.cancelContentSearchIndexBuild();
     this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
     this.markSearchVisibilityDirty();
   }
@@ -1563,6 +1588,7 @@ class GraphFrontierView extends ItemView {
 
   markGraphVisibilityDirty() {
     this.visibilityGraphVersion += 1;
+    this.contentSearchIndexGraphVersion = -1;
     this.filterVisibilityCache.queryRuleVisibleGraphVersion = -1;
     this.filterVisibilityCache.queryRuleVisibleNodeIds = null;
     this.filterVisibilityCache.finalVisibleKey = '';
@@ -2692,7 +2718,10 @@ class GraphFrontierView extends ItemView {
     }
     this.syncSearchMatchesLive();
     this.syncSearchClearButtonVisibility();
-    this.scheduleContentSearchIndexRebuild();
+    if (!this.shouldUseContentSearchIndex()) {
+      this.cancelContentSearchIndexBuild();
+    }
+    this.getNodeSpatialIndex();
     this.updateLayoutCenter();
 
     this.cleanupDetachedData({
@@ -2715,14 +2744,27 @@ class GraphFrontierView extends ItemView {
   }
 
   scheduleContentSearchIndexRebuild() {
+    if (!this.shouldUseContentSearchIndex()) return;
+    if (
+      this.contentSearchBuildGraphVersion === this.visibilityGraphVersion ||
+      this.contentSearchIndexGraphVersion === this.visibilityGraphVersion
+    ) {
+      return;
+    }
     const buildToken = ++this.contentSearchBuildToken;
+    const graphVersion = this.visibilityGraphVersion;
+    this.contentSearchBuildGraphVersion = graphVersion;
     const nodesSnapshot = this.nodes.slice();
     const appRef = this.app;
     const nextIndex = new Map();
 
     const buildIndexAsync = async () => {
       for (const node of nodesSnapshot) {
-        if (buildToken !== this.contentSearchBuildToken) return;
+        if (
+          buildToken !== this.contentSearchBuildToken ||
+          graphVersion !== this.visibilityGraphVersion
+        )
+          return;
         if (!node || node.meta?.isAttachment) continue;
         const file = appRef.vault.getAbstractFileByPath(node.id);
         if (!file || typeof file.extension !== 'string' || file.extension.toLowerCase() !== 'md')
@@ -2734,8 +2776,14 @@ class GraphFrontierView extends ItemView {
           continue;
         }
       }
-      if (buildToken !== this.contentSearchBuildToken) return;
+      if (
+        buildToken !== this.contentSearchBuildToken ||
+        graphVersion !== this.visibilityGraphVersion
+      )
+        return;
       this.contentSearchIndex = nextIndex;
+      this.contentSearchIndexGraphVersion = graphVersion;
+      this.contentSearchBuildGraphVersion = -1;
       this.syncSearchMatchesLive();
     };
 
