@@ -2113,6 +2113,19 @@ class GraphFrontierView extends ItemView {
     return this.nodeSpatialIndex;
   }
 
+  isNodeSpatialIndexFresh() {
+    return (
+      !!this.nodeSpatialIndex && this.nodeSpatialIndexBuildVersion === this.nodeSpatialIndexVersion
+    );
+  }
+
+  warmNodeSpatialIndexIfIdle() {
+    if (this.isNodeSpatialIndexFresh()) return;
+    if (this.dragNodeId || this.panDrag || this.boxSelectDrag) return;
+    if (!this.layoutPaused) return;
+    this.getNodeSpatialIndex();
+  }
+
   // Groups block: color-rule rows, drag-and-drop priority, and settings persistence.
   buildGroupEditorSection(parentEl) {
     const section = parentEl.createDiv({ cls: 'graphfrontier-groups' });
@@ -3111,6 +3124,7 @@ class GraphFrontierView extends ItemView {
     if (!this.isOpen) return;
     this.stepCameraSmoothing();
     this.stepSimulation();
+    this.warmNodeSpatialIndexIfIdle();
     this.stepFocusSmoothing();
     this.render();
     this.frameHandle = this.contentEl.win.requestAnimationFrame(() => this.runFrame());
@@ -6073,9 +6087,14 @@ class GraphFrontierView extends ItemView {
     const world = this.screenToWorld(screenX, screenY);
     const visibleNodeIds = this.getFilterVisibleNodeIds();
     const hasFilter = visibleNodeIds instanceof Set;
-    const spatialIndex = this.getNodeSpatialIndex();
     const zoom = Math.max(this.camera.zoom, 0.0001);
     const maxCandidateRadius = 4 + 2 / zoom;
+
+    if (!this.isNodeSpatialIndexFresh()) {
+      return this.getNodeAtWorldByScan(world, visibleNodeIds, hasFilter, zoom, maxCandidateRadius);
+    }
+
+    const spatialIndex = this.nodeSpatialIndex;
     const cellSize = spatialIndex.cellSize;
     const centerGX = Math.floor(world.x / cellSize);
     const centerGY = Math.floor(world.y / cellSize);
@@ -6099,6 +6118,33 @@ class GraphFrontierView extends ItemView {
           }
         }
       }
+    }
+
+    if (!bestNode) return null;
+
+    const baseRadius = this.getNodeRadius(bestNode);
+    const maxDist = Math.max(1, baseRadius + 2 / zoom);
+    if (bestDist2 > maxDist * maxDist) return null;
+
+    return bestNode;
+  }
+
+  getNodeAtWorldByScan(world, visibleNodeIds, hasFilter, zoom, maxCandidateRadius) {
+    let bestNode = null;
+    let bestDist2 = Infinity;
+    const coarseMaxDist = Math.max(1, maxCandidateRadius);
+    const coarseMaxDist2 = coarseMaxDist * coarseMaxDist;
+
+    for (const node of this.nodes) {
+      if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
+      const dx = node.x - world.x;
+      if (Math.abs(dx) > coarseMaxDist) continue;
+      const dy = node.y - world.y;
+      if (Math.abs(dy) > coarseMaxDist) continue;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 > coarseMaxDist2 || dist2 >= bestDist2) continue;
+      bestDist2 = dist2;
+      bestNode = node;
     }
 
     if (!bestNode) return null;
