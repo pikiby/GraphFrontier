@@ -41,9 +41,7 @@ function stepFocusSmoothing(view) {
 
   const baseSearchFocusNodeId = view.getFilterNodeId() || view.getFindFocusNodeId();
   const hoverTargetNodeId =
-    baseSearchFocusNodeId && view.hoverNodeId && view.hoverNodeId !== baseSearchFocusNodeId
-      ? view.hoverNodeId
-      : null;
+    view.hoverNodeId && view.hoverNodeId !== baseSearchFocusNodeId ? view.hoverNodeId : null;
 
   if (hoverTargetNodeId && hoverTargetNodeId !== view.hoverFocusNodeId) {
     if (view.hoverFocusNodeId && view.hoverFocusProgress > 0.001) {
@@ -483,7 +481,6 @@ function drawNodes(view, ctx) {
     : new Set();
   const hasAnyFocus = hasFocus || hasHoverFocus || hasHoverFade;
   const combinedFocusProgress = Math.max(focusProgress, hoverFocusProgress, hoverFadeProgress);
-  const hasSearchFocus = !!(view.getFilterNodeId() || view.getFindFocusNodeId());
   const searchHighlightNodeIds = view.getSearchHighlightNodeIds();
   const hasSearchHighlight =
     !hasFilter &&
@@ -523,10 +520,8 @@ function drawNodes(view, ctx) {
       hoverFocusNeighborProgress,
       hoverFadeNeighborProgress
     );
-    const hoverVisualProgressBase = hasSearchFocus
-      ? isHoverFocusNode
-        ? hoverFocusProgress
-        : 0
+    const hoverVisualProgressBase = isHoverFocusNode
+      ? hoverFocusProgress
       : isFocusNode
         ? focusProgress
         : isHoverNodeRaw
