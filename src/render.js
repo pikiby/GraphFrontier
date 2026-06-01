@@ -208,18 +208,55 @@ function getLabelFontSize(view) {
 function getGroupColorForNode(view, node) {
   const groups = Array.isArray(view.plugin.data.groups) ? view.plugin.data.groups : [];
   if (groups.length === 0) return null;
-  const meta = view.nodeMetaById.get(node.id) || node.meta || null;
-  if (!meta) return null;
+  const signature = groups
+    .map((group) => {
+      if (!group || typeof group !== 'object') return '';
+      const id = String(group.id || '');
+      const enabled = group.enabled !== false ? '1' : '0';
+      const query = String(group.query || '').trim();
+      const color = String(group.color || '').trim();
+      return `${id}|${enabled}|${query}|${color}`;
+    })
+    .join('||');
+  const graphVersion = Number(view.visibilityGraphVersion || 0);
+  const cache =
+    view.groupColorCache && typeof view.groupColorCache === 'object' ? view.groupColorCache : null;
+  if (
+    cache &&
+    cache.graphVersion === graphVersion &&
+    cache.groupsSignature === signature &&
+    cache.colorByNodeId instanceof Map
+  ) {
+    return cache.colorByNodeId.get(node.id) || null;
+  }
 
+  const parsedGroups = [];
   for (const group of groups) {
     if (!group || group.enabled === false) continue;
     const parsed = view.plugin.parseGroupQuery(group.query);
     if (!parsed) continue;
-    if (nodeMatchesParsedGroup(meta, parsed, node)) {
-      return view.plugin.normalizeGroupColor(group.color);
+    parsedGroups.push({
+      parsed,
+      color: view.plugin.normalizeGroupColor(group.color),
+    });
+  }
+  const colorByNodeId = new Map();
+  for (const candidateNode of view.nodes) {
+    const meta = view.nodeMetaById.get(candidateNode.id) || candidateNode.meta || null;
+    if (!meta) continue;
+    for (const group of parsedGroups) {
+      if (nodeMatchesParsedGroup(meta, group.parsed, candidateNode)) {
+        colorByNodeId.set(candidateNode.id, group.color);
+        break;
+      }
     }
   }
-  return null;
+  view.groupColorCache = {
+    graphVersion,
+    groupsSignature: signature,
+    colorByNodeId,
+  };
+  return colorByNodeId.get(node.id) || null;
 }
 
 // Match helper used by group-color rules (path/file/tag/line/section/property).
@@ -345,6 +382,15 @@ function drawEdges(view, ctx) {
 
     const sourcePoint = view.worldToScreen(sourceNode.x, sourceNode.y);
     const targetPoint = view.worldToScreen(targetNode.x, targetNode.y);
+    const edgePad = 80;
+    if (
+      (sourcePoint.x < -edgePad && targetPoint.x < -edgePad) ||
+      (sourcePoint.x > view.viewWidth + edgePad && targetPoint.x > view.viewWidth + edgePad) ||
+      (sourcePoint.y < -edgePad && targetPoint.y < -edgePad) ||
+      (sourcePoint.y > view.viewHeight + edgePad && targetPoint.y > view.viewHeight + edgePad)
+    ) {
+      continue;
+    }
     const sourcePaintColor = view.plugin.getPaintedEdgeColor(sourceNode.id);
     const targetPaintColor = view.plugin.getPaintedEdgeColor(targetNode.id);
     const paintedColor = sourcePaintColor || targetPaintColor;
