@@ -164,6 +164,7 @@ class GraphFrontierView extends ItemView {
     this.isOpen = false;
     this.resizeObserver = null;
     this.frameHandle = null;
+    this.canvasBackgroundColor = '#111418';
   }
 
   getViewType() {
@@ -188,6 +189,7 @@ class GraphFrontierView extends ItemView {
     this.sidePanelEl = this.wrapEl.createDiv({ cls: 'graphfrontier-sidepanel' });
     this.buildQuickPreviewPanel();
     this.ctx = this.canvasEl.getContext('2d');
+    this.updateCanvasBackgroundColor();
 
     this.buildSidePanel();
     this.bindEvents();
@@ -488,6 +490,7 @@ class GraphFrontierView extends ItemView {
     });
     this.addLayoutFileSearchRow(layoutSection);
     this.addSideSaveLayoutButton(layoutSection);
+    this.syncSidePanelControls();
   }
 
   createSidePanelSection(parentEl, options = {}) {
@@ -2681,10 +2684,18 @@ class GraphFrontierView extends ItemView {
     if (this.wrapEl.style.maxHeight) this.wrapEl.style.maxHeight = '';
   }
 
+  updateCanvasBackgroundColor() {
+    if (!this.contentEl) return;
+    const styles = getComputedStyle(this.contentEl);
+    this.canvasBackgroundColor =
+      styles.getPropertyValue('--background-primary').trim() || '#111418';
+  }
+
   resizeCanvas() {
     if (!this.canvasEl || !this.ctx) return;
 
     this.updateWrapHeightForKeyboard();
+    this.updateCanvasBackgroundColor();
 
     const rect = this.wrapEl.getBoundingClientRect();
     this.viewWidth = Math.max(1, Math.floor(rect.width));

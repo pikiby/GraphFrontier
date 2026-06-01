@@ -82,17 +82,13 @@ function stepFocusSmoothing(view) {
 // Main render pass: clear background, optional grid, then edges and nodes.
 function renderFrame(view) {
   if (!view.ctx) return;
-  view.syncSidePanelControls();
 
   const ctx = view.ctx;
   const width = view.viewWidth;
   const height = view.viewHeight;
 
-  const styles = getComputedStyle(view.contentEl);
-  const bgColor = styles.getPropertyValue('--background-primary').trim() || '#111418';
-
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = bgColor;
+  ctx.fillStyle = view.canvasBackgroundColor || '#111418';
   ctx.fillRect(0, 0, width, height);
 
   if (view.plugin.getSettings().show_grid) {
