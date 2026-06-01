@@ -332,6 +332,16 @@ function drawGrid(view, ctx) {
 
 // Draw all edges with focus/fade interpolation and painted-edge overrides.
 function drawEdges(view, ctx) {
+  const zoom = Math.max(view.camera.zoom, 0.0001);
+  const halfWidthWorld = view.viewWidth / (2 * zoom);
+  const halfHeightWorld = view.viewHeight / (2 * zoom);
+  const edgePadWorld = 80 / zoom;
+  const minWorldX = view.camera.x - halfWidthWorld - edgePadWorld;
+  const maxWorldX = view.camera.x + halfWidthWorld + edgePadWorld;
+  const minWorldY = view.camera.y - halfHeightWorld - edgePadWorld;
+  const maxWorldY = view.camera.y + halfHeightWorld + edgePadWorld;
+  const screenCenterX = view.viewWidth / 2;
+  const screenCenterY = view.viewHeight / 2;
   const edgeScale = view.plugin.clampNumber(
     view.plugin.getSettings().edge_width_scale,
     0.01,
@@ -367,6 +377,7 @@ function drawEdges(view, ctx) {
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
+  const paintedEdgeColors = view.plugin.data?.painted_edge_colors || {};
 
   for (const edge of view.edges) {
     if (hasFilter) {
@@ -376,23 +387,25 @@ function drawEdges(view, ctx) {
         if (!isFilterEdge) continue;
       }
     }
-    const sourceNode = view.nodeById.get(edge.source);
-    const targetNode = view.nodeById.get(edge.target);
+    const sourceNode = edge.sourceNode || view.nodeById.get(edge.source);
+    const targetNode = edge.targetNode || view.nodeById.get(edge.target);
     if (!sourceNode || !targetNode) continue;
 
-    const sourcePoint = view.worldToScreen(sourceNode.x, sourceNode.y);
-    const targetPoint = view.worldToScreen(targetNode.x, targetNode.y);
-    const edgePad = 80;
     if (
-      (sourcePoint.x < -edgePad && targetPoint.x < -edgePad) ||
-      (sourcePoint.x > view.viewWidth + edgePad && targetPoint.x > view.viewWidth + edgePad) ||
-      (sourcePoint.y < -edgePad && targetPoint.y < -edgePad) ||
-      (sourcePoint.y > view.viewHeight + edgePad && targetPoint.y > view.viewHeight + edgePad)
+      (sourceNode.x < minWorldX && targetNode.x < minWorldX) ||
+      (sourceNode.x > maxWorldX && targetNode.x > maxWorldX) ||
+      (sourceNode.y < minWorldY && targetNode.y < minWorldY) ||
+      (sourceNode.y > maxWorldY && targetNode.y > maxWorldY)
     ) {
       continue;
     }
-    const sourcePaintColor = view.plugin.getPaintedEdgeColor(sourceNode.id);
-    const targetPaintColor = view.plugin.getPaintedEdgeColor(targetNode.id);
+
+    const sourcePointX = (sourceNode.x - view.camera.x) * zoom + screenCenterX;
+    const sourcePointY = (sourceNode.y - view.camera.y) * zoom + screenCenterY;
+    const targetPointX = (targetNode.x - view.camera.x) * zoom + screenCenterX;
+    const targetPointY = (targetNode.y - view.camera.y) * zoom + screenCenterY;
+    const sourcePaintColor = paintedEdgeColors[sourceNode.id] || null;
+    const targetPaintColor = paintedEdgeColors[targetNode.id] || null;
     const paintedColor = sourcePaintColor || targetPaintColor;
 
     const isPrimaryFocusEdge =
@@ -415,7 +428,6 @@ function drawEdges(view, ctx) {
       : hasSearchHighlight
         ? searchDimAlpha
         : 1;
-    ctx.save();
     ctx.globalAlpha = edgeAlpha;
 
     if (paintedColor) {
@@ -432,16 +444,25 @@ function drawEdges(view, ctx) {
     }
 
     ctx.beginPath();
-    ctx.moveTo(sourcePoint.x, sourcePoint.y);
-    ctx.lineTo(targetPoint.x, targetPoint.y);
+    ctx.moveTo(sourcePointX, sourcePointY);
+    ctx.lineTo(targetPointX, targetPointY);
     ctx.stroke();
-    ctx.restore();
   }
+  ctx.globalAlpha = 1;
 }
 
 // Draw nodes, labels, hover outlines, and hovered title popup.
 function drawNodes(view, ctx) {
-  const zoom = view.camera.zoom;
+  const zoom = Math.max(view.camera.zoom, 0.0001);
+  const halfWidthWorld = view.viewWidth / (2 * zoom);
+  const halfHeightWorld = view.viewHeight / (2 * zoom);
+  const nodePadWorld = 80 / zoom;
+  const minWorldX = view.camera.x - halfWidthWorld - nodePadWorld;
+  const maxWorldX = view.camera.x + halfWidthWorld + nodePadWorld;
+  const minWorldY = view.camera.y - halfHeightWorld - nodePadWorld;
+  const maxWorldY = view.camera.y + halfHeightWorld + nodePadWorld;
+  const screenCenterX = view.viewWidth / 2;
+  const screenCenterY = view.viewHeight / 2;
   const labelMinZoom = getLabelZoomThreshold(view);
   const labelFontSize = getLabelFontSize(view);
   const labelFadeRange = Math.max(0.001, labelMinZoom * 0.35);
@@ -477,15 +498,11 @@ function drawNodes(view, ctx) {
 
   for (const node of view.nodes) {
     if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
-    const point = view.worldToScreen(node.x, node.y);
-    if (
-      point.x < -80 ||
-      point.x > view.viewWidth + 80 ||
-      point.y < -80 ||
-      point.y > view.viewHeight + 80
-    ) {
+    if (node.x < minWorldX || node.x > maxWorldX || node.y < minWorldY || node.y > maxWorldY) {
       continue;
     }
+    const pointX = (node.x - view.camera.x) * zoom + screenCenterX;
+    const pointY = (node.y - view.camera.y) * zoom + screenCenterY;
 
     const radius = Math.max(0.6, getNodeRadius(view, node) * view.camera.zoom);
 
@@ -548,7 +565,7 @@ function drawNodes(view, ctx) {
     ctx.globalAlpha = nodeAlpha;
     ctx.fillStyle = fillColor;
     ctx.beginPath();
-    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.arc(pointX, pointY, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
@@ -561,7 +578,7 @@ function drawNodes(view, ctx) {
       ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(hoverStrokeAlpha, selectedStrokeAlpha)})`;
       ctx.lineWidth = Math.max(hoverLineWidth, selectedLineWidth);
       ctx.beginPath();
-      ctx.arc(point.x, point.y, radius + 2, 0, Math.PI * 2);
+      ctx.arc(pointX, pointY, radius + 2, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -579,7 +596,7 @@ function drawNodes(view, ctx) {
       ctx.font = `${zoomedFontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(node.label, point.x, point.y + radius + 8);
+      ctx.fillText(node.label, pointX, pointY + radius + 8);
       ctx.restore();
     }
   }

@@ -2925,6 +2925,8 @@ class GraphFrontierView extends ItemView {
       nextEdges.push({
         source: rawEdge.source,
         target: rawEdge.target,
+        sourceNode,
+        targetNode,
       });
     }
 
