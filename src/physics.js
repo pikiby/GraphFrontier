@@ -1,15 +1,7 @@
 const { TWO_PI, DEFAULT_DATA } = require('./constants');
 
-const DEFAULT_LAYOUT_SEARCH_MS = 3000;
-const DRAG_RELEASE_LAYOUT_SEARCH_MS = 600;
-
 // Simulation restart marker used after manual layout-changing actions.
-function kickLayoutSearch(view, options = {}) {
-  const requestedDurationMs = Number(options.durationMs);
-  view.layoutKickDurationMs =
-    Number.isFinite(requestedDurationMs) && requestedDurationMs > 0
-      ? requestedDurationMs
-      : DEFAULT_LAYOUT_SEARCH_MS;
+function kickLayoutSearch(view) {
   view.layoutKickAtMs = Date.now();
   view.layoutStillFrames = 0;
   view.layoutAutosaveDirty = true;
@@ -130,58 +122,10 @@ function stepCameraSmoothing(view) {
   view.camera.zoom += (view.cameraTarget.zoom - view.camera.zoom) * smooth;
 }
 
-function getActivelyDraggedNodeIds(view) {
-  const activelyDraggedNodeIds = new Set();
-  if (view.dragNodeId) activelyDraggedNodeIds.add(view.dragNodeId);
-  if (view.dragSelectionOffsets instanceof Map) {
-    for (const nodeId of view.dragSelectionOffsets.keys()) {
-      if (!nodeId) continue;
-      activelyDraggedNodeIds.add(nodeId);
-    }
-  }
-  return activelyDraggedNodeIds;
-}
-
-function syncOrbitPinnedNodesForDrag(view) {
-  const activelyDraggedNodeIds = getActivelyDraggedNodeIds(view);
-  if (activelyDraggedNodeIds.size === 0) return;
-
-  const orbitPins = view.plugin?.data?.orbit_pins || {};
-  let changed = false;
-  for (const [orbitNodeId, orbitPin] of Object.entries(orbitPins)) {
-    if (activelyDraggedNodeIds.has(orbitNodeId)) continue;
-    const anchorId = String(orbitPin?.anchor_id || '');
-    if (!activelyDraggedNodeIds.has(anchorId)) continue;
-
-    const orbitNode = view.nodeById.get(orbitNodeId);
-    const anchorNode = view.nodeById.get(anchorId);
-    if (!orbitNode || !anchorNode) continue;
-
-    orbitNode.x = anchorNode.x + Math.cos(orbitPin.angle) * orbitPin.radius;
-    orbitNode.y = anchorNode.y + Math.sin(orbitPin.angle) * orbitPin.radius;
-    orbitNode.vx = 0;
-    orbitNode.vy = 0;
-    changed = true;
-  }
-
-  if (changed && typeof view.markNodeSpatialIndexDirty === 'function') {
-    view.markNodeSpatialIndexDirty();
-  }
-}
-
-function getLayoutSearchDurationMs(view) {
-  const durationMs = Number(view.layoutKickDurationMs);
-  return Number.isFinite(durationMs) && durationMs > 0 ? durationMs : DEFAULT_LAYOUT_SEARCH_MS;
-}
-
 // Main force simulation step: repel/link/center forces, pin constraints, and autosave settling.
 function stepSimulation(view) {
+  if (view.layoutPaused && !view.dragNodeId) return;
   if (view.nodes.length === 0) return;
-  if (view.dragNodeId) {
-    syncOrbitPinnedNodesForDrag(view);
-    return;
-  }
-  if (view.layoutPaused) return;
 
   const filterVisibleNodeIds = view.getFilterVisibleNodeIds();
   const hasPhysicsFilter = filterVisibleNodeIds instanceof Set;
@@ -214,10 +158,12 @@ function stepSimulation(view) {
   const settings = view.plugin.getSettings();
   const attachmentIsolationMode = settings.attachments_on_orbits !== false;
   const nowMs = Date.now();
-  const layoutSearchMs = getLayoutSearchDurationMs(view);
+  const layoutSearchMs = 3000;
   const elapsedSearchMs = nowMs - view.layoutKickAtMs;
   const layoutSearchFactor = 1;
-  const settleProgress = Math.max(0, Math.min(1, elapsedSearchMs / layoutSearchMs));
+  const settleProgress = view.dragNodeId
+    ? 0
+    : Math.max(0, Math.min(1, elapsedSearchMs / layoutSearchMs));
   // Gradual global slowdown during settle window to imitate increasing damping.
   const settleVelocityBrake = 1 - settleProgress * 0.7;
 
@@ -308,7 +254,14 @@ function stepSimulation(view) {
     ? buildAttachmentMainNodeMap(view, nodes, hasPhysicsFilter ? filterVisibleNodeIds : null)
     : new Map();
   const autoAttachmentOrbitNodeIds = new Set(autoAttachmentOrbitById.keys());
-  const activelyDraggedNodeIds = getActivelyDraggedNodeIds(view);
+  const activelyDraggedNodeIds = new Set();
+  if (view.dragNodeId) activelyDraggedNodeIds.add(view.dragNodeId);
+  if (view.dragSelectionOffsets instanceof Map) {
+    for (const nodeId of view.dragSelectionOffsets.keys()) {
+      if (!nodeId) continue;
+      activelyDraggedNodeIds.add(nodeId);
+    }
+  }
   const hasMovableNodes = nodes.some(
     (node) =>
       !fixedNodeIds.has(node.id) &&
@@ -886,7 +839,6 @@ function recomputeOrbitRadii(view) {
 }
 
 module.exports = {
-  DRAG_RELEASE_LAYOUT_SEARCH_MS,
   kickLayoutSearch,
   updateLayoutCenter,
   stepCameraSmoothing,

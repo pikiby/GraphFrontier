@@ -11,7 +11,6 @@ const {
 } = require('./constants');
 
 const {
-  DRAG_RELEASE_LAYOUT_SEARCH_MS,
   kickLayoutSearch: kickLayoutSearchPhysics,
   updateLayoutCenter: updateLayoutCenterPhysics,
   getOrbitRadiusBySpacing,
@@ -134,7 +133,6 @@ class GraphFrontierView extends ItemView {
     this.boxSelectArmed = false;
     this.dragSelectionOffsets = null;
     this.layoutKickAtMs = Date.now();
-    this.layoutKickDurationMs = 3000;
     this.layoutStillFrames = 0;
     this.layoutAutosaveDirty = false;
     this.layoutPaused = false;
@@ -2051,8 +2049,8 @@ class GraphFrontierView extends ItemView {
   }
 
   // Simulation restart marker: called when settings or node positions change.
-  kickLayoutSearch(options = {}) {
-    return kickLayoutSearchPhysics(this, options);
+  kickLayoutSearch() {
+    return kickLayoutSearchPhysics(this);
   }
 
   markNodeSpatialIndexDirty() {
@@ -3378,7 +3376,7 @@ class GraphFrontierView extends ItemView {
     this.panDragMovedDistance = 0;
     this.canvasEl.removeClass('is-dragging');
 
-    if (didDragNodeMove) this.kickLayoutSearch({ durationMs: DRAG_RELEASE_LAYOUT_SEARCH_MS });
+    if (didDragNodeMove) this.kickLayoutSearch();
 
     const isBackgroundClick = !hadDraggedNode && hadPanDrag && panDragMovedDistance <= 3;
     if (isBackgroundClick) {
