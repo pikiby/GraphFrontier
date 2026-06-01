@@ -98,7 +98,6 @@ function registerGraphFrontierRefreshEvents(plugin) {
   plugin.registerEvent(plugin.app.vault.on('modify', scheduleRefreshForVaultEvent));
   plugin.registerEvent(plugin.app.vault.on('delete', scheduleRefreshForVaultEvent));
   plugin.registerEvent(plugin.app.vault.on('rename', scheduleRefreshForVaultEvent));
-  plugin.registerEvent(plugin.app.workspace.on('layout-change', () => plugin.scheduleRefreshAllViews()));
 }
 
 // Convert any keyboard key string into one canonical non-modifier token.

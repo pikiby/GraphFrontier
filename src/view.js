@@ -2122,8 +2122,7 @@ class GraphFrontierView extends ItemView {
   warmNodeSpatialIndexIfIdle() {
     if (this.isNodeSpatialIndexFresh()) return;
     if (this.dragNodeId || this.panDrag || this.boxSelectDrag) return;
-    if (!this.layoutPaused) return;
-    this.getNodeSpatialIndex();
+    if (!this.nodeSpatialIndex || this.layoutPaused) this.getNodeSpatialIndex();
   }
 
   // Groups block: color-rule rows, drag-and-drop priority, and settings persistence.
@@ -2855,6 +2854,8 @@ class GraphFrontierView extends ItemView {
     this.boxSelectDrag = null;
 
     this.applyAutoAttachmentOrbitPositions();
+    this.nodeSpatialIndex = null;
+    this.nodeSpatialIndexBuildVersion = -1;
     this.markNodeSpatialIndexDirty();
   }
 
@@ -6090,11 +6091,14 @@ class GraphFrontierView extends ItemView {
     const zoom = Math.max(this.camera.zoom, 0.0001);
     const maxCandidateRadius = 4 + 2 / zoom;
 
-    if (!this.isNodeSpatialIndexFresh()) {
-      return this.getNodeAtWorldByScan(world, visibleNodeIds, hasFilter, zoom, maxCandidateRadius);
+    if (!this.nodeSpatialIndex) {
+      this.getNodeSpatialIndex();
     }
 
     const spatialIndex = this.nodeSpatialIndex;
+    if (!spatialIndex) {
+      return this.getNodeAtWorldByScan(world, visibleNodeIds, hasFilter, zoom, maxCandidateRadius);
+    }
     const cellSize = spatialIndex.cellSize;
     const centerGX = Math.floor(world.x / cellSize);
     const centerGY = Math.floor(world.y / cellSize);
