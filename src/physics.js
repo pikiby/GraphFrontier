@@ -554,7 +554,7 @@ function stepSimulation(view) {
       if (!sourceNode || !targetNode) continue;
       const sourceIsFixed = fixedNodeIds.has(sourceNode.id);
       const targetIsFixed = fixedNodeIds.has(targetNode.id);
-      if (sourceIsFixed || targetIsFixed) continue;
+      if (sourceIsFixed && targetIsFixed) continue;
       const sourceIsAttachment = !!sourceNode.meta?.isAttachment;
       const targetIsAttachment = !!targetNode.meta?.isAttachment;
       if (attachmentIsolationMode && (sourceIsAttachment || targetIsAttachment)) {
@@ -564,11 +564,6 @@ function stepSimulation(view) {
         const mainNodeId = attachmentMainById.get(attachmentNode.id) || '';
         if (!mainNodeId || regularNode.id !== mainNodeId) continue;
       }
-      const sourceIsOrbitPinned = orbitNodeIds.has(sourceNode.id);
-      const targetIsOrbitPinned = orbitNodeIds.has(targetNode.id);
-      // Orbit-pinned nodes must remain fixed in place, but their links should still
-      // attract/free connected nodes. Only skip fully fixed orbit-to-orbit edges.
-      if (sourceIsOrbitPinned && targetIsOrbitPinned) continue;
       if (
         autoAttachmentOrbitNodeIds.has(sourceNode.id) ||
         autoAttachmentOrbitNodeIds.has(targetNode.id)
@@ -595,8 +590,8 @@ function stepSimulation(view) {
 
       const sourceAccel = accelById.get(sourceNode.id);
       const targetAccel = accelById.get(targetNode.id);
-      let sourceReceivesForce = !sourceIsOrbitPinned;
-      let targetReceivesForce = !targetIsOrbitPinned;
+      let sourceReceivesForce = !sourceIsFixed;
+      let targetReceivesForce = !targetIsFixed;
       if (attachmentIsolationMode && sourceIsAttachment !== targetIsAttachment) {
         sourceReceivesForce = sourceReceivesForce && sourceIsAttachment;
         targetReceivesForce = targetReceivesForce && targetIsAttachment;
