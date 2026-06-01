@@ -6032,7 +6032,7 @@ class GraphFrontierView extends ItemView {
     this.plugin.data.view_state.pan_x = this.cameraTarget.x;
     this.plugin.data.view_state.pan_y = this.cameraTarget.y;
     this.plugin.data.view_state.zoom = this.cameraTarget.zoom;
-    this.plugin.schedulePersist();
+    this.plugin.schedulePersist(1200);
   }
 
   async openNodeFile(nodeId) {
