@@ -127,7 +127,6 @@ class GraphFrontierView extends ItemView {
     this.hoverFocusProgress = 0;
     this.hoverFadeNodeId = null;
     this.hoverFadeProgress = 0;
-    this.fastRenderUntilMs = 0;
     this.neighborsById = new Map();
     this.clickFlashNodeId = null;
     this.clickFlashUntilMs = 0;
@@ -3125,7 +3124,7 @@ class GraphFrontierView extends ItemView {
   runFrame() {
     if (!this.isOpen) return;
     this.stepCameraSmoothing();
-    if (!this.isCameraNavigationActive()) this.stepSimulation();
+    this.stepSimulation();
     this.warmNodeSpatialIndexIfIdle();
     this.stepFocusSmoothing();
     this.render();
@@ -3148,33 +3147,6 @@ class GraphFrontierView extends ItemView {
    */
   render() {
     return renderFrameRender(this);
-  }
-
-  markFastInteractionRender(durationMs = 180) {
-    const safeDurationMs = Math.max(50, Math.min(800, Number(durationMs) || 180));
-    this.fastRenderUntilMs = Math.max(this.fastRenderUntilMs, Date.now() + safeDurationMs);
-  }
-
-  isCameraSmoothingActive() {
-    return (
-      Math.abs(this.camera.x - this.cameraTarget.x) > 0.05 ||
-      Math.abs(this.camera.y - this.cameraTarget.y) > 0.05 ||
-      Math.abs(this.camera.zoom - this.cameraTarget.zoom) > 0.0005
-    );
-  }
-
-  isCameraNavigationActive() {
-    return !!this.panDrag || Date.now() < this.fastRenderUntilMs || this.isCameraSmoothingActive();
-  }
-
-  isFastInteractionRender() {
-    return (
-      !!this.dragNodeId ||
-      !!this.panDrag ||
-      !!this.boxSelectDrag ||
-      Date.now() < this.fastRenderUntilMs ||
-      this.isCameraSmoothingActive()
-    );
   }
 
   drawGrid(ctx) {
@@ -3288,7 +3260,6 @@ class GraphFrontierView extends ItemView {
     }
 
     if (this.dragNodeId) {
-      this.markFastInteractionRender();
       const world = this.screenToWorld(screenX, screenY);
       if (this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0) {
         for (const [nodeId, offset] of this.dragSelectionOffsets.entries()) {
@@ -3330,7 +3301,6 @@ class GraphFrontierView extends ItemView {
     }
 
     if (this.panDrag) {
-      this.markFastInteractionRender();
       const dx = screenX - this.panDrag.startX;
       const dy = screenY - this.panDrag.startY;
       this.panDragMovedDistance = Math.max(this.panDragMovedDistance, Math.sqrt(dx * dx + dy * dy));
@@ -3597,7 +3567,6 @@ class GraphFrontierView extends ItemView {
     this.cameraTarget.x += before.x - after.x;
     this.cameraTarget.y += before.y - after.y;
 
-    this.markFastInteractionRender(260);
     this.persistViewState();
   }
 
@@ -3649,7 +3618,6 @@ class GraphFrontierView extends ItemView {
     }
 
     if (this.dragNodeId) {
-      this.markFastInteractionRender();
       const node = this.nodeById.get(this.dragNodeId);
       if (node) {
         const world = this.screenToWorld(point.x, point.y);
@@ -3685,7 +3653,6 @@ class GraphFrontierView extends ItemView {
     const dy = point.y - this.panDrag.startY;
     this.cameraTarget.x = this.panDrag.startCameraX - dx / this.panDrag.startZoom;
     this.cameraTarget.y = this.panDrag.startCameraY - dy / this.panDrag.startZoom;
-    this.markFastInteractionRender();
     this.persistViewState();
   }
 
@@ -3835,7 +3802,6 @@ class GraphFrontierView extends ItemView {
       this.touchGesture.startCameraX + (this.touchGesture.anchorWorldX - worldAtCurrentCenter.x);
     this.cameraTarget.y =
       this.touchGesture.startCameraY + (this.touchGesture.anchorWorldY - worldAtCurrentCenter.y);
-    this.markFastInteractionRender(260);
     this.persistViewState();
   }
 

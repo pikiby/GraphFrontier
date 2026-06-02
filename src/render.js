@@ -93,13 +93,8 @@ function renderFrame(view) {
     drawGrid(view, ctx);
   }
 
-  if (typeof view.isFastInteractionRender === 'function' && view.isFastInteractionRender()) {
-    drawFastEdges(view, ctx);
-    drawFastNodes(view, ctx);
-  } else {
-    drawEdges(view, ctx);
-    drawNodes(view, ctx);
-  }
+  drawEdges(view, ctx);
+  drawNodes(view, ctx);
   drawSelectionBox(view, ctx);
 }
 
@@ -156,106 +151,6 @@ function getNodeFileTypeLabel(node) {
   if (extMatch && extMatch[1]) return String(extMatch[1]).toLowerCase();
   if (node?.meta?.isAttachment) return 'attachment';
   return 'md';
-}
-
-// Draft edge renderer for active camera/node interaction on large graphs.
-function drawFastEdges(view, ctx) {
-  const zoom = Math.max(view.camera.zoom, 0.0001);
-  const halfWidthWorld = view.viewWidth / (2 * zoom);
-  const halfHeightWorld = view.viewHeight / (2 * zoom);
-  const edgePadWorld = 80 / zoom;
-  const minWorldX = view.camera.x - halfWidthWorld - edgePadWorld;
-  const maxWorldX = view.camera.x + halfWidthWorld + edgePadWorld;
-  const minWorldY = view.camera.y - halfHeightWorld - edgePadWorld;
-  const maxWorldY = view.camera.y + halfHeightWorld + edgePadWorld;
-  const screenCenterX = view.viewWidth / 2;
-  const screenCenterY = view.viewHeight / 2;
-  const edgeScale = view.plugin.clampNumber(
-    view.plugin.getSettings().edge_width_scale,
-    0.01,
-    1,
-    DEFAULT_DATA.settings.edge_width_scale
-  );
-  const visibleNodeIds = view.getFilterVisibleNodeIds();
-  const hasFilter = visibleNodeIds instanceof Set;
-  const filterNodeId = hasFilter ? view.getFilterNodeId() : null;
-  const isNameFilterMode =
-    hasFilter && view.getEffectiveSearchSource() === 'name' && !!filterNodeId;
-
-  ctx.globalAlpha = 0.34;
-  ctx.strokeStyle = 'rgba(145, 160, 187, 0.55)';
-  ctx.lineWidth = edgeScale;
-  ctx.beginPath();
-  let hasPath = false;
-
-  for (const edge of view.edges) {
-    if (hasFilter) {
-      if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) continue;
-      if (isNameFilterMode && edge.source !== filterNodeId && edge.target !== filterNodeId) {
-        continue;
-      }
-    }
-
-    const sourceNode = edge.sourceNode || view.nodeById.get(edge.source);
-    const targetNode = edge.targetNode || view.nodeById.get(edge.target);
-    if (!sourceNode || !targetNode) continue;
-    if (
-      (sourceNode.x < minWorldX && targetNode.x < minWorldX) ||
-      (sourceNode.x > maxWorldX && targetNode.x > maxWorldX) ||
-      (sourceNode.y < minWorldY && targetNode.y < minWorldY) ||
-      (sourceNode.y > maxWorldY && targetNode.y > maxWorldY)
-    ) {
-      continue;
-    }
-
-    ctx.moveTo(
-      (sourceNode.x - view.camera.x) * zoom + screenCenterX,
-      (sourceNode.y - view.camera.y) * zoom + screenCenterY
-    );
-    ctx.lineTo(
-      (targetNode.x - view.camera.x) * zoom + screenCenterX,
-      (targetNode.y - view.camera.y) * zoom + screenCenterY
-    );
-    hasPath = true;
-  }
-
-  if (hasPath) ctx.stroke();
-  ctx.globalAlpha = 1;
-}
-
-// Draft node renderer: no labels, no hover title, no per-node save/restore.
-function drawFastNodes(view, ctx) {
-  const zoom = Math.max(view.camera.zoom, 0.0001);
-  const halfWidthWorld = view.viewWidth / (2 * zoom);
-  const halfHeightWorld = view.viewHeight / (2 * zoom);
-  const nodePadWorld = 80 / zoom;
-  const minWorldX = view.camera.x - halfWidthWorld - nodePadWorld;
-  const maxWorldX = view.camera.x + halfWidthWorld + nodePadWorld;
-  const minWorldY = view.camera.y - halfHeightWorld - nodePadWorld;
-  const maxWorldY = view.camera.y + halfHeightWorld + nodePadWorld;
-  const screenCenterX = view.viewWidth / 2;
-  const screenCenterY = view.viewHeight / 2;
-  const visibleNodeIds = view.getFilterVisibleNodeIds();
-  const hasFilter = visibleNodeIds instanceof Set;
-  const selectedNodeIds = view.selectedNodeIds instanceof Set ? view.selectedNodeIds : null;
-
-  ctx.globalAlpha = 0.92;
-  for (const node of view.nodes) {
-    if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
-    if (node.x < minWorldX || node.x > maxWorldX || node.y < minWorldY || node.y > maxWorldY) {
-      continue;
-    }
-
-    const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
-    const isSelectedNode = selectedNodeIds ? selectedNodeIds.has(node.id) : false;
-    ctx.fillStyle = isSelectedNode ? '#ffffff' : isAttachmentNode ? '#f2e7a0' : '#7aa2f7';
-
-    const pointX = (node.x - view.camera.x) * zoom + screenCenterX;
-    const pointY = (node.y - view.camera.y) * zoom + screenCenterY;
-    const dotSize = Math.max(1, Math.min(4, getNodeRadius(view, node) * zoom));
-    ctx.fillRect(pointX - dotSize, pointY - dotSize, dotSize * 2, dotSize * 2);
-  }
-  ctx.globalAlpha = 1;
 }
 
 // Node radius formula with attachment-specific size multiplier.
