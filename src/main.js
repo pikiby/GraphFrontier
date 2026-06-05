@@ -76,17 +76,28 @@ function registerGraphFrontierCommands(plugin) {
 
 // Register all data/layout change listeners that trigger a graph refresh.
 function registerGraphFrontierRefreshEvents(plugin) {
+  const shouldIgnoreVaultEvent = (file) => {
+    const filePath = String(file?.path || '');
+    if (!filePath) return false;
+    const configDir = String(plugin.app?.vault?.configDir || '.obsidian').replace(/\/+$/u, '');
+    const pluginId = String(plugin.manifest?.id || 'graphfrontier').trim() || 'graphfrontier';
+    return filePath === `${configDir}/plugins/${pluginId}` || filePath.startsWith(`${configDir}/plugins/${pluginId}/`);
+  };
+  const scheduleRefreshForVaultEvent = (file) => {
+    if (shouldIgnoreVaultEvent(file)) return;
+    plugin.scheduleRefreshAllViews();
+  };
+
   plugin.registerEvent(
     plugin.app.metadataCache.on('resolved', () => {
       plugin.metadataResolvedOnce = true;
       plugin.scheduleRefreshAllViews({ metadataResolved: true });
     })
   );
-  plugin.registerEvent(plugin.app.vault.on('create', () => plugin.scheduleRefreshAllViews()));
-  plugin.registerEvent(plugin.app.vault.on('modify', () => plugin.scheduleRefreshAllViews()));
-  plugin.registerEvent(plugin.app.vault.on('delete', () => plugin.scheduleRefreshAllViews()));
-  plugin.registerEvent(plugin.app.vault.on('rename', () => plugin.scheduleRefreshAllViews()));
-  plugin.registerEvent(plugin.app.workspace.on('layout-change', () => plugin.scheduleRefreshAllViews()));
+  plugin.registerEvent(plugin.app.vault.on('create', scheduleRefreshForVaultEvent));
+  plugin.registerEvent(plugin.app.vault.on('modify', scheduleRefreshForVaultEvent));
+  plugin.registerEvent(plugin.app.vault.on('delete', scheduleRefreshForVaultEvent));
+  plugin.registerEvent(plugin.app.vault.on('rename', scheduleRefreshForVaultEvent));
 }
 
 // Convert any keyboard key string into one canonical non-modifier token.
@@ -646,11 +657,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this.app.commands.executeCommandById(commandId);
   }
 
-  schedulePersist() {
+  schedulePersist(delayMs = 250) {
     if (this._persistTimer) window.clearTimeout(this._persistTimer);
+    const safeDelayMs = this.clampNumber(delayMs, 100, 5000, 250);
     this._persistTimer = window.setTimeout(() => {
       void this.persistPluginDataOnly();
-    }, 250);
+    }, safeDelayMs);
   }
 
   getLayoutsFolderRelativePath() {

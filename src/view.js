@@ -55,6 +55,15 @@ class GraphFrontierView extends ItemView {
     this.nodeById = new Map();
     this.nodeMetaById = new Map();
     this.edges = [];
+    this.nodeSpatialIndex = null;
+    this.nodeSpatialIndexVersion = 0;
+    this.nodeSpatialIndexBuildVersion = -1;
+    this.nodeSpatialIndexCellSize = 64;
+    this.groupColorCache = {
+      graphVersion: -1,
+      groupsSignature: '',
+      colorByNodeId: new Map(),
+    };
 
     this.lastCursorScreen = null;
     this.hoverNodeId = null;
@@ -110,6 +119,8 @@ class GraphFrontierView extends ItemView {
     this.layoutFileSuggestRequestToken = 0;
     this.contentSearchIndex = new Map();
     this.contentSearchBuildToken = 0;
+    this.contentSearchIndexGraphVersion = -1;
+    this.contentSearchBuildGraphVersion = -1;
     this.focusNodeId = null;
     this.focusProgress = 0;
     this.hoverFocusNodeId = null;
@@ -153,6 +164,7 @@ class GraphFrontierView extends ItemView {
     this.isOpen = false;
     this.resizeObserver = null;
     this.frameHandle = null;
+    this.canvasBackgroundColor = '#111418';
   }
 
   getViewType() {
@@ -177,13 +189,15 @@ class GraphFrontierView extends ItemView {
     this.sidePanelEl = this.wrapEl.createDiv({ cls: 'graphfrontier-sidepanel' });
     this.buildQuickPreviewPanel();
     this.ctx = this.canvasEl.getContext('2d');
+    this.updateCanvasBackgroundColor();
 
     this.buildSidePanel();
     this.bindEvents();
     this.installResizeObserver();
     this.resizeCanvas();
 
-    this.refreshFromVault({ keepCamera: false });
+    const hasSavedLayoutPositions = Object.keys(this.plugin.data.saved_positions || {}).length > 0;
+    this.refreshFromVault({ keepCamera: false, skipLayoutKick: hasSavedLayoutPositions });
 
     this.isOpen = true;
     this.runFrame();
@@ -476,6 +490,7 @@ class GraphFrontierView extends ItemView {
     });
     this.addLayoutFileSearchRow(layoutSection);
     this.addSideSaveLayoutButton(layoutSection);
+    this.syncSidePanelControls();
   }
 
   createSidePanelSection(parentEl, options = {}) {
@@ -794,9 +809,8 @@ class GraphFrontierView extends ItemView {
 
       if (result.activeChanged) {
         this.syncLayoutFileSelectionFromPlugin();
-        this.plugin.refreshAllViews({ forceSavedPositions: true });
+        this.plugin.refreshAllViews({ forceSavedPositions: true, skipLayoutKick: true });
         this.buildSidePanel();
-        this.kickLayoutSearch();
         this.plugin.renderAllViews();
         return;
       }
@@ -945,9 +959,8 @@ class GraphFrontierView extends ItemView {
       return;
     }
     this.syncLayoutFileSelectionFromPlugin();
-    this.plugin.refreshAllViews({ forceSavedPositions: true });
+    this.plugin.refreshAllViews({ forceSavedPositions: true, skipLayoutKick: true });
     this.buildSidePanel();
-    this.kickLayoutSearch();
     this.plugin.renderAllViews();
   }
 
@@ -1034,14 +1047,14 @@ class GraphFrontierView extends ItemView {
             this.searchSelectedNodeId = null;
             this.syncSearchMatchesLive();
             this.syncSearchClearButtonVisibility();
-            this.kickLayoutSearch();
+            if (this.searchMode === 'filter') this.kickLayoutSearch();
             this.contentEl.win.setTimeout(() => openSearchSuggestionPopup(), 0);
             return;
           }
           searchInput.value = selectedText;
           this.searchInputValue = selectedText;
           commitBestSearchSelection();
-          this.kickLayoutSearch();
+          if (this.searchMode === 'filter') this.kickLayoutSearch();
         },
         { title: suggestionPack.menuTitle || '' }
       );
@@ -1066,7 +1079,7 @@ class GraphFrontierView extends ItemView {
       this.searchSelectedNodeId = null;
       this.syncSearchMatchesLive();
       this.syncSearchClearButtonVisibility();
-      this.kickLayoutSearch();
+      if (this.searchMode === 'filter') this.kickLayoutSearch();
       openSearchSuggestionPopup();
     });
     this.registerDomEvent(searchInput, 'change', () => {
@@ -1119,7 +1132,7 @@ class GraphFrontierView extends ItemView {
       this.markSearchVisibilityDirty();
       if (this.searchInputEl) this.searchInputEl.value = '';
       this.syncSearchClearButtonVisibility();
-      this.kickLayoutSearch();
+      if (this.searchMode === 'filter') this.kickLayoutSearch();
       this.closeInputSuggestMenu();
       if (this.searchInputEl) this.searchInputEl.focus();
     });
@@ -1451,6 +1464,7 @@ class GraphFrontierView extends ItemView {
     if (!queryText) return matches;
 
     if (parsed.source === 'content') {
+      if (!this.ensureContentSearchIndexForCurrentGraph(parsed)) return matches;
       for (const node of this.nodes) {
         if (node?.meta?.isAttachment) continue;
         const contentText = this.contentSearchIndex.get(node.id);
@@ -1469,14 +1483,36 @@ class GraphFrontierView extends ItemView {
     return matches;
   }
 
+  shouldUseContentSearchIndex(parsed = null) {
+    const safeParsed =
+      parsed ||
+      this.parseSearchQuery(this.searchInputEl ? this.searchInputEl.value : this.searchInputValue);
+    return safeParsed && safeParsed.source === 'content' && !!String(safeParsed.query || '').trim();
+  }
+
+  ensureContentSearchIndexForCurrentGraph(parsed = null) {
+    if (!this.shouldUseContentSearchIndex(parsed)) return false;
+    if (this.contentSearchIndexGraphVersion === this.visibilityGraphVersion) return true;
+    this.scheduleContentSearchIndexRebuild();
+    return false;
+  }
+
+  cancelContentSearchIndexBuild() {
+    if (this.contentSearchBuildGraphVersion === -1) return;
+    this.contentSearchBuildToken += 1;
+    this.contentSearchBuildGraphVersion = -1;
+  }
+
   syncSearchMatchesLive() {
     const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
     const parsed = this.parseSearchQuery(rawText);
     if (!parsed.query || parsed.source === 'name') {
+      this.cancelContentSearchIndexBuild();
       this.searchMatchedNodeIds = new Set();
       this.markSearchVisibilityDirty();
       return;
     }
+    if (parsed.source !== 'content') this.cancelContentSearchIndexBuild();
     this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
     this.markSearchVisibilityDirty();
   }
@@ -1526,6 +1562,8 @@ class GraphFrontierView extends ItemView {
     if (!node) return;
     this.searchMatchedNodeIds = new Set();
     this.searchSelectedNodeId = node.id;
+    this.focusNodeId = node.id;
+    this.focusProgress = 1;
     const parsed = this.parseSearchQuery(
       this.searchInputEl ? this.searchInputEl.value : this.searchInputValue
     );
@@ -1555,6 +1593,7 @@ class GraphFrontierView extends ItemView {
 
   markGraphVisibilityDirty() {
     this.visibilityGraphVersion += 1;
+    this.contentSearchIndexGraphVersion = -1;
     this.filterVisibilityCache.queryRuleVisibleGraphVersion = -1;
     this.filterVisibilityCache.queryRuleVisibleNodeIds = null;
     this.filterVisibilityCache.finalVisibleKey = '';
@@ -1608,6 +1647,11 @@ class GraphFrontierView extends ItemView {
       if (liveBestNode) return liveBestNode.id;
     }
     return this.searchSelectedNodeId || null;
+  }
+
+  getSearchSelectedFocusNodeId() {
+    if (!this.searchSelectedNodeId) return null;
+    return this.nodeById.has(this.searchSelectedNodeId) ? this.searchSelectedNodeId : null;
   }
 
   getFilterVisibleNodeIds() {
@@ -1773,16 +1817,20 @@ class GraphFrontierView extends ItemView {
 
   getFindFocusNodeId() {
     if (this.searchMode !== 'find') return null;
+    const selectedFocusNodeId = this.getSearchSelectedFocusNodeId();
+    if (selectedFocusNodeId) return selectedFocusNodeId;
     if (this.getEffectiveSearchSource() !== 'name') return null;
     return this.searchSelectedNodeId || null;
   }
 
   getActiveFocusNodeId() {
+    const selectedFocusNodeId = this.getSearchSelectedFocusNodeId();
+    if (selectedFocusNodeId) return selectedFocusNodeId;
     const filterFocusNodeId = this.getFilterNodeId();
     if (filterFocusNodeId) return filterFocusNodeId;
     const findFocusNodeId = this.getFindFocusNodeId();
     if (findFocusNodeId) return findFocusNodeId;
-    return this.hoverNodeId || null;
+    return null;
   }
 
   // Shared input suggestion popup used by both search and group editor inputs.
@@ -2043,6 +2091,49 @@ class GraphFrontierView extends ItemView {
   // Simulation restart marker: called when settings or node positions change.
   kickLayoutSearch() {
     return kickLayoutSearchPhysics(this);
+  }
+
+  markNodeSpatialIndexDirty() {
+    this.nodeSpatialIndexVersion += 1;
+  }
+
+  getNodeSpatialIndex() {
+    if (
+      this.nodeSpatialIndex &&
+      this.nodeSpatialIndexBuildVersion === this.nodeSpatialIndexVersion
+    ) {
+      return this.nodeSpatialIndex;
+    }
+
+    const cellSize = Math.max(1, Number(this.nodeSpatialIndexCellSize) || 64);
+    const buckets = new Map();
+    for (const node of this.nodes) {
+      const gx = Math.floor(node.x / cellSize);
+      const gy = Math.floor(node.y / cellSize);
+      const key = `${gx}:${gy}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = [];
+        buckets.set(key, bucket);
+      }
+      bucket.push(node);
+    }
+
+    this.nodeSpatialIndex = { buckets, cellSize };
+    this.nodeSpatialIndexBuildVersion = this.nodeSpatialIndexVersion;
+    return this.nodeSpatialIndex;
+  }
+
+  isNodeSpatialIndexFresh() {
+    return (
+      !!this.nodeSpatialIndex && this.nodeSpatialIndexBuildVersion === this.nodeSpatialIndexVersion
+    );
+  }
+
+  warmNodeSpatialIndexIfIdle() {
+    if (this.isNodeSpatialIndexFresh()) return;
+    if (this.dragNodeId || this.panDrag || this.boxSelectDrag) return;
+    if (!this.nodeSpatialIndex || this.layoutPaused) this.getNodeSpatialIndex();
   }
 
   // Groups block: color-rule rows, drag-and-drop priority, and settings persistence.
@@ -2616,10 +2707,18 @@ class GraphFrontierView extends ItemView {
     if (this.wrapEl.style.maxHeight) this.wrapEl.style.maxHeight = '';
   }
 
+  updateCanvasBackgroundColor() {
+    if (!this.contentEl) return;
+    const styles = getComputedStyle(this.contentEl);
+    this.canvasBackgroundColor =
+      styles.getPropertyValue('--background-primary').trim() || '#111418';
+  }
+
   resizeCanvas() {
     if (!this.canvasEl || !this.ctx) return;
 
     this.updateWrapHeightForKeyboard();
+    this.updateCanvasBackgroundColor();
 
     const rect = this.wrapEl.getBoundingClientRect();
     this.viewWidth = Math.max(1, Math.floor(rect.width));
@@ -2637,6 +2736,7 @@ class GraphFrontierView extends ItemView {
   refreshFromVault(opts = {}) {
     const keepCamera = !!opts.keepCamera;
     const forceSavedPositions = !!opts.forceSavedPositions;
+    const skipLayoutKick = !!opts.skipLayoutKick;
     const metadataResolved = !!opts.metadataResolved;
     if (metadataResolved) {
       this.hasSeenMetadataResolvedRefresh = true;
@@ -2652,7 +2752,10 @@ class GraphFrontierView extends ItemView {
     }
     this.syncSearchMatchesLive();
     this.syncSearchClearButtonVisibility();
-    this.scheduleContentSearchIndexRebuild();
+    if (!this.shouldUseContentSearchIndex()) {
+      this.cancelContentSearchIndexBuild();
+    }
+    this.getNodeSpatialIndex();
     this.updateLayoutCenter();
 
     this.cleanupDetachedData({
@@ -2664,19 +2767,38 @@ class GraphFrontierView extends ItemView {
       this.centerCameraOnActiveFileNode();
     }
 
-    this.kickLayoutSearch();
+    if (skipLayoutKick) {
+      this.layoutPaused = true;
+      this.layoutStillFrames = 0;
+      this.layoutAutosaveDirty = false;
+    } else {
+      this.kickLayoutSearch();
+    }
     this.render();
   }
 
   scheduleContentSearchIndexRebuild() {
+    if (!this.shouldUseContentSearchIndex()) return;
+    if (
+      this.contentSearchBuildGraphVersion === this.visibilityGraphVersion ||
+      this.contentSearchIndexGraphVersion === this.visibilityGraphVersion
+    ) {
+      return;
+    }
     const buildToken = ++this.contentSearchBuildToken;
+    const graphVersion = this.visibilityGraphVersion;
+    this.contentSearchBuildGraphVersion = graphVersion;
     const nodesSnapshot = this.nodes.slice();
     const appRef = this.app;
     const nextIndex = new Map();
 
     const buildIndexAsync = async () => {
       for (const node of nodesSnapshot) {
-        if (buildToken !== this.contentSearchBuildToken) return;
+        if (
+          buildToken !== this.contentSearchBuildToken ||
+          graphVersion !== this.visibilityGraphVersion
+        )
+          return;
         if (!node || node.meta?.isAttachment) continue;
         const file = appRef.vault.getAbstractFileByPath(node.id);
         if (!file || typeof file.extension !== 'string' || file.extension.toLowerCase() !== 'md')
@@ -2688,8 +2810,14 @@ class GraphFrontierView extends ItemView {
           continue;
         }
       }
-      if (buildToken !== this.contentSearchBuildToken) return;
+      if (
+        buildToken !== this.contentSearchBuildToken ||
+        graphVersion !== this.visibilityGraphVersion
+      )
+        return;
       this.contentSearchIndex = nextIndex;
+      this.contentSearchIndexGraphVersion = graphVersion;
+      this.contentSearchBuildGraphVersion = -1;
       this.syncSearchMatchesLive();
     };
 
@@ -2737,6 +2865,9 @@ class GraphFrontierView extends ItemView {
     this.boxSelectDrag = null;
 
     this.applyAutoAttachmentOrbitPositions();
+    this.nodeSpatialIndex = null;
+    this.nodeSpatialIndexBuildVersion = -1;
+    this.markNodeSpatialIndexDirty();
   }
 
   buildNextNodesFromGraphData(rawNodes, oldNodes, options = {}) {
@@ -2830,6 +2961,8 @@ class GraphFrontierView extends ItemView {
       nextEdges.push({
         source: rawEdge.source,
         target: rawEdge.target,
+        sourceNode,
+        targetNode,
       });
     }
 
@@ -3003,6 +3136,7 @@ class GraphFrontierView extends ItemView {
     if (!this.isOpen) return;
     this.stepCameraSmoothing();
     this.stepSimulation();
+    this.warmNodeSpatialIndexIfIdle();
     this.stepFocusSmoothing();
     this.render();
     this.frameHandle = this.contentEl.win.requestAnimationFrame(() => this.runFrame());
@@ -3155,6 +3289,7 @@ class GraphFrontierView extends ItemView {
             Math.sqrt(ddx * ddx + ddy * ddy)
           );
         }
+        this.markNodeSpatialIndexDirty();
         return;
       }
       const node = this.nodeById.get(this.dragNodeId);
@@ -3171,6 +3306,7 @@ class GraphFrontierView extends ItemView {
             Math.sqrt(ddx * ddx + ddy * ddy)
           );
         }
+        this.markNodeSpatialIndexDirty();
       }
       return;
     }
@@ -3288,6 +3424,7 @@ class GraphFrontierView extends ItemView {
     const hadDraggedNode = !!this.dragNodeId;
     const hadPanDrag = !!this.panDrag;
     const panDragMovedDistance = this.panDragMovedDistance;
+    const didDragNodeMove = hadDraggedNode && this.dragMovedDistance > 3;
     const draggedNodeId = this.dragNodeId;
     const draggedNodeIds =
       this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0
@@ -3326,7 +3463,7 @@ class GraphFrontierView extends ItemView {
     this.panDragMovedDistance = 0;
     this.canvasEl.removeClass('is-dragging');
 
-    if (hadDraggedNode) this.kickLayoutSearch();
+    if (didDragNodeMove) this.kickLayoutSearch();
 
     const isBackgroundClick = !hadDraggedNode && hadPanDrag && panDragMovedDistance <= 3;
     if (isBackgroundClick) {
@@ -3507,6 +3644,7 @@ class GraphFrontierView extends ItemView {
             Math.sqrt(ddx * ddx + ddy * ddy)
           );
         }
+        this.markNodeSpatialIndexDirty();
       }
       return;
     }
@@ -4229,15 +4367,37 @@ class GraphFrontierView extends ItemView {
       new Notice('Cannot access filesystem APIs for export');
       return;
     }
-    const normalizedExportPath = String(exportPath || '').trim();
-    if (!normalizedExportPath) {
+    const rawExportPath = String(exportPath || '').trim();
+    if (!rawExportPath) {
       new Notice('Export path is empty');
       return;
     }
-    if (!path.isAbsolute(normalizedExportPath)) {
+    if (!path.isAbsolute(rawExportPath)) {
       new Notice('Use absolute path for export');
       return;
     }
+
+    const defaultExportFileName = 'graphfrontier-static.html';
+    let normalizedExportPath = rawExportPath;
+    try {
+      const exportPathStat = await fs.promises.stat(normalizedExportPath);
+      if (exportPathStat.isDirectory()) {
+        normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
+      }
+    } catch {
+      // Missing paths are normal here: the parent folder is created below.
+    }
+    if (/[\\/]$/u.test(normalizedExportPath)) {
+      normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
+    } else {
+      const extension = path.extname(normalizedExportPath).toLowerCase();
+      if (extension !== '.html' && extension !== '.htm') {
+        const parsedPath = path.parse(normalizedExportPath);
+        const fileName = parsedPath.name ? `${parsedPath.name}.html` : defaultExportFileName;
+        normalizedExportPath = path.join(parsedPath.dir, fileName);
+      }
+    }
+
     if (this.plugin.data.settings.export_static_html_path !== normalizedExportPath) {
       this.plugin.data.settings.export_static_html_path = normalizedExportPath;
       this.plugin.schedulePersist();
@@ -5187,6 +5347,7 @@ class GraphFrontierView extends ItemView {
       node.vy = 0;
       pinnedCount += 1;
     }
+    this.markNodeSpatialIndexDirty();
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
     new Notice(`Pinned all nodes: ${pinnedCount}`);
@@ -5226,6 +5387,7 @@ class GraphFrontierView extends ItemView {
       currentNode.vx = 0;
       currentNode.vy = 0;
     }
+    this.markNodeSpatialIndexDirty();
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
     new Notice(`Pinned to coordinates: ${nodeId} (${x.toFixed(2)}, ${y.toFixed(2)})`);
@@ -5314,6 +5476,7 @@ class GraphFrontierView extends ItemView {
       node.vx = 0;
       node.vy = 0;
     }
+    this.markNodeSpatialIndexDirty();
     this.kickLayoutSearch();
   }
 
@@ -5328,6 +5491,7 @@ class GraphFrontierView extends ItemView {
       node.vx = 0;
       node.vy = 0;
     }
+    this.markNodeSpatialIndexDirty();
     this.kickLayoutSearch();
   }
 
@@ -5359,6 +5523,7 @@ class GraphFrontierView extends ItemView {
       }
     }
 
+    this.markNodeSpatialIndexDirty();
     this.plugin.schedulePersist();
     new Notice(
       moved > 0
@@ -5408,6 +5573,7 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
+    this.markNodeSpatialIndexDirty();
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
     new Notice(`Pinned ${targetLabel}: ${pinnedCount}`);
@@ -5450,6 +5616,7 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
+    this.markNodeSpatialIndexDirty();
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
     new Notice(`Pinned ${targetLabel} to grid: ${pinnedCount}`);
@@ -5546,6 +5713,7 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
+    this.markNodeSpatialIndexDirty();
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
     new Notice(`Orbit pinned ${targetLabel}: ${orbitPinnedCount}`);
@@ -5771,10 +5939,9 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
-    this.refreshFromVault({ keepCamera: true, forceSavedPositions: true });
+    this.refreshFromVault({ keepCamera: true, forceSavedPositions: true, skipLayoutKick: true });
     this.buildSidePanel();
     this.plugin.schedulePersist();
-    this.kickLayoutSearch();
     this.plugin.renderAllViews();
     if (!silent) new Notice('Layout loaded');
   }
@@ -5913,7 +6080,7 @@ class GraphFrontierView extends ItemView {
     this.plugin.data.view_state.pan_x = this.cameraTarget.x;
     this.plugin.data.view_state.pan_y = this.cameraTarget.y;
     this.plugin.data.view_state.zoom = this.cameraTarget.zoom;
-    this.plugin.schedulePersist();
+    this.plugin.schedulePersist(1200);
   }
 
   async openNodeFile(nodeId) {
@@ -5954,25 +6121,73 @@ class GraphFrontierView extends ItemView {
     const world = this.screenToWorld(screenX, screenY);
     const visibleNodeIds = this.getFilterVisibleNodeIds();
     const hasFilter = visibleNodeIds instanceof Set;
+    const zoom = Math.max(this.camera.zoom, 0.0001);
+    const maxCandidateRadius = 4 + 2 / zoom;
+
+    if (!this.nodeSpatialIndex) {
+      this.getNodeSpatialIndex();
+    }
+
+    const spatialIndex = this.nodeSpatialIndex;
+    if (!spatialIndex) {
+      return this.getNodeAtWorldByScan(world, visibleNodeIds, hasFilter, zoom, maxCandidateRadius);
+    }
+    const cellSize = spatialIndex.cellSize;
+    const centerGX = Math.floor(world.x / cellSize);
+    const centerGY = Math.floor(world.y / cellSize);
+    const bucketRange = Math.max(1, Math.ceil(maxCandidateRadius / cellSize));
 
     let bestNode = null;
     let bestDist2 = Infinity;
 
-    for (const node of this.nodes) {
-      if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
-      const dx = node.x - world.x;
-      const dy = node.y - world.y;
-      const dist2 = dx * dx + dy * dy;
-      if (dist2 < bestDist2) {
-        bestDist2 = dist2;
-        bestNode = node;
+    for (let offsetX = -bucketRange; offsetX <= bucketRange; offsetX += 1) {
+      for (let offsetY = -bucketRange; offsetY <= bucketRange; offsetY += 1) {
+        const bucket = spatialIndex.buckets.get(`${centerGX + offsetX}:${centerGY + offsetY}`);
+        if (!bucket) continue;
+        for (const node of bucket) {
+          if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
+          const dx = node.x - world.x;
+          const dy = node.y - world.y;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 < bestDist2) {
+            bestDist2 = dist2;
+            bestNode = node;
+          }
+        }
       }
     }
 
     if (!bestNode) return null;
 
     const baseRadius = this.getNodeRadius(bestNode);
-    const maxDist = Math.max(1, baseRadius + 2 / Math.max(this.camera.zoom, 0.0001));
+    const maxDist = Math.max(1, baseRadius + 2 / zoom);
+    if (bestDist2 > maxDist * maxDist) return null;
+
+    return bestNode;
+  }
+
+  getNodeAtWorldByScan(world, visibleNodeIds, hasFilter, zoom, maxCandidateRadius) {
+    let bestNode = null;
+    let bestDist2 = Infinity;
+    const coarseMaxDist = Math.max(1, maxCandidateRadius);
+    const coarseMaxDist2 = coarseMaxDist * coarseMaxDist;
+
+    for (const node of this.nodes) {
+      if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
+      const dx = node.x - world.x;
+      if (Math.abs(dx) > coarseMaxDist) continue;
+      const dy = node.y - world.y;
+      if (Math.abs(dy) > coarseMaxDist) continue;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 > coarseMaxDist2 || dist2 >= bestDist2) continue;
+      bestDist2 = dist2;
+      bestNode = node;
+    }
+
+    if (!bestNode) return null;
+
+    const baseRadius = this.getNodeRadius(bestNode);
+    const maxDist = Math.max(1, baseRadius + 2 / zoom);
     if (bestDist2 > maxDist * maxDist) return null;
 
     return bestNode;

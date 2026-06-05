@@ -41,9 +41,7 @@ function stepFocusSmoothing(view) {
 
   const baseSearchFocusNodeId = view.getFilterNodeId() || view.getFindFocusNodeId();
   const hoverTargetNodeId =
-    baseSearchFocusNodeId && view.hoverNodeId && view.hoverNodeId !== baseSearchFocusNodeId
-      ? view.hoverNodeId
-      : null;
+    view.hoverNodeId && view.hoverNodeId !== baseSearchFocusNodeId ? view.hoverNodeId : null;
 
   if (hoverTargetNodeId && hoverTargetNodeId !== view.hoverFocusNodeId) {
     if (view.hoverFocusNodeId && view.hoverFocusProgress > 0.001) {
@@ -82,17 +80,13 @@ function stepFocusSmoothing(view) {
 // Main render pass: clear background, optional grid, then edges and nodes.
 function renderFrame(view) {
   if (!view.ctx) return;
-  view.syncSidePanelControls();
 
   const ctx = view.ctx;
   const width = view.viewWidth;
   const height = view.viewHeight;
 
-  const styles = getComputedStyle(view.contentEl);
-  const bgColor = styles.getPropertyValue('--background-primary').trim() || '#111418';
-
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = bgColor;
+  ctx.fillStyle = view.canvasBackgroundColor || '#111418';
   ctx.fillRect(0, 0, width, height);
 
   if (view.plugin.getSettings().show_grid) {
@@ -204,22 +198,65 @@ function getLabelFontSize(view) {
   return baseSize / 5;
 }
 
-// Resolve first matching group color for a node, according to current row priority.
-function getGroupColorForNode(view, node) {
+// Resolve group colors once per graph/groups version; drawing can then do cheap map lookups.
+function getGroupColorMap(view) {
   const groups = Array.isArray(view.plugin.data.groups) ? view.plugin.data.groups : [];
   if (groups.length === 0) return null;
-  const meta = view.nodeMetaById.get(node.id) || node.meta || null;
-  if (!meta) return null;
+  const signature = groups
+    .map((group) => {
+      if (!group || typeof group !== 'object') return '';
+      const id = String(group.id || '');
+      const enabled = group.enabled !== false ? '1' : '0';
+      const query = String(group.query || '').trim();
+      const color = String(group.color || '').trim();
+      return `${id}|${enabled}|${query}|${color}`;
+    })
+    .join('||');
+  const graphVersion = Number(view.visibilityGraphVersion || 0);
+  const cache =
+    view.groupColorCache && typeof view.groupColorCache === 'object' ? view.groupColorCache : null;
+  if (
+    cache &&
+    cache.graphVersion === graphVersion &&
+    cache.groupsSignature === signature &&
+    cache.colorByNodeId instanceof Map
+  ) {
+    return cache.colorByNodeId;
+  }
 
+  const parsedGroups = [];
   for (const group of groups) {
     if (!group || group.enabled === false) continue;
     const parsed = view.plugin.parseGroupQuery(group.query);
     if (!parsed) continue;
-    if (nodeMatchesParsedGroup(meta, parsed, node)) {
-      return view.plugin.normalizeGroupColor(group.color);
+    parsedGroups.push({
+      parsed,
+      color: view.plugin.normalizeGroupColor(group.color),
+    });
+  }
+  const colorByNodeId = new Map();
+  for (const candidateNode of view.nodes) {
+    const meta = view.nodeMetaById.get(candidateNode.id) || candidateNode.meta || null;
+    if (!meta) continue;
+    for (const group of parsedGroups) {
+      if (nodeMatchesParsedGroup(meta, group.parsed, candidateNode)) {
+        colorByNodeId.set(candidateNode.id, group.color);
+        break;
+      }
     }
   }
-  return null;
+  view.groupColorCache = {
+    graphVersion,
+    groupsSignature: signature,
+    colorByNodeId,
+  };
+  return colorByNodeId;
+}
+
+// Resolve first matching group color for a node, according to current row priority.
+function getGroupColorForNode(view, node) {
+  const colorByNodeId = getGroupColorMap(view);
+  return colorByNodeId instanceof Map ? colorByNodeId.get(node.id) || null : null;
 }
 
 // Match helper used by group-color rules (path/file/tag/line/section/property).
@@ -295,6 +332,16 @@ function drawGrid(view, ctx) {
 
 // Draw all edges with focus/fade interpolation and painted-edge overrides.
 function drawEdges(view, ctx) {
+  const zoom = Math.max(view.camera.zoom, 0.0001);
+  const halfWidthWorld = view.viewWidth / (2 * zoom);
+  const halfHeightWorld = view.viewHeight / (2 * zoom);
+  const edgePadWorld = 80 / zoom;
+  const minWorldX = view.camera.x - halfWidthWorld - edgePadWorld;
+  const maxWorldX = view.camera.x + halfWidthWorld + edgePadWorld;
+  const minWorldY = view.camera.y - halfHeightWorld - edgePadWorld;
+  const maxWorldY = view.camera.y + halfHeightWorld + edgePadWorld;
+  const screenCenterX = view.viewWidth / 2;
+  const screenCenterY = view.viewHeight / 2;
   const edgeScale = view.plugin.clampNumber(
     view.plugin.getSettings().edge_width_scale,
     0.01,
@@ -330,6 +377,25 @@ function drawEdges(view, ctx) {
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
+  const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+  const normalEdgeAlpha = hasAnyFocus ? focusDimAlpha : hasSearchHighlight ? searchDimAlpha : 1;
+  const paintedEdgeColors = view.plugin.data?.painted_edge_colors || {};
+  let hasNormalEdgeBatch = false;
+
+  const beginNormalEdgeBatch = () => {
+    if (hasNormalEdgeBatch) return;
+    ctx.globalAlpha = normalEdgeAlpha;
+    ctx.strokeStyle = 'rgba(145, 160, 187, 0.35)';
+    ctx.lineWidth = edgeScale;
+    ctx.beginPath();
+    hasNormalEdgeBatch = true;
+  };
+
+  const flushNormalEdgeBatch = () => {
+    if (!hasNormalEdgeBatch) return;
+    ctx.stroke();
+    hasNormalEdgeBatch = false;
+  };
 
   for (const edge of view.edges) {
     if (hasFilter) {
@@ -339,14 +405,25 @@ function drawEdges(view, ctx) {
         if (!isFilterEdge) continue;
       }
     }
-    const sourceNode = view.nodeById.get(edge.source);
-    const targetNode = view.nodeById.get(edge.target);
+    const sourceNode = edge.sourceNode || view.nodeById.get(edge.source);
+    const targetNode = edge.targetNode || view.nodeById.get(edge.target);
     if (!sourceNode || !targetNode) continue;
 
-    const sourcePoint = view.worldToScreen(sourceNode.x, sourceNode.y);
-    const targetPoint = view.worldToScreen(targetNode.x, targetNode.y);
-    const sourcePaintColor = view.plugin.getPaintedEdgeColor(sourceNode.id);
-    const targetPaintColor = view.plugin.getPaintedEdgeColor(targetNode.id);
+    if (
+      (sourceNode.x < minWorldX && targetNode.x < minWorldX) ||
+      (sourceNode.x > maxWorldX && targetNode.x > maxWorldX) ||
+      (sourceNode.y < minWorldY && targetNode.y < minWorldY) ||
+      (sourceNode.y > maxWorldY && targetNode.y > maxWorldY)
+    ) {
+      continue;
+    }
+
+    const sourcePointX = (sourceNode.x - view.camera.x) * zoom + screenCenterX;
+    const sourcePointY = (sourceNode.y - view.camera.y) * zoom + screenCenterY;
+    const targetPointX = (targetNode.x - view.camera.x) * zoom + screenCenterX;
+    const targetPointY = (targetNode.y - view.camera.y) * zoom + screenCenterY;
+    const sourcePaintColor = paintedEdgeColors[sourceNode.id] || null;
+    const targetPaintColor = paintedEdgeColors[targetNode.id] || null;
     const paintedColor = sourcePaintColor || targetPaintColor;
 
     const isPrimaryFocusEdge =
@@ -363,13 +440,20 @@ function drawEdges(view, ctx) {
       hoverFocusEdgeProgress,
       hoverFadeEdgeProgress
     );
-    const dimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+
+    if (!paintedColor && focusEdgeProgress <= 0.001) {
+      beginNormalEdgeBatch();
+      ctx.moveTo(sourcePointX, sourcePointY);
+      ctx.lineTo(targetPointX, targetPointY);
+      continue;
+    }
+
+    flushNormalEdgeBatch();
     const edgeAlpha = hasAnyFocus
-      ? dimAlpha + (1 - dimAlpha) * focusEdgeProgress
+      ? focusDimAlpha + (1 - focusDimAlpha) * focusEdgeProgress
       : hasSearchHighlight
         ? searchDimAlpha
         : 1;
-    ctx.save();
     ctx.globalAlpha = edgeAlpha;
 
     if (paintedColor) {
@@ -386,16 +470,26 @@ function drawEdges(view, ctx) {
     }
 
     ctx.beginPath();
-    ctx.moveTo(sourcePoint.x, sourcePoint.y);
-    ctx.lineTo(targetPoint.x, targetPoint.y);
+    ctx.moveTo(sourcePointX, sourcePointY);
+    ctx.lineTo(targetPointX, targetPointY);
     ctx.stroke();
-    ctx.restore();
   }
+  flushNormalEdgeBatch();
+  ctx.globalAlpha = 1;
 }
 
 // Draw nodes, labels, hover outlines, and hovered title popup.
 function drawNodes(view, ctx) {
-  const zoom = view.camera.zoom;
+  const zoom = Math.max(view.camera.zoom, 0.0001);
+  const halfWidthWorld = view.viewWidth / (2 * zoom);
+  const halfHeightWorld = view.viewHeight / (2 * zoom);
+  const nodePadWorld = 80 / zoom;
+  const minWorldX = view.camera.x - halfWidthWorld - nodePadWorld;
+  const maxWorldX = view.camera.x + halfWidthWorld + nodePadWorld;
+  const minWorldY = view.camera.y - halfHeightWorld - nodePadWorld;
+  const maxWorldY = view.camera.y + halfHeightWorld + nodePadWorld;
+  const screenCenterX = view.viewWidth / 2;
+  const screenCenterY = view.viewHeight / 2;
   const labelMinZoom = getLabelZoomThreshold(view);
   const labelFontSize = getLabelFontSize(view);
   const labelFadeRange = Math.max(0.001, labelMinZoom * 0.35);
@@ -420,7 +514,6 @@ function drawNodes(view, ctx) {
     : new Set();
   const hasAnyFocus = hasFocus || hasHoverFocus || hasHoverFade;
   const combinedFocusProgress = Math.max(focusProgress, hoverFocusProgress, hoverFadeProgress);
-  const hasSearchFocus = !!(view.getFilterNodeId() || view.getFindFocusNodeId());
   const searchHighlightNodeIds = view.getSearchHighlightNodeIds();
   const hasSearchHighlight =
     !hasFilter &&
@@ -428,18 +521,17 @@ function drawNodes(view, ctx) {
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
+  const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+  const groupColorByNodeId = getGroupColorMap(view);
+  const selectedNodeIds = view.selectedNodeIds instanceof Set ? view.selectedNodeIds : null;
 
   for (const node of view.nodes) {
     if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
-    const point = view.worldToScreen(node.x, node.y);
-    if (
-      point.x < -80 ||
-      point.x > view.viewWidth + 80 ||
-      point.y < -80 ||
-      point.y > view.viewHeight + 80
-    ) {
+    if (node.x < minWorldX || node.x > maxWorldX || node.y < minWorldY || node.y > maxWorldY) {
       continue;
     }
+    const pointX = (node.x - view.camera.x) * zoom + screenCenterX;
+    const pointY = (node.y - view.camera.y) * zoom + screenCenterY;
 
     const radius = Math.max(0.6, getNodeRadius(view, node) * view.camera.zoom);
 
@@ -447,7 +539,7 @@ function drawNodes(view, ctx) {
     const isHoverFocusNode = hasHoverFocus && node.id === hoverFocusNodeId;
     const isHoverNodeRaw = view.hoverNodeId === node.id;
     const isHoverFadeNode = hasHoverFade && node.id === hoverFadeNodeId;
-    const isSelectedNode = view.selectedNodeIds instanceof Set && view.selectedNodeIds.has(node.id);
+    const isSelectedNode = selectedNodeIds ? selectedNodeIds.has(node.id) : false;
     const focusNodeProgress = isFocusNode ? focusProgress : 0;
     const hoverFocusNodeProgress = isHoverFocusNode ? hoverFocusProgress : 0;
     const hoverFadeNodeProgress = isHoverFadeNode ? hoverFadeProgress : 0;
@@ -464,10 +556,8 @@ function drawNodes(view, ctx) {
       hoverFocusNeighborProgress,
       hoverFadeNeighborProgress
     );
-    const hoverVisualProgressBase = hasSearchFocus
-      ? isHoverFocusNode
-        ? hoverFocusProgress
-        : 0
+    const hoverVisualProgressBase = isHoverFocusNode
+      ? hoverFocusProgress
       : isFocusNode
         ? focusProgress
         : isHoverNodeRaw
@@ -480,13 +570,12 @@ function drawNodes(view, ctx) {
     );
     const isHover = hoverVisualProgress > 0.001;
     const isClickFlash = view.clickFlashNodeId === node.id && nowMs < view.clickFlashUntilMs;
-    const groupColor = getGroupColorForNode(view, node);
-    const dimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
+    const groupColor = groupColorByNodeId instanceof Map ? groupColorByNodeId.get(node.id) : null;
     const isSearchHighlightNode = hasSearchHighlight && searchHighlightNodeIds.has(node.id);
     const nodeAlpha = isClickFlash
       ? 1
       : hasAnyFocus
-        ? dimAlpha + (1 - dimAlpha) * relationProgress
+        ? focusDimAlpha + (1 - focusDimAlpha) * relationProgress
         : hasSearchHighlight
           ? isSearchHighlightNode
             ? 1
@@ -498,26 +587,23 @@ function drawNodes(view, ctx) {
     if (groupColor && !isAttachmentNode) fillColor = groupColor;
     if (isClickFlash) fillColor = '#ffffff';
 
-    ctx.save();
     ctx.globalAlpha = nodeAlpha;
     ctx.fillStyle = fillColor;
     ctx.beginPath();
-    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.arc(pointX, pointY, radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.restore();
 
     if (isHover || isSelectedNode) {
       const hoverStrokeAlpha = Math.max(0.12, 0.95 * hoverVisualProgress);
       const selectedStrokeAlpha = isSelectedNode ? 0.95 : 0;
       const hoverLineWidth = 1 + hoverVisualProgress;
       const selectedLineWidth = isSelectedNode ? 1.4 : 0;
-      ctx.save();
+      ctx.globalAlpha = 1;
       ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(hoverStrokeAlpha, selectedStrokeAlpha)})`;
       ctx.lineWidth = Math.max(hoverLineWidth, selectedLineWidth);
       ctx.beginPath();
-      ctx.arc(point.x, point.y, radius + 2, 0, Math.PI * 2);
+      ctx.arc(pointX, pointY, radius + 2, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.restore();
     }
 
     const labelAlphaRaw = (zoom - labelMinZoom) / labelFadeRange;
@@ -526,17 +612,16 @@ function drawNodes(view, ctx) {
     const labelAlpha = isAttachmentNode ? 0 : Math.max(labelAlphaBase, hoverLabelBoost);
     if (labelAlpha > 0.01) {
       const zoomedFontSize = Math.max(1, labelFontSize * zoom);
-      ctx.save();
       ctx.globalAlpha = labelAlpha * nodeAlpha;
       ctx.fillStyle =
         hoverLabelBoost > 0.001 ? 'rgba(255, 235, 164, 1)' : 'rgba(238, 243, 252, 0.95)';
       ctx.font = `${zoomedFontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(node.label, point.x, point.y + radius + 8);
-      ctx.restore();
+      ctx.fillText(node.label, pointX, pointY + radius + 8);
     }
   }
+  ctx.globalAlpha = 1;
 
   const hoverTitleNode = view.hoverNodeId ? view.nodeById.get(view.hoverNodeId) || null : null;
   if (hoverTitleNode) drawFocusedNodeTitle(view, ctx, hoverTitleNode);

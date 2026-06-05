@@ -44,9 +44,11 @@ jobs:
       - name: Create release zip from dist
         run: |
           VERSION="$(node -p "require('./manifest.json').version")"
-          ZIP_NAME="graphfrontier-${VERSION}.zip"
+          RELEASE_DIR="dist/release"
+          ZIP_NAME="${RELEASE_DIR}/graphfrontier-${VERSION}.zip"
+          mkdir -p "${RELEASE_DIR}"
           cd dist
-          zip -r "../${ZIP_NAME}" .
+          zip -r "../${ZIP_NAME}" . -x "release/*"
           cd ..
           ls -la "${ZIP_NAME}" dist
 
@@ -54,8 +56,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            graphfrontier-*.zip
+            dist/release/graphfrontier-*.zip
             dist/main.js
             dist/manifest.json
             dist/styles.css
+            dist/versions.json
           generate_release_notes: true
