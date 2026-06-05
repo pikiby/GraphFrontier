@@ -1562,6 +1562,8 @@ class GraphFrontierView extends ItemView {
     if (!node) return;
     this.searchMatchedNodeIds = new Set();
     this.searchSelectedNodeId = node.id;
+    this.focusNodeId = node.id;
+    this.focusProgress = 1;
     const parsed = this.parseSearchQuery(
       this.searchInputEl ? this.searchInputEl.value : this.searchInputValue
     );
@@ -1645,6 +1647,11 @@ class GraphFrontierView extends ItemView {
       if (liveBestNode) return liveBestNode.id;
     }
     return this.searchSelectedNodeId || null;
+  }
+
+  getSearchSelectedFocusNodeId() {
+    if (!this.searchSelectedNodeId) return null;
+    return this.nodeById.has(this.searchSelectedNodeId) ? this.searchSelectedNodeId : null;
   }
 
   getFilterVisibleNodeIds() {
@@ -1810,11 +1817,15 @@ class GraphFrontierView extends ItemView {
 
   getFindFocusNodeId() {
     if (this.searchMode !== 'find') return null;
+    const selectedFocusNodeId = this.getSearchSelectedFocusNodeId();
+    if (selectedFocusNodeId) return selectedFocusNodeId;
     if (this.getEffectiveSearchSource() !== 'name') return null;
     return this.searchSelectedNodeId || null;
   }
 
   getActiveFocusNodeId() {
+    const selectedFocusNodeId = this.getSearchSelectedFocusNodeId();
+    if (selectedFocusNodeId) return selectedFocusNodeId;
     const filterFocusNodeId = this.getFilterNodeId();
     if (filterFocusNodeId) return filterFocusNodeId;
     const findFocusNodeId = this.getFindFocusNodeId();
@@ -4356,15 +4367,37 @@ class GraphFrontierView extends ItemView {
       new Notice('Cannot access filesystem APIs for export');
       return;
     }
-    const normalizedExportPath = String(exportPath || '').trim();
-    if (!normalizedExportPath) {
+    const rawExportPath = String(exportPath || '').trim();
+    if (!rawExportPath) {
       new Notice('Export path is empty');
       return;
     }
-    if (!path.isAbsolute(normalizedExportPath)) {
+    if (!path.isAbsolute(rawExportPath)) {
       new Notice('Use absolute path for export');
       return;
     }
+
+    const defaultExportFileName = 'graphfrontier-static.html';
+    let normalizedExportPath = rawExportPath;
+    try {
+      const exportPathStat = await fs.promises.stat(normalizedExportPath);
+      if (exportPathStat.isDirectory()) {
+        normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
+      }
+    } catch {
+      // Missing paths are normal here: the parent folder is created below.
+    }
+    if (/[\\/]$/u.test(normalizedExportPath)) {
+      normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
+    } else {
+      const extension = path.extname(normalizedExportPath).toLowerCase();
+      if (extension !== '.html' && extension !== '.htm') {
+        const parsedPath = path.parse(normalizedExportPath);
+        const fileName = parsedPath.name ? `${parsedPath.name}.html` : defaultExportFileName;
+        normalizedExportPath = path.join(parsedPath.dir, fileName);
+      }
+    }
+
     if (this.plugin.data.settings.export_static_html_path !== normalizedExportPath) {
       this.plugin.data.settings.export_static_html_path = normalizedExportPath;
       this.plugin.schedulePersist();

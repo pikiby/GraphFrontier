@@ -32,25 +32,23 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.6.10/graphfrontier-0.6.10.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.7.1/graphfrontier-0.7.1.zip
 
-1. Download `graphfrontier-0.6.10.zip` from Releases
+1. Download `graphfrontier-0.7.1.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
    - `Settings -> Community plugins -> GraphFrontier -> Enable`
 
-## Recent Updates (0.6.10)
+## Recent Updates (0.7.1)
 
-- New right-click actions for linked nodes:
-  - `Select linked nodes`
-  - `Copy linked names`
-  - `Copy linked paths`
-- Linked copy output format:
-  - one item per line
-  - commas on each line except the last
-- Multi-selection controls moved to a dedicated `Selection` section above `Display`
-- `Box select` and `Add/remove selected` controls restyled to match the side panel `Hide` button style
+- Improved performance and interaction responsiveness on large graphs.
+- Restored linked-node highlighting when selecting a node from search.
+- Fixed static HTML export so `Export to` always writes a working `.html` graph file.
+- Static HTML exports include pan, zoom, hover labels, node selection, and a file-content side panel.
+- Layout handling is now file-based: choose a layout, save/load it, and keep autosave tied to the active layout.
+- Added blacklist and whitelist filtering sections for always-on graph visibility rules.
+- Added multi-selection tools, linked-node selection, and copy-linked names/paths actions.
 
 ## Features
 
@@ -171,7 +169,8 @@ https://github.com/pikiby/GraphFrontier/releases/download/0.6.10/graphfrontier-0
 - `src/render.js`: render pass, visual helpers, focus/label/color behavior
 - `src/constants.js`: defaults, limits, command metadata, shared constants
 - `src/static/`: plugin release assets source (`manifest.json`, `styles.css`, `versions.json`)
-- `dist/`: release artifacts ready to install into a vault plugin folder
+- `dist/`: built plugin files ready to install into a vault plugin folder
+- `dist/release/`: packaged release zip files
 
 ## License
 
