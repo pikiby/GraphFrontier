@@ -1028,6 +1028,20 @@ class GraphFrontierView extends ItemView {
     });
     this.searchClearButtonEl = clearButton;
 
+    const connectionsRow = section.createDiv({ cls: 'graphfrontier-search-connections' });
+    this.searchConnectionsToggleEl = connectionsRow.createEl('button', {
+      cls: 'graphfrontier-toggle-btn graphfrontier-search-mode-toggle',
+      attr: { type: 'button', role: 'switch', 'aria-label': 'Show connections' },
+    });
+    connectionsRow.createSpan({ text: 'Show connections' });
+    this.registerDomEvent(this.searchConnectionsToggleEl, 'click', () => {
+      this.plugin.data.settings.show_search_connections =
+        !this.plugin.getSettings().show_search_connections;
+      this.syncSearchModeToggleUi();
+      this.plugin.schedulePersist();
+    });
+    this.syncSearchModeToggleUi();
+
     const getSuggestionPack = () => {
       const rawQuery = String(searchInput.value || '');
       return this.getSearchSuggestionPack(rawQuery, Number.POSITIVE_INFINITY);
@@ -1073,6 +1087,7 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(modeToggle, 'click', () => {
       this.searchMode = this.searchMode === 'filter' ? 'find' : 'filter';
       this.plugin.data.settings.search_mode = this.searchMode;
+      this.syncSearchMatchesLive();
       this.markSearchVisibilityDirty();
       this.syncSearchModeToggleUi();
       this.kickLayoutSearch();
@@ -1146,6 +1161,11 @@ class GraphFrontierView extends ItemView {
   }
 
   syncSearchModeToggleUi() {
+    if (this.searchConnectionsToggleEl) {
+      const enabled = this.plugin.getSettings().show_search_connections === true;
+      this.searchConnectionsToggleEl.toggleClass('is-on', enabled);
+      this.searchConnectionsToggleEl.setAttr('aria-checked', String(enabled));
+    }
     if (!this.searchModeToggleEl) return;
     const safeMode = this.searchMode === 'filter' ? 'filter' : 'find';
     this.searchModeToggleEl.toggleClass('is-on', safeMode === 'filter');
@@ -1478,7 +1498,17 @@ class GraphFrontierView extends ItemView {
       return matches;
     }
 
-    if (parsed.source === 'name') return matches;
+    if (parsed.source === 'name') {
+      for (const node of this.nodes) {
+        if (
+          String(node.label || '')
+            .toLowerCase()
+            .includes(queryText)
+        )
+          matches.add(node.id);
+      }
+      return matches;
+    }
 
     for (const node of this.nodes) {
       const meta = this.getNodeMetaForSearch(node);
@@ -1511,7 +1541,7 @@ class GraphFrontierView extends ItemView {
   syncSearchMatchesLive() {
     const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
     const parsed = this.parseSearchQuery(rawText);
-    if (!parsed.query || parsed.source === 'name') {
+    if (!parsed.query || (parsed.source === 'name' && this.searchMode === 'filter')) {
       this.cancelContentSearchIndexBuild();
       this.searchMatchedNodeIds = new Set();
       this.markSearchVisibilityDirty();
@@ -1534,7 +1564,7 @@ class GraphFrontierView extends ItemView {
       if (this.searchMode === 'filter') this.kickLayoutSearch();
       return;
     }
-    if (parsed.source === 'name') {
+    if (parsed.source === 'name' && this.searchMode === 'filter') {
       this.searchMatchedNodeIds = new Set();
       const bestNode = this.getBestMatchingNodeByName(parsed.query);
       if (!bestNode) {

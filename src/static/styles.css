@@ -384,11 +384,21 @@
 }
 
 .graphfrontier-find-mode-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+}
+
+.graphfrontier-search-connections {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-normal);
 }
 
 .graphfrontier-find-mode-controls {

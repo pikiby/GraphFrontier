@@ -544,6 +544,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.hide_orphans = !!normalized.settings.hide_orphans;
     normalized.settings.hide_attachments = !!normalized.settings.hide_attachments;
     normalized.settings.existing_files_only = !!normalized.settings.existing_files_only;
+    normalized.settings.show_search_connections =
+      normalized.settings.show_search_connections === true;
     normalized.settings.search_mode =
       normalized.settings.search_mode === 'filter' || normalized.settings.search_mode === 'filtr'
         ? 'filter'

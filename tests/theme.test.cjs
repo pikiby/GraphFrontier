@@ -104,6 +104,28 @@ function graph(t, scheme, variables) {
   return { ...f, ...recorded };
 }
 
+test('Find keeps all matching nodes bright while another node has hover focus', (t) => {
+  const { view, ctx } = graph(t, 'dark');
+  view.nodes = ['Grafana', 'GraphFrontier', 'NATS'].map((label, index) => ({
+    id: label,
+    label,
+    x: index * 20,
+    y: 0,
+    degree: 0,
+  }));
+  view.getSearchHighlightNodeIds = () => new Set(['Grafana', 'GraphFrontier']);
+  view.hoverFocusNodeId = 'NATS';
+  view.hoverFocusProgress = 1;
+  const alphas = [];
+  ctx.fill = function () {
+    alphas.push(this.globalAlpha);
+  };
+  render.drawNodes(view, ctx);
+  assert.equal(alphas[0], 1);
+  assert.equal(alphas[1], 1);
+  assert.equal(alphas[2], 1);
+});
+
 for (const scheme of ['light', 'dark']) {
   test(`${scheme}: readable labels near threshold, themed grid and selection, no opacity leak`, (t) => {
     const { view, ctx, calls } = graph(t, scheme);

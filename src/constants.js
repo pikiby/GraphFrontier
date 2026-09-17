@@ -28,6 +28,7 @@ const DEFAULT_DATA = {
     attachments_on_orbits: true,
     existing_files_only: true,
     search_mode: 'find',
+    show_search_connections: false,
     quick_pick_modifier: 'alt',
     selection_box_modifier: 'shift',
     selection_toggle_modifier: 'none',
