@@ -3,7 +3,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['node_modules/**', 'dist/**', 'main.js'],
+    ignores: ['node_modules/**', 'dist/**', 'main.js', '.pcw/**'],
   },
   js.configs.recommended,
   {
@@ -17,7 +17,7 @@ export default [
     },
   },
   {
-    files: ['**/*.js'],
+    files: ['**/*.{js,cjs}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'script',

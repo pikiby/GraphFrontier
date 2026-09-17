@@ -1,5 +1,44 @@
 const { TWO_PI, DEFAULT_DATA } = require('./constants');
 
+const layoutAutosaveStates = new WeakMap();
+
+// Pausing physics must not pause persistence or discard pending layout changes.
+function stepLayoutAutosave(view, moving = false) {
+  if (
+    !view.layoutAutosaveDirty ||
+    !view.plugin.getSettings().layout_autosave ||
+    view.isSearchFilled() ||
+    view.dragNodeId ||
+    (view.dragSelectionOffsets instanceof Map && view.dragSelectionOffsets.size > 0)
+  ) {
+    view.layoutStillFrames = 0;
+    return;
+  }
+
+  view.layoutStillFrames = moving ? 0 : Math.min(8, view.layoutStillFrames + 1);
+  if (view.layoutStillFrames < 8) return;
+
+  let state = layoutAutosaveStates.get(view);
+  if (!state) {
+    state = { inFlight: false, retryAtMs: 0 };
+    layoutAutosaveStates.set(view, state);
+  }
+  if (state.inFlight || Date.now() < state.retryAtMs) return;
+
+  state.inFlight = true;
+  void (async () => {
+    try {
+      // The save owner acknowledges dirty only after successfully persisting unchanged state.
+      await view.saveCurrentLayout({ silent: true });
+    } catch {
+      // Keep failed saves retryable without an unhandled rejection in the animation loop.
+    } finally {
+      state.inFlight = false;
+      state.retryAtMs = Date.now() + 1000;
+    }
+  })();
+}
+
 // Simulation restart marker used after manual layout-changing actions.
 function kickLayoutSearch(view) {
   view.layoutKickAtMs = Date.now();
@@ -124,8 +163,14 @@ function stepCameraSmoothing(view) {
 
 // Main force simulation step: repel/link/center forces, pin constraints, and autosave settling.
 function stepSimulation(view) {
-  if (view.layoutPaused && !view.dragNodeId) return;
-  if (view.nodes.length === 0) return;
+  if (view.nodes.length === 0) {
+    stepLayoutAutosave(view);
+    return;
+  }
+  if (view.layoutPaused && !view.dragNodeId) {
+    stepLayoutAutosave(view);
+    return;
+  }
 
   const filterVisibleNodeIds = view.getFilterVisibleNodeIds();
   const hasPhysicsFilter = filterVisibleNodeIds instanceof Set;
@@ -140,7 +185,10 @@ function stepSimulation(view) {
     ? view.nodes.filter((node) => filterVisibleNodeIds.has(node.id))
     : view.nodes;
   const nodeCount = nodes.length;
-  if (nodeCount === 0) return;
+  if (nodeCount === 0) {
+    stepLayoutAutosave(view);
+    return;
+  }
   const localDegreeById = hasPhysicsFilter ? new Map(nodes.map((node) => [node.id, 0])) : null;
   if (localDegreeById) {
     for (const edge of view.edges) {
@@ -270,8 +318,7 @@ function stepSimulation(view) {
   );
   if (!view.dragNodeId && !hasMovableNodes) {
     view.layoutPaused = true;
-    view.layoutStillFrames = 0;
-    view.layoutAutosaveDirty = false;
+    stepLayoutAutosave(view);
     return;
   }
   const freeOrphanNodes = [];
@@ -708,24 +755,11 @@ function stepSimulation(view) {
     view.markNodeSpatialIndexDirty();
   }
 
-  const autosaveAllowed = settings.layout_autosave && !view.isSearchFilled();
-  if (autosaveAllowed) {
-    if (movingNodeCount > 0) {
-      view.layoutStillFrames = 0;
-      view.layoutAutosaveDirty = true;
-      view.layoutPaused = false;
-    } else {
-      view.layoutStillFrames += 1;
-    }
-
-    if (view.layoutAutosaveDirty && view.layoutStillFrames >= 8) {
-      view.saveCurrentLayout({ silent: true });
-      view.layoutAutosaveDirty = false;
-    }
-  } else {
-    view.layoutStillFrames = 0;
-    if (view.isSearchFilled()) view.layoutAutosaveDirty = false;
+  if (settings.layout_autosave && !view.isSearchFilled() && movingNodeCount > 0) {
+    view.layoutAutosaveDirty = true;
+    view.layoutPaused = false;
   }
+  stepLayoutAutosave(view, movingNodeCount > 0);
 
   if (!view.dragNodeId && elapsedSearchMs >= layoutSearchMs) {
     view.layoutPaused = true;

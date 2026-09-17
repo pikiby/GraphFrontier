@@ -32,15 +32,24 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.7.1/graphfrontier-0.7.1.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.7.2/graphfrontier-0.7.2.zip
 
-1. Download `graphfrontier-0.7.1.zip` from Releases
+1. Download `graphfrontier-0.7.2.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
    - `Settings -> Community plugins -> GraphFrontier -> Enable`
 
-## Recent Updates (0.7.1)
+## Recent Updates (0.7.2)
+
+- Graph backgrounds, grid, labels, selection indicators, tooltips, and controls now follow the active light or dark theme.
+- Improved label readability across zoom levels; selected and hovered node labels remain visible.
+- Standalone HTML exports preserve the graph's theme colours and label behaviour.
+- More reliable layout saving, loading, switching, and autosave, including paused and fully pinned graphs.
+- Background vault refreshes preserve restored layouts, and hit testing uses current node positions.
+- Added regression tests and release checks for metadata consistency and packaged assets.
+
+## Previous Updates (0.7.1)
 
 - Improved performance and interaction responsiveness on large graphs.
 - Restored linked-node highlighting when selecting a node from search.

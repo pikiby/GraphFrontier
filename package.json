@@ -1,6 +1,6 @@
 {
   "name": "graphfrontier",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "GraphFrontier Obsidian plugin",
   "license": "MIT",
@@ -9,6 +9,8 @@
     "build": "node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs dev",
     "lint": "eslint .",
+    "test": "node --test tests/*.test.cjs",
+    "check:release": "node scripts/check-release.cjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

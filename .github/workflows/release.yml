@@ -22,24 +22,23 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Validate release version
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
-
-          echo "Tag: ${TAG}"
-          echo "Manifest version: ${MANIFEST_VERSION}"
-
-          if [ "${TAG}" != "${MANIFEST_VERSION}" ]; then
-            echo "Error: tag version does not match manifest.json version"
-            exit 1
-          fi
-
       - name: Install dependencies
         run: npm ci
 
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
+
+      - name: Check release tag, metadata and assets
+        run: npm run check:release -- "$GITHUB_REF_NAME"
 
       - name: Create release zip from dist
         run: |
@@ -48,7 +47,7 @@ jobs:
           ZIP_NAME="${RELEASE_DIR}/graphfrontier-${VERSION}.zip"
           mkdir -p "${RELEASE_DIR}"
           cd dist
-          zip -r "../${ZIP_NAME}" . -x "release/*"
+          zip "../${ZIP_NAME}" main.js manifest.json styles.css versions.json LICENSE
           cd ..
           ls -la "${ZIP_NAME}" dist
 
@@ -62,3 +61,4 @@ jobs:
             dist/styles.css
             dist/versions.json
           generate_release_notes: true
+          fail_on_unmatched_files: true

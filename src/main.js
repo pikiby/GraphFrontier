@@ -1,7 +1,4 @@
-const {
-  Plugin,
-  Notice,
-} = require('obsidian');
+const { Plugin, Notice } = require('obsidian');
 
 const {
   GRAPHFRONTIER_VIEW_TYPE,
@@ -29,27 +26,111 @@ function registerGraphFrontierCommands(plugin) {
 
   // Cursor-targeted actions: resolve active GraphFrontier view first, then run the matching handler.
   const viewActions = [
-    { id: 'graphfrontier-toggle-pin-under-cursor', name: 'Toggle pin under cursor', method: 'togglePinUnderCursor' },
-    { id: 'graphfrontier-set-force-multiplier-under-cursor', name: 'Set force multiplier under cursor', method: 'promptSetMultiplierUnderCursor' },
-    { id: 'graphfrontier-clear-force-multiplier-under-cursor', name: 'Clear force multiplier under cursor', method: 'clearMultiplierUnderCursor' },
-    { id: 'graphfrontier-align-pins-to-grid', name: 'Align pins to grid', method: 'alignPinsToGrid' },
-    { id: 'graphfrontier-pin-node-under-cursor', name: 'Pin node under cursor', method: 'commandPinNode' },
-    { id: 'graphfrontier-pin-to-grid-under-cursor', name: 'Pin node to grid under cursor', method: 'commandPinToGrid' },
-    { id: 'graphfrontier-unpin-node-under-cursor', name: 'Unpin node under cursor', method: 'commandUnpinNode' },
-    { id: 'graphfrontier-pin-linked-to-orbit-under-cursor', name: 'Pin linked to orbit under cursor', method: 'commandPinLinkedToOrbit' },
-    { id: 'graphfrontier-toggle-selection-under-cursor', name: 'Toggle selection under cursor', method: 'commandToggleSelectionUnderCursor' },
-    { id: 'graphfrontier-arm-box-selection', name: 'Arm box selection', method: 'commandArmBoxSelection' },
-    { id: 'graphfrontier-clear-selection', name: 'Clear selection', method: 'commandClearSelection' },
-    { id: 'graphfrontier-export-static-html', name: 'Export static graph to HTML', method: 'commandExportStaticHtml' },
-    { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor', method: 'commandUnpinLinkedNodes' },
-    { id: 'graphfrontier-add-to-search-under-cursor', name: 'Add to search under cursor', method: 'commandAddToSearch' },
-    { id: 'graphfrontier-show-local-graph-under-cursor', name: 'Show local graph under cursor', method: 'commandShowLocalGraph' },
-    { id: 'graphfrontier-pin-linked-nodes-under-cursor', name: 'Pin linked nodes under cursor', method: 'commandPinLinkedNodes' },
-    { id: 'graphfrontier-pin-linked-nodes-to-grid-under-cursor', name: 'Pin linked nodes to grid under cursor', method: 'commandPinLinkedNodesToGrid' },
-    { id: 'graphfrontier-paint-edges-under-cursor', name: 'Paint edges under cursor', method: 'commandPaintEdges' },
-    { id: 'graphfrontier-clear-painted-edges-under-cursor', name: 'Clear painted edges under cursor', method: 'commandClearPaintedEdges' },
-    { id: 'graphfrontier-strong-pull-under-cursor', name: 'Strong pull under cursor', method: 'commandStrongPull' },
-    { id: 'graphfrontier-clear-strong-pull-under-cursor', name: 'Clear strong pull under cursor', method: 'commandClearStrongPull' },
+    {
+      id: 'graphfrontier-toggle-pin-under-cursor',
+      name: 'Toggle pin under cursor',
+      method: 'togglePinUnderCursor',
+    },
+    {
+      id: 'graphfrontier-set-force-multiplier-under-cursor',
+      name: 'Set force multiplier under cursor',
+      method: 'promptSetMultiplierUnderCursor',
+    },
+    {
+      id: 'graphfrontier-clear-force-multiplier-under-cursor',
+      name: 'Clear force multiplier under cursor',
+      method: 'clearMultiplierUnderCursor',
+    },
+    {
+      id: 'graphfrontier-align-pins-to-grid',
+      name: 'Align pins to grid',
+      method: 'alignPinsToGrid',
+    },
+    {
+      id: 'graphfrontier-pin-node-under-cursor',
+      name: 'Pin node under cursor',
+      method: 'commandPinNode',
+    },
+    {
+      id: 'graphfrontier-pin-to-grid-under-cursor',
+      name: 'Pin node to grid under cursor',
+      method: 'commandPinToGrid',
+    },
+    {
+      id: 'graphfrontier-unpin-node-under-cursor',
+      name: 'Unpin node under cursor',
+      method: 'commandUnpinNode',
+    },
+    {
+      id: 'graphfrontier-pin-linked-to-orbit-under-cursor',
+      name: 'Pin linked to orbit under cursor',
+      method: 'commandPinLinkedToOrbit',
+    },
+    {
+      id: 'graphfrontier-toggle-selection-under-cursor',
+      name: 'Toggle selection under cursor',
+      method: 'commandToggleSelectionUnderCursor',
+    },
+    {
+      id: 'graphfrontier-arm-box-selection',
+      name: 'Arm box selection',
+      method: 'commandArmBoxSelection',
+    },
+    {
+      id: 'graphfrontier-clear-selection',
+      name: 'Clear selection',
+      method: 'commandClearSelection',
+    },
+    {
+      id: 'graphfrontier-export-static-html',
+      name: 'Export static graph to HTML',
+      method: 'commandExportStaticHtml',
+    },
+    {
+      id: 'graphfrontier-unpin-linked-nodes-under-cursor',
+      name: 'Unpin linked nodes under cursor',
+      method: 'commandUnpinLinkedNodes',
+    },
+    {
+      id: 'graphfrontier-add-to-search-under-cursor',
+      name: 'Add to search under cursor',
+      method: 'commandAddToSearch',
+    },
+    {
+      id: 'graphfrontier-show-local-graph-under-cursor',
+      name: 'Show local graph under cursor',
+      method: 'commandShowLocalGraph',
+    },
+    {
+      id: 'graphfrontier-pin-linked-nodes-under-cursor',
+      name: 'Pin linked nodes under cursor',
+      method: 'commandPinLinkedNodes',
+    },
+    {
+      id: 'graphfrontier-pin-linked-nodes-to-grid-under-cursor',
+      name: 'Pin linked nodes to grid under cursor',
+      method: 'commandPinLinkedNodesToGrid',
+    },
+    {
+      id: 'graphfrontier-paint-edges-under-cursor',
+      name: 'Paint edges under cursor',
+      method: 'commandPaintEdges',
+    },
+    {
+      id: 'graphfrontier-clear-painted-edges-under-cursor',
+      name: 'Clear painted edges under cursor',
+      method: 'commandClearPaintedEdges',
+    },
+    {
+      id: 'graphfrontier-strong-pull-under-cursor',
+      name: 'Strong pull under cursor',
+      method: 'commandStrongPull',
+    },
+    {
+      id: 'graphfrontier-clear-strong-pull-under-cursor',
+      name: 'Clear strong pull under cursor',
+      method: 'commandClearStrongPull',
+    },
     { id: 'graphfrontier-save-layout', name: 'Save layout', method: 'saveCurrentLayout' },
     { id: 'graphfrontier-load-layout', name: 'Load layout', method: 'loadSavedLayout' },
     { id: 'graphfrontier-pin-all', name: 'Pin all nodes', method: 'commandPinAllNodes' },
@@ -81,17 +162,20 @@ function registerGraphFrontierRefreshEvents(plugin) {
     if (!filePath) return false;
     const configDir = String(plugin.app?.vault?.configDir || '.obsidian').replace(/\/+$/u, '');
     const pluginId = String(plugin.manifest?.id || 'graphfrontier').trim() || 'graphfrontier';
-    return filePath === `${configDir}/plugins/${pluginId}` || filePath.startsWith(`${configDir}/plugins/${pluginId}/`);
+    return (
+      filePath === `${configDir}/plugins/${pluginId}` ||
+      filePath.startsWith(`${configDir}/plugins/${pluginId}/`)
+    );
   };
   const scheduleRefreshForVaultEvent = (file) => {
     if (shouldIgnoreVaultEvent(file)) return;
-    plugin.scheduleRefreshAllViews();
+    plugin.scheduleRefreshAllViews({ passive: true });
   };
 
   plugin.registerEvent(
     plugin.app.metadataCache.on('resolved', () => {
       plugin.metadataResolvedOnce = true;
-      plugin.scheduleRefreshAllViews({ metadataResolved: true });
+      plugin.scheduleRefreshAllViews({ metadataResolved: true, passive: true });
     })
   );
   plugin.registerEvent(plugin.app.vault.on('create', scheduleRefreshForVaultEvent));
@@ -129,7 +213,14 @@ function normalizeHotkeyTextUtil(rawHotkey) {
 
   for (const rawPart of parts) {
     const part = rawPart.toLowerCase();
-    if (part === 'mod' || part === 'cmd' || part === 'command' || part === 'ctrl' || part === 'control' || part === 'meta') {
+    if (
+      part === 'mod' ||
+      part === 'cmd' ||
+      part === 'command' ||
+      part === 'ctrl' ||
+      part === 'control' ||
+      part === 'meta'
+    ) {
       hasMod = true;
       continue;
     }
@@ -179,9 +270,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this._pendingRefreshOptions = {};
     const resolvedLinks = this.app?.metadataCache?.resolvedLinks;
     this.metadataResolvedOnce =
-      !!resolvedLinks &&
-      typeof resolvedLinks === 'object' &&
-      Object.keys(resolvedLinks).length > 0;
+      !!resolvedLinks && typeof resolvedLinks === 'object' && Object.keys(resolvedLinks).length > 0;
     await this.bootstrapActiveLayoutData();
 
     // UI entry point: ribbon icon opens GraphFrontier view.
@@ -191,10 +280,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     registerGraphFrontierCommands(this);
 
     // Register custom view type that renders the graph.
-    this.registerView(
-      GRAPHFRONTIER_VIEW_TYPE,
-      (leaf) => new GraphFrontierView(leaf, this),
-    );
+    this.registerView(GRAPHFRONTIER_VIEW_TYPE, (leaf) => new GraphFrontierView(leaf, this));
 
     // Subscribe to vault/workspace changes and refresh all open GraphFrontier views.
     registerGraphFrontierRefreshEvents(this);
@@ -213,25 +299,32 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
     const pins = safe.pins && typeof safe.pins === 'object' ? safe.pins : {};
     const orbitPins = safe.orbit_pins && typeof safe.orbit_pins === 'object' ? safe.orbit_pins : {};
-    const savedPositions = safe.saved_positions && typeof safe.saved_positions === 'object' ? safe.saved_positions : {};
-    const savedLayoutSettings = safe.saved_layout_settings && typeof safe.saved_layout_settings === 'object'
-      ? safe.saved_layout_settings
-      : {};
-    const savedLayoutPins = safe.saved_layout_pins && typeof safe.saved_layout_pins === 'object'
-      ? safe.saved_layout_pins
-      : {};
-    const savedLayoutOrbitPins = safe.saved_layout_orbit_pins && typeof safe.saved_layout_orbit_pins === 'object'
-      ? safe.saved_layout_orbit_pins
-      : {};
-    const multipliers = safe.node_force_multipliers && typeof safe.node_force_multipliers === 'object'
-      ? safe.node_force_multipliers
-      : {};
-    const strongPullNodes = safe.strong_pull_nodes && typeof safe.strong_pull_nodes === 'object'
-      ? safe.strong_pull_nodes
-      : {};
-    const paintedEdgeColors = safe.painted_edge_colors && typeof safe.painted_edge_colors === 'object'
-      ? safe.painted_edge_colors
-      : {};
+    const savedPositions =
+      safe.saved_positions && typeof safe.saved_positions === 'object' ? safe.saved_positions : {};
+    const savedLayoutSettings =
+      safe.saved_layout_settings && typeof safe.saved_layout_settings === 'object'
+        ? safe.saved_layout_settings
+        : {};
+    const savedLayoutPins =
+      safe.saved_layout_pins && typeof safe.saved_layout_pins === 'object'
+        ? safe.saved_layout_pins
+        : {};
+    const savedLayoutOrbitPins =
+      safe.saved_layout_orbit_pins && typeof safe.saved_layout_orbit_pins === 'object'
+        ? safe.saved_layout_orbit_pins
+        : {};
+    const multipliers =
+      safe.node_force_multipliers && typeof safe.node_force_multipliers === 'object'
+        ? safe.node_force_multipliers
+        : {};
+    const strongPullNodes =
+      safe.strong_pull_nodes && typeof safe.strong_pull_nodes === 'object'
+        ? safe.strong_pull_nodes
+        : {};
+    const paintedEdgeColors =
+      safe.painted_edge_colors && typeof safe.painted_edge_colors === 'object'
+        ? safe.painted_edge_colors
+        : {};
     const rawGroups = Array.isArray(safe.groups) ? safe.groups : [];
     const rawBlacklist = Array.isArray(safe.blacklist) ? safe.blacklist : [];
     const rawWhitelist = Array.isArray(safe.whitelist) ? safe.whitelist : [];
@@ -316,55 +409,97 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.grid_step = this.clampGridStep(normalized.settings.grid_step);
     // Backward compatibility: old link strength stored as tiny float (e.g. 0.001 -> new scale 40).
     if (Number(normalized.settings.base_link_strength) < 1) {
-      normalized.settings.base_link_strength = Number(normalized.settings.base_link_strength) / 0.000025;
+      normalized.settings.base_link_strength =
+        Number(normalized.settings.base_link_strength) / 0.000025;
     }
-    normalized.settings.base_link_strength = this.clampNumber(normalized.settings.base_link_strength, 1, 100, DEFAULT_DATA.settings.base_link_strength);
-    normalized.settings.link_distance = this.clampNumber(normalized.settings.link_distance, 1, 50, DEFAULT_DATA.settings.link_distance);
-    normalized.settings.repel_strength = this.clampNumber(normalized.settings.repel_strength, 0, 100, DEFAULT_DATA.settings.repel_strength);
+    normalized.settings.base_link_strength = this.clampNumber(
+      normalized.settings.base_link_strength,
+      1,
+      100,
+      DEFAULT_DATA.settings.base_link_strength
+    );
+    normalized.settings.link_distance = this.clampNumber(
+      normalized.settings.link_distance,
+      1,
+      50,
+      DEFAULT_DATA.settings.link_distance
+    );
+    normalized.settings.repel_strength = this.clampNumber(
+      normalized.settings.repel_strength,
+      0,
+      100,
+      DEFAULT_DATA.settings.repel_strength
+    );
     normalized.settings.repel_radius = this.clampNumber(
       normalized.settings.repel_radius,
       20,
       500,
-      DEFAULT_DATA.settings.repel_radius,
+      DEFAULT_DATA.settings.repel_radius
     );
     // Backward compatibility: old center strength (e.g. 0.0001 -> new scale 10).
     if (Number(normalized.settings.center_strength) < 1) {
       normalized.settings.center_strength = Number(normalized.settings.center_strength) / 0.00001;
     }
-    normalized.settings.center_strength = this.clampNumber(normalized.settings.center_strength, 1, 100, DEFAULT_DATA.settings.center_strength);
-    normalized.settings.damping = this.clampNumber(normalized.settings.damping, 0.01, 0.9, DEFAULT_DATA.settings.damping);
-    normalized.settings.node_size_scale = this.clampNumber(normalized.settings.node_size_scale, 0.1, 2, DEFAULT_DATA.settings.node_size_scale);
-    normalized.settings.edge_width_scale = this.clampNumber(normalized.settings.edge_width_scale, 0.01, 1, DEFAULT_DATA.settings.edge_width_scale);
+    normalized.settings.center_strength = this.clampNumber(
+      normalized.settings.center_strength,
+      1,
+      100,
+      DEFAULT_DATA.settings.center_strength
+    );
+    normalized.settings.damping = this.clampNumber(
+      normalized.settings.damping,
+      0.01,
+      0.9,
+      DEFAULT_DATA.settings.damping
+    );
+    normalized.settings.node_size_scale = this.clampNumber(
+      normalized.settings.node_size_scale,
+      0.1,
+      2,
+      DEFAULT_DATA.settings.node_size_scale
+    );
+    normalized.settings.edge_width_scale = this.clampNumber(
+      normalized.settings.edge_width_scale,
+      0.01,
+      1,
+      DEFAULT_DATA.settings.edge_width_scale
+    );
     normalized.settings.painted_edge_width = this.clampNumber(
       normalized.settings.painted_edge_width,
       0.01,
       1,
-      DEFAULT_DATA.settings.painted_edge_width,
+      DEFAULT_DATA.settings.painted_edge_width
     );
     if (normalized.settings.label_zoom_steps == null && settings.label_min_zoom != null) {
       const legacySlider = this.clampNumber(settings.label_min_zoom, 0.01, 1, 0.35);
       const legacyThreshold = this.clampNumber(1.01 - legacySlider, MIN_ZOOM, MAX_ZOOM, 1);
-      const legacySteps = Math.round(Math.log(MAX_ZOOM / legacyThreshold) / Math.log(ZOOM_STEP_FACTOR)) + 1;
+      const legacySteps =
+        Math.round(Math.log(MAX_ZOOM / legacyThreshold) / Math.log(ZOOM_STEP_FACTOR)) + 1;
       normalized.settings.label_zoom_steps = legacySteps;
     }
     normalized.settings.label_zoom_steps = this.clampNumber(
       normalized.settings.label_zoom_steps,
       1,
       20,
-      DEFAULT_DATA.settings.label_zoom_steps,
+      DEFAULT_DATA.settings.label_zoom_steps
     );
-    normalized.settings.label_font_size = this.clampNumber(normalized.settings.label_font_size, 5, 20, DEFAULT_DATA.settings.label_font_size);
+    normalized.settings.label_font_size = this.clampNumber(
+      normalized.settings.label_font_size,
+      5,
+      20,
+      DEFAULT_DATA.settings.label_font_size
+    );
     normalized.settings.hover_dim_strength = this.clampNumber(
       normalized.settings.hover_dim_strength,
       0,
       100,
-      DEFAULT_DATA.settings.hover_dim_strength,
+      DEFAULT_DATA.settings.hover_dim_strength
     );
     normalized.settings.strong_pull_multiplier = this.clampNumber(
       normalized.settings.strong_pull_multiplier,
       NODE_MULTIPLIER_MIN,
       NODE_MULTIPLIER_MAX,
-      DEFAULT_DATA.settings.strong_pull_multiplier,
+      DEFAULT_DATA.settings.strong_pull_multiplier
     );
     const hasOrbitDistanceSetting = settings.orbit_distance != null;
     let orbitDistanceSetting = Number(normalized.settings.orbit_distance);
@@ -373,7 +508,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         settings.orbit_distance_multiplier,
         0.1,
         2,
-        0.2,
+        0.2
       );
       orbitDistanceSetting = normalized.settings.link_distance * legacyOrbitDistanceMultiplier;
     }
@@ -381,19 +516,21 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       orbitDistanceSetting,
       1,
       100,
-      DEFAULT_DATA.settings.orbit_distance,
+      DEFAULT_DATA.settings.orbit_distance
     );
     normalized.settings.attachment_size_multiplier = this.clampNumber(
       normalized.settings.attachment_size_multiplier,
       0.1,
       1,
-      DEFAULT_DATA.settings.attachment_size_multiplier,
+      DEFAULT_DATA.settings.attachment_size_multiplier
     );
-    let attachmentLinkDistanceSetting = Number(normalized.settings.attachment_link_distance_multiplier);
+    let attachmentLinkDistanceSetting = Number(
+      normalized.settings.attachment_link_distance_multiplier
+    );
     if (
-      Number.isFinite(attachmentLinkDistanceSetting)
-      && attachmentLinkDistanceSetting > 0
-      && attachmentLinkDistanceSetting <= 1
+      Number.isFinite(attachmentLinkDistanceSetting) &&
+      attachmentLinkDistanceSetting > 0 &&
+      attachmentLinkDistanceSetting <= 1
     ) {
       attachmentLinkDistanceSetting *= normalized.settings.link_distance;
     }
@@ -401,23 +538,33 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       attachmentLinkDistanceSetting,
       1,
       100,
-      DEFAULT_DATA.settings.attachment_link_distance_multiplier,
+      DEFAULT_DATA.settings.attachment_link_distance_multiplier
     );
     normalized.settings.show_grid = !!normalized.settings.show_grid;
     normalized.settings.hide_orphans = !!normalized.settings.hide_orphans;
     normalized.settings.hide_attachments = !!normalized.settings.hide_attachments;
     normalized.settings.existing_files_only = !!normalized.settings.existing_files_only;
-    normalized.settings.search_mode = (
-      normalized.settings.search_mode === 'filter'
-      || normalized.settings.search_mode === 'filtr'
-    ) ? 'filter' : 'find';
-    normalized.settings.quick_pick_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.quick_pick_modifier)
+    normalized.settings.search_mode =
+      normalized.settings.search_mode === 'filter' || normalized.settings.search_mode === 'filtr'
+        ? 'filter'
+        : 'find';
+    normalized.settings.quick_pick_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(
+      normalized.settings.quick_pick_modifier
+    )
       ? normalized.settings.quick_pick_modifier
       : DEFAULT_DATA.settings.quick_pick_modifier;
-    normalized.settings.selection_box_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.selection_box_modifier)
+    normalized.settings.selection_box_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(
+      normalized.settings.selection_box_modifier
+    )
       ? normalized.settings.selection_box_modifier
       : DEFAULT_DATA.settings.selection_box_modifier;
-    normalized.settings.selection_toggle_modifier = ['alt', 'ctrl', 'meta', 'shift', 'none'].includes(normalized.settings.selection_toggle_modifier)
+    normalized.settings.selection_toggle_modifier = [
+      'alt',
+      'ctrl',
+      'meta',
+      'shift',
+      'none',
+    ].includes(normalized.settings.selection_toggle_modifier)
       ? normalized.settings.selection_toggle_modifier
       : DEFAULT_DATA.settings.selection_toggle_modifier;
     normalized.settings.layout_autosave = !!normalized.settings.layout_autosave;
@@ -430,11 +577,11 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     delete normalized.settings.orbit_distance_multiplier;
 
     if (
-      Number(settings.base_link_strength) === 0.08
-      && Number(settings.link_distance) === 220
-      && Number(settings.repel_strength) === 2800
-      && Number(settings.center_strength) === 0.015
-      && Number(settings.damping) === 0.86
+      Number(settings.base_link_strength) === 0.08 &&
+      Number(settings.link_distance) === 220 &&
+      Number(settings.repel_strength) === 2800 &&
+      Number(settings.center_strength) === 0.015 &&
+      Number(settings.damping) === 0.86
     ) {
       normalized.settings.base_link_strength = DEFAULT_DATA.settings.base_link_strength;
       normalized.settings.link_distance = DEFAULT_DATA.settings.link_distance;
@@ -502,10 +649,15 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
     normalized.view_state.pan_x = this.clampNumber(normalized.view_state.pan_x, -1e7, 1e7, 0);
     normalized.view_state.pan_y = this.clampNumber(normalized.view_state.pan_y, -1e7, 1e7, 0);
-    normalized.view_state.zoom = this.clampNumber(normalized.view_state.zoom, MIN_ZOOM, MAX_ZOOM, 1);
+    normalized.view_state.zoom = this.clampNumber(
+      normalized.view_state.zoom,
+      MIN_ZOOM,
+      MAX_ZOOM,
+      1
+    );
     const rawSidePanelSections =
-      normalized.view_state.side_panel_sections
-      && typeof normalized.view_state.side_panel_sections === 'object'
+      normalized.view_state.side_panel_sections &&
+      typeof normalized.view_state.side_panel_sections === 'object'
         ? normalized.view_state.side_panel_sections
         : {};
     const nextSidePanelSections = {};
@@ -542,7 +694,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   clampStrongPullMultiplier(value) {
-    return this.clampNumber(value, NODE_MULTIPLIER_MIN, NODE_MULTIPLIER_MAX, DEFAULT_DATA.settings.strong_pull_multiplier);
+    return this.clampNumber(
+      value,
+      NODE_MULTIPLIER_MIN,
+      NODE_MULTIPLIER_MAX,
+      DEFAULT_DATA.settings.strong_pull_multiplier
+    );
   }
 
   clampNumber(value, min, max, fallback) {
@@ -553,8 +710,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
   getSidePanelSectionsState() {
     const rawSidePanelSections =
-      this.data?.view_state?.side_panel_sections
-      && typeof this.data.view_state.side_panel_sections === 'object'
+      this.data?.view_state?.side_panel_sections &&
+      typeof this.data.view_state.side_panel_sections === 'object'
         ? this.data.view_state.side_panel_sections
         : {};
     const nextSidePanelSections = {};
@@ -658,6 +815,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   schedulePersist(delayMs = 250) {
+    this._persistRevision = (this._persistRevision || 0) + 1;
     if (this._persistTimer) window.clearTimeout(this._persistTimer);
     const safeDelayMs = this.clampNumber(delayMs, 100, 5000, 250);
     this._persistTimer = window.setTimeout(() => {
@@ -727,22 +885,27 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
   async readLayoutFileData(layoutFileName) {
     const adapter = this.app?.vault?.adapter;
-    if (!adapter || typeof adapter.read !== 'function') return null;
+    if (!adapter || typeof adapter.read !== 'function') return { status: 'error' };
     const filePath = this.getLayoutFileRelativePath(layoutFileName);
     try {
+      if (typeof adapter.exists === 'function' && (await adapter.exists(filePath)) === false) {
+        return { status: 'missing' };
+      }
       const rawText = await adapter.read(filePath);
-      const parsed = JSON.parse(String(rawText || '{}'));
-      if (!parsed || typeof parsed !== 'object') return null;
-      return parsed;
+      const parsed = JSON.parse(rawText);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { status: 'error' };
+      }
+      return { status: 'ok', data: parsed };
     } catch {
-      return null;
+      // A failed read is not proof of absence; never bootstrap over it.
+      return { status: 'error' };
     }
   }
 
   async writeLayoutFileData(layoutFileName, dataObject) {
     const adapter = this.app?.vault?.adapter;
     if (!adapter || typeof adapter.write !== 'function') return false;
-    await this.ensureLayoutsFolder();
     const fileName = this.normalizeLayoutFileName(layoutFileName);
     const filePath = this.getLayoutFileRelativePath(fileName);
     const normalizedData = this.normalizeData(dataObject);
@@ -753,7 +916,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     }
     normalizedData.view_state.side_panel_sections = {};
     try {
-      await adapter.write(filePath, `${JSON.stringify(normalizedData, null, 2)}\n`);
+      const contents = `${JSON.stringify(normalizedData, null, 2)}\n`;
+      await this.ensureLayoutsFolder();
+      await adapter.write(filePath, contents);
       return true;
     } catch {
       return false;
@@ -837,51 +1002,73 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     await this.saveData(this.data);
   }
 
-  async persistActiveLayoutFile() {
-    const activeLayoutName = this.getActiveLayoutFileName();
-    this.data.active_layout_name = activeLayoutName;
-    await this.writeLayoutFileData(activeLayoutName, this.data);
+  async persistActiveLayoutFile(data = this.data, layoutName = this.getActiveLayoutFileName()) {
+    if (this._layoutReadFailedName === layoutName) return false;
+    return this.writeLayoutFileData(layoutName, data);
+  }
+
+  // Serialize save commits and full-file reloads, not unrelated UI work.
+  runLayoutFileOperation(operation) {
+    const pending = (this._layoutFileOperation || Promise.resolve()).then(operation);
+    this._layoutFileOperation = pending.catch(() => {});
+    return pending;
   }
 
   async bootstrapActiveLayoutData() {
-    await this.ensureLayoutsFolder();
-    const preservedSidePanelSections = this.getSidePanelSectionsState();
     const activeLayoutName = this.getActiveLayoutFileName();
-    const loadedLayoutData = await this.readLayoutFileData(activeLayoutName);
-    if (loadedLayoutData && typeof loadedLayoutData === 'object') {
-      const normalizedLayoutData = this.normalizeData(loadedLayoutData);
+    const result = await this.readLayoutFileData(activeLayoutName);
+    if (result.status === 'ok') {
+      const normalizedLayoutData = this.normalizeData(result.data);
       normalizedLayoutData.active_layout_name = activeLayoutName;
-      this.applySidePanelSectionsState(normalizedLayoutData, preservedSidePanelSections);
+      this.applySidePanelSectionsState(normalizedLayoutData);
       this.data = normalizedLayoutData;
+      this._layoutReadFailedName = null;
       await this.persistPluginDataOnly();
-      return;
+      return true;
+    }
+    if (result.status !== 'missing') {
+      this._layoutReadFailedName = activeLayoutName;
+      new Notice(`Cannot read layout: ${activeLayoutName}. File left unchanged.`);
+      return false;
     }
     this.data.active_layout_name = activeLayoutName;
-    this.applySidePanelSectionsState(this.data, preservedSidePanelSections);
+    const written = await this.persistActiveLayoutFile();
+    if (!written) {
+      new Notice(`Failed to create layout: ${activeLayoutName}`);
+      return false;
+    }
     await this.persistPluginDataOnly();
-    await this.persistActiveLayoutFile();
+    return true;
   }
 
   async setActiveLayoutFile(layoutFileName, options = {}) {
-    if (this._persistTimer) {
-      window.clearTimeout(this._persistTimer);
-      this._persistTimer = null;
-      await this.persistPluginDataOnly();
-    }
-    const preservedSidePanelSections = this.getSidePanelSectionsState();
-    const nextLayoutName = this.normalizeLayoutFileName(layoutFileName);
-    const shouldLoadFromFile = options.loadFromFile !== false;
-    let nextData = this.normalizeData(this.data);
-    if (shouldLoadFromFile) {
-      const loadedLayoutData = await this.readLayoutFileData(nextLayoutName);
-      if (!loadedLayoutData) return false;
-      nextData = this.normalizeData(loadedLayoutData);
-    }
-    nextData.active_layout_name = nextLayoutName;
-    this.applySidePanelSectionsState(nextData, preservedSidePanelSections);
-    this.data = nextData;
-    await this.persistPluginDataOnly();
-    return true;
+    return this.runLayoutFileOperation(async () => {
+      const nextLayoutName = this.normalizeLayoutFileName(layoutFileName);
+      const shouldLoadFromFile = options.loadFromFile !== false;
+      let nextData = this.normalizeData(this.data);
+      if (shouldLoadFromFile) {
+        const result = await this.readLayoutFileData(nextLayoutName);
+        if (result.status !== 'ok') return false;
+        nextData = this.normalizeData(result.data);
+      }
+      if (this._persistTimer) {
+        window.clearTimeout(this._persistTimer);
+        this._persistTimer = null;
+      }
+      nextData.active_layout_name = nextLayoutName;
+      this.applySidePanelSectionsState(nextData);
+      try {
+        await this.saveData(nextData);
+      } catch {
+        new Notice('Layout selected, but plugin preferences could not be saved');
+      }
+      // Publish after the last await so queued saves still identify the old layout
+      // until the full-file switch is ready to update its views.
+      this.applySidePanelSectionsState(nextData);
+      this.data = nextData;
+      if (shouldLoadFromFile) this._layoutReadFailedName = null;
+      return true;
+    });
   }
 
   // Node-state management: pin/grid/orbit modes, strong pull, and painted edges.
@@ -1141,7 +1328,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     if (propertyMatch) {
       return {
         type: 'property',
-        propertyKey: String(propertyMatch[1] || '').trim().toLowerCase(),
+        propertyKey: String(propertyMatch[1] || '')
+          .trim()
+          .toLowerCase(),
         value: String(propertyMatch[2] || '').trim(),
       };
     }
@@ -1149,9 +1338,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   composeGroupQuery(type, value, propertyKey = '') {
-    const cleanType = String(type || '').trim().toLowerCase();
+    const cleanType = String(type || '')
+      .trim()
+      .toLowerCase();
     const cleanValue = String(value || '').trim();
-    const cleanPropertyKey = String(propertyKey || '').trim().toLowerCase();
+    const cleanPropertyKey = String(propertyKey || '')
+      .trim()
+      .toLowerCase();
     if (!cleanType || !cleanValue) return '';
     if (cleanType === 'property') {
       if (!cleanPropertyKey) return '';
@@ -1164,7 +1357,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   getGroupSuggestions(query, limit = 30) {
     const suggestions = [];
     const text = String(query || '').trim();
-    const index = this.groupSuggestionIndex || this.buildGroupSuggestionIndex(this.app.vault.getMarkdownFiles());
+    const index =
+      this.groupSuggestionIndex ||
+      this.buildGroupSuggestionIndex(this.app.vault.getMarkdownFiles());
 
     const addSuggestions = (items, prefix) => {
       const sorted = Array.from(items).sort((a, b) => a.localeCompare(b));
@@ -1203,8 +1398,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   getGroupPropertyKeySuggestions(query = '', limit = 40) {
-    const text = String(query || '').trim().toLowerCase();
-    const index = this.groupSuggestionIndex || this.buildGroupSuggestionIndex(this.app.vault.getMarkdownFiles());
+    const text = String(query || '')
+      .trim()
+      .toLowerCase();
+    const index =
+      this.groupSuggestionIndex ||
+      this.buildGroupSuggestionIndex(this.app.vault.getMarkdownFiles());
     const keys = Array.from(index.properties.keys()).sort((a, b) => a.localeCompare(b));
     const filtered = [];
     for (const key of keys) {
@@ -1215,9 +1414,15 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   getGroupValueSuggestions(type, query = '', propertyKey = '', limit = 40) {
-    const cleanType = String(type || '').trim().toLowerCase();
-    const text = String(query || '').trim().toLowerCase();
-    const index = this.groupSuggestionIndex || this.buildGroupSuggestionIndex(this.app.vault.getMarkdownFiles());
+    const cleanType = String(type || '')
+      .trim()
+      .toLowerCase();
+    const text = String(query || '')
+      .trim()
+      .toLowerCase();
+    const index =
+      this.groupSuggestionIndex ||
+      this.buildGroupSuggestionIndex(this.app.vault.getMarkdownFiles());
 
     let items = [];
     if (cleanType === 'tag') items = Array.from(index.tags);
@@ -1226,7 +1431,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     else if (cleanType === 'line') items = Array.from(index.lines);
     else if (cleanType === 'section') items = Array.from(index.sections);
     else if (cleanType === 'property') {
-      const cleanKey = String(propertyKey || '').trim().toLowerCase();
+      const cleanKey = String(propertyKey || '')
+        .trim()
+        .toLowerCase();
       if (!cleanKey) return [];
       items = Array.from(index.properties.get(cleanKey) || []);
     } else {
@@ -1279,7 +1486,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const fileExt = typeof file?.extension === 'string' ? file.extension.toLowerCase() : '';
     const meta = {
       path,
-      fileName: typeof file?.basename === 'string' ? file.basename : (String(path).split('/').pop() || String(path)),
+      fileName:
+        typeof file?.basename === 'string'
+          ? file.basename
+          : String(path).split('/').pop() || String(path),
       tags: [],
       sections: [],
       lines: [],
@@ -1310,7 +1520,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const fmTags = fm.tags;
     if (Array.isArray(fmTags)) {
       for (const tag of fmTags) {
-        const text = String(tag || '').replace(/^#/, '').trim();
+        const text = String(tag || '')
+          .replace(/^#/, '')
+          .trim();
         if (text) tags.add(text);
       }
     } else if (typeof fmTags === 'string') {
@@ -1339,7 +1551,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     }
 
     for (const [rawKey, rawValue] of Object.entries(fm)) {
-      const key = String(rawKey || '').trim().toLowerCase();
+      const key = String(rawKey || '')
+        .trim()
+        .toLowerCase();
       if (!key || key === 'position') continue;
       if (!meta.properties.has(key)) meta.properties.set(key, []);
       const bucket = meta.properties.get(key);
@@ -1384,7 +1598,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       nodeMap.set(nodeId, {
         id: nodeId,
         label,
-        meta: this.buildNodeMetaByPath(nodeId, null, { isAttachment: options.isAttachment === true }),
+        meta: this.buildNodeMetaByPath(nodeId, null, {
+          isAttachment: options.isAttachment === true,
+        }),
       });
     };
 
@@ -1402,14 +1618,16 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
         const targetAbs = this.app.vault.getAbstractFileByPath(targetPath);
         const targetExists = !!targetAbs && typeof targetAbs.path === 'string';
-        const targetExt = targetExists && typeof targetAbs.extension === 'string'
-          ? targetAbs.extension.toLowerCase()
-          : '';
+        const targetExt =
+          targetExists && typeof targetAbs.extension === 'string'
+            ? targetAbs.extension.toLowerCase()
+            : '';
         const isAttachmentExisting = targetExists && targetExt !== '' && targetExt !== 'md';
 
         const unresolvedExtMatch = /(?:\.([^.\/]+))$/u.exec(targetPath);
         const unresolvedExt = unresolvedExtMatch ? unresolvedExtMatch[1].toLowerCase() : '';
-        const isAttachmentUnresolved = !targetExists && unresolvedExt !== '' && unresolvedExt !== 'md';
+        const isAttachmentUnresolved =
+          !targetExists && unresolvedExt !== '' && unresolvedExt !== 'md';
 
         if (!includeAttachments && (isAttachmentExisting || isAttachmentUnresolved)) continue;
         if (existingFilesOnly && !targetExists) continue;
@@ -1417,17 +1635,19 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         const targetIsMarkdown = targetExists ? targetExt === 'md' : !isAttachmentUnresolved;
         if (!targetIsMarkdown && !includeAttachments) continue;
 
-        const targetLabel = targetExists && typeof targetAbs.basename === 'string'
-          ? targetAbs.basename
-          : targetPath.split('/').pop() || targetPath;
+        const targetLabel =
+          targetExists && typeof targetAbs.basename === 'string'
+            ? targetAbs.basename
+            : targetPath.split('/').pop() || targetPath;
 
         addNodeIfMissing(targetPath, targetLabel, {
           isAttachment: isAttachmentExisting || isAttachmentUnresolved,
         });
 
-        const pair = sourcePath < targetPath
-          ? `${sourcePath}\u0000${targetPath}`
-          : `${targetPath}\u0000${sourcePath}`;
+        const pair =
+          sourcePath < targetPath
+            ? `${sourcePath}\u0000${targetPath}`
+            : `${targetPath}\u0000${sourcePath}`;
 
         if (edgeSet.has(pair)) continue;
         edgeSet.add(pair);
@@ -1466,10 +1686,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   async openOrRevealGraphFrontierView() {
-    const activeLayoutName = this.getActiveLayoutFileName();
-    await this.setActiveLayoutFile(activeLayoutName, { loadFromFile: true });
     const existingLeaf = this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)[0];
-    const leaf = existingLeaf || this.app.workspace.getLeaf('tab') || this.app.workspace.getLeaf(true);
+    const leaf =
+      existingLeaf || this.app.workspace.getLeaf('tab') || this.app.workspace.getLeaf(true);
     await leaf.setViewState({ type: GRAPHFRONTIER_VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
 

@@ -32,5 +32,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
+
+      - name: Check release metadata and assets
+        run: npm run check:release

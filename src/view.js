@@ -1,4 +1,5 @@
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
+const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
 
 const {
   DEFAULT_DATA,
@@ -137,6 +138,7 @@ class GraphFrontierView extends ItemView {
     this.layoutKickAtMs = Date.now();
     this.layoutStillFrames = 0;
     this.layoutAutosaveDirty = false;
+    this.layoutEditVersion = 0;
     this.layoutPaused = false;
     this.hasSeenMetadataResolvedRefresh = !!this.plugin.metadataResolvedOnce;
     this.quickPreviewEl = null;
@@ -164,7 +166,8 @@ class GraphFrontierView extends ItemView {
     this.isOpen = false;
     this.resizeObserver = null;
     this.frameHandle = null;
-    this.canvasBackgroundColor = '#111418';
+    this.canvasTheme = { ...DARK_THEME };
+    this.canvasBackgroundColor = this.canvasTheme.background;
   }
 
   getViewType() {
@@ -181,6 +184,10 @@ class GraphFrontierView extends ItemView {
 
   // View lifecycle: create canvas/UI on open and release resources on close.
   async onOpen() {
+    const loaded = await this.plugin.setActiveLayoutFile(this.plugin.getActiveLayoutFileName());
+    if (!loaded) new Notice('Cannot read active layout. File left unchanged.');
+    this.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
+    this.sidePanelSectionState = this.plugin.getSidePanelSectionsState();
     this.contentEl.empty();
     this.contentEl.addClass('graphfrontier-host');
 
@@ -197,7 +204,11 @@ class GraphFrontierView extends ItemView {
     this.resizeCanvas();
 
     const hasSavedLayoutPositions = Object.keys(this.plugin.data.saved_positions || {}).length > 0;
-    this.refreshFromVault({ keepCamera: false, skipLayoutKick: hasSavedLayoutPositions });
+    this.refreshFromVault({
+      keepCamera: false,
+      forceSavedPositions: loaded,
+      skipLayoutKick: !loaded || hasSavedLayoutPositions,
+    });
 
     this.isOpen = true;
     this.runFrame();
@@ -219,8 +230,13 @@ class GraphFrontierView extends ItemView {
     this.plugin.data.view_state.zoom = this.cameraTarget.zoom;
 
     const autosaveEnabled = !!this.plugin.data.settings.layout_autosave;
-    if (!autosaveEnabled && this.layoutAutosaveDirty) {
-      this.applySavedLayoutStateDataOnly();
+    if (autosaveEnabled && this.layoutAutosaveDirty && !this.isSearchFilled()) {
+      if (!(await this.saveCurrentLayout({ silent: true }))) {
+        new Notice('Failed to save layout on close. Changes are still unsaved.');
+      }
+    } else if (!autosaveEnabled) {
+      // Groups, rules, and display settings can change without a physics kick.
+      await this.loadSavedLayout({ silent: true });
     }
 
     this.contentEl.removeClass('graphfrontier-host');
@@ -231,6 +247,12 @@ class GraphFrontierView extends ItemView {
   }
 
   bindEvents() {
+    this.registerEvent(
+      this.app.workspace.on('css-change', () => {
+        this.updateCanvasBackgroundColor();
+        this.render();
+      })
+    );
     this.registerDomEvent(this.canvasEl, 'mousemove', (event) => this.onMouseMove(event));
     this.registerDomEvent(this.canvasEl, 'mousedown', (event) => this.onMouseDown(event));
     this.registerDomEvent(this.canvasEl, 'mouseup', (event) => this.onMouseUp(event));
@@ -749,15 +771,7 @@ class GraphFrontierView extends ItemView {
           ? this.layoutFileSearchInputEl.value
           : this.layoutFileSearchInputValue
       );
-      const switched = await this.plugin.setActiveLayoutFile(targetLayoutFileName, {
-        loadFromFile: false,
-      });
-      if (!switched) {
-        new Notice('Cannot use layout name');
-        return;
-      }
-      this.syncLayoutFileSelectionFromPlugin();
-      await this.saveCurrentLayout();
+      await this.saveCurrentLayout({ layoutFileName: targetLayoutFileName });
     });
 
     const loadButton = buttonsWrap.createEl('button', {
@@ -951,17 +965,8 @@ class GraphFrontierView extends ItemView {
 
   async selectActiveLayoutFileByName(layoutFileName) {
     const selectedName = String(layoutFileName || '').trim();
-    if (!selectedName) return;
-    const switched = await this.plugin.setActiveLayoutFile(selectedName, { loadFromFile: true });
-    if (!switched) {
-      new Notice('Layout file not found');
-      this.syncLayoutFileSelectionFromPlugin();
-      return;
-    }
-    this.syncLayoutFileSelectionFromPlugin();
-    this.plugin.refreshAllViews({ forceSavedPositions: true, skipLayoutKick: true });
-    this.buildSidePanel();
-    this.plugin.renderAllViews();
+    if (!selectedName) return false;
+    return this.loadSavedLayout({ layoutFileName: selectedName, silent: true });
   }
 
   getLayoutDisplayName(layoutFileName) {
@@ -2090,6 +2095,7 @@ class GraphFrontierView extends ItemView {
 
   // Simulation restart marker: called when settings or node positions change.
   kickLayoutSearch() {
+    this.layoutEditVersion += 1;
     return kickLayoutSearchPhysics(this);
   }
 
@@ -2709,9 +2715,8 @@ class GraphFrontierView extends ItemView {
 
   updateCanvasBackgroundColor() {
     if (!this.contentEl) return;
-    const styles = getComputedStyle(this.contentEl);
-    this.canvasBackgroundColor =
-      styles.getPropertyValue('--background-primary').trim() || '#111418';
+    this.canvasTheme = readGraphTheme(this.contentEl);
+    this.canvasBackgroundColor = this.canvasTheme.background;
   }
 
   resizeCanvas() {
@@ -2738,6 +2743,7 @@ class GraphFrontierView extends ItemView {
     const forceSavedPositions = !!opts.forceSavedPositions;
     const skipLayoutKick = !!opts.skipLayoutKick;
     const metadataResolved = !!opts.metadataResolved;
+    const passive = opts.passive === true || metadataResolved;
     if (metadataResolved) {
       this.hasSeenMetadataResolvedRefresh = true;
     } else if (this.plugin.metadataResolvedOnce) {
@@ -2770,8 +2776,8 @@ class GraphFrontierView extends ItemView {
     if (skipLayoutKick) {
       this.layoutPaused = true;
       this.layoutStillFrames = 0;
-      this.layoutAutosaveDirty = false;
-    } else {
+      if (forceSavedPositions) this.layoutAutosaveDirty = false;
+    } else if (!passive) {
       this.kickLayoutSearch();
     }
     this.render();
@@ -2997,75 +3003,9 @@ class GraphFrontierView extends ItemView {
 
   // Data cleanup and initial framing after graph rebuild.
   cleanupDetachedData(options = {}) {
-    const allowDestructivePrune = !!options.allowDestructivePrune;
-    if (!allowDestructivePrune) return;
-    const nodeIds = new Set(this.nodes.map((node) => node.id));
-
-    let changed = false;
-    for (const nodeId of Object.keys(this.plugin.data.pins)) {
-      if (!nodeIds.has(nodeId)) {
-        delete this.plugin.data.pins[nodeId];
-        changed = true;
-      }
-    }
-    for (const nodeId of Object.keys(this.plugin.data.saved_positions || {})) {
-      if (!nodeIds.has(nodeId)) {
-        delete this.plugin.data.saved_positions[nodeId];
-        changed = true;
-      }
-    }
-    for (const nodeId of Object.keys(this.plugin.data.saved_layout_pins || {})) {
-      if (!nodeIds.has(nodeId)) {
-        delete this.plugin.data.saved_layout_pins[nodeId];
-        changed = true;
-      }
-    }
-    for (const [nodeId, orbitMeta] of Object.entries(
-      this.plugin.data.saved_layout_orbit_pins || {}
-    )) {
-      if (!nodeIds.has(nodeId)) {
-        delete this.plugin.data.saved_layout_orbit_pins[nodeId];
-        changed = true;
-        continue;
-      }
-      const anchorId = String(orbitMeta?.anchor_id || '').trim();
-      if (!anchorId || anchorId === nodeId || !nodeIds.has(anchorId)) {
-        delete this.plugin.data.saved_layout_orbit_pins[nodeId];
-        changed = true;
-      }
-    }
-    for (const nodeId of Object.keys(this.plugin.data.node_force_multipliers)) {
-      if (!nodeIds.has(nodeId)) {
-        delete this.plugin.data.node_force_multipliers[nodeId];
-        changed = true;
-      }
-    }
-    for (const nodeId of Object.keys(this.plugin.data.strong_pull_nodes)) {
-      if (!nodeIds.has(nodeId)) {
-        delete this.plugin.data.strong_pull_nodes[nodeId];
-        changed = true;
-      }
-    }
-    for (const nodeId of Object.keys(this.plugin.data.painted_edge_colors || {})) {
-      if (!nodeIds.has(nodeId)) {
-        delete this.plugin.data.painted_edge_colors[nodeId];
-        changed = true;
-      }
-    }
-    for (const [nodeId, orbitMeta] of Object.entries(this.plugin.data.orbit_pins || {})) {
-      if (!nodeIds.has(nodeId)) {
-        delete this.plugin.data.orbit_pins[nodeId];
-        changed = true;
-        continue;
-      }
-      const anchorId = String(orbitMeta?.anchor_id || '').trim();
-      if (!anchorId || anchorId === nodeId || !nodeIds.has(anchorId)) {
-        delete this.plugin.data.orbit_pins[nodeId];
-        changed = true;
-      }
-    }
-
-    if (changed) this.plugin.schedulePersist();
+    void options;
+    // The runtime graph is settings-dependent and can be incomplete while Obsidian metadata
+    // is still resolving. Never prune persisted layout state from this filtered snapshot.
   }
 
   fitCameraToNodes() {
@@ -4498,10 +4438,11 @@ class GraphFrontierView extends ItemView {
 
     const width = Math.max(1, Math.floor(this.viewWidth || this.canvasEl.clientWidth || 1));
     const height = Math.max(1, Math.floor(this.viewHeight || this.canvasEl.clientHeight || 1));
-    const computedStyles = getComputedStyle(this.contentEl);
-    const bgColor = computedStyles.getPropertyValue('--background-primary').trim() || '#111418';
-    const textColor = computedStyles.getPropertyValue('--text-normal').trim() || '#e6e8ed';
-    const mutedTextColor = computedStyles.getPropertyValue('--text-muted').trim() || '#9ea4af';
+    this.updateCanvasBackgroundColor();
+    const theme = this.canvasTheme;
+    const bgColor = theme.background;
+    const textColor = theme.text;
+    const mutedTextColor = theme.mutedText;
     const exportedAt = new Date().toISOString();
     const payload = {
       exportPath: normalizedExportPath,
@@ -4512,11 +4453,7 @@ class GraphFrontierView extends ItemView {
         zoom: Number(this.camera.zoom) || 1,
       },
       canvas: { width, height },
-      theme: {
-        background: bgColor,
-        text: textColor,
-        mutedText: mutedTextColor,
-      },
+      theme: { ...theme },
       settings: {
         showGrid: !!this.plugin.getSettings().show_grid,
         gridStep: this.plugin.clampGridStep(this.plugin.getSettings().grid_step),
@@ -4554,7 +4491,7 @@ class GraphFrontierView extends ItemView {
   <title>GraphFrontier Static Interactive Export</title>
   <style>
     :root {
-      color-scheme: dark;
+      color-scheme: ${theme.colorScheme};
     }
     html {
       width: 100%;
@@ -4598,8 +4535,8 @@ class GraphFrontierView extends ItemView {
       position: absolute;
       top: 10px;
       left: 10px;
-      background: rgba(8, 11, 16, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: ${theme.surface};
+      border: 1px solid ${theme.border};
       border-radius: 8px;
       padding: 6px 8px;
       color: ${mutedTextColor};
@@ -4607,8 +4544,8 @@ class GraphFrontierView extends ItemView {
       pointer-events: none;
     }
     .panel {
-      background: rgba(12, 16, 23, 0.95);
-      border-left: 1px solid rgba(255, 255, 255, 0.08);
+      background: ${theme.surface};
+      border-left: 1px solid ${theme.border};
       display: flex;
       flex-direction: column;
       min-width: 0;
@@ -4617,7 +4554,7 @@ class GraphFrontierView extends ItemView {
     }
     .panel-header {
       padding: 12px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid ${theme.border};
     }
     .panel-title {
       font-size: 13px;
@@ -4664,7 +4601,7 @@ class GraphFrontierView extends ItemView {
       margin: 0.4em 0;
       padding: 8px;
       border-radius: 6px;
-      background: rgba(0, 0, 0, 0.32);
+      background: ${bgColor};
       max-width: 100%;
       overflow-x: auto;
       overflow-y: hidden;
@@ -4682,7 +4619,7 @@ class GraphFrontierView extends ItemView {
         bottom: 8px;
         width: min(94vw, 430px);
         border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid ${theme.border};
       }
     }
   </style>
@@ -4707,6 +4644,7 @@ class GraphFrontierView extends ItemView {
   <script>
     const EXPORT_DATA = ${payloadJson};
     (() => {
+      const getLabelAppearance = ${getLabelAppearance.toString()};
       const canvas = document.getElementById('graph');
       const hud = document.getElementById('hud');
       const panelTitle = document.getElementById('panel-title');
@@ -4797,7 +4735,9 @@ class GraphFrontierView extends ItemView {
         const startY = Math.floor(topWorld / gridStep) * gridStep;
         const endY = Math.ceil(bottomWorld / gridStep) * gridStep;
 
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.save();
+        ctx.globalAlpha = EXPORT_DATA.theme.gridOpacity;
+        ctx.strokeStyle = EXPORT_DATA.theme.grid;
         ctx.lineWidth = 1;
         ctx.beginPath();
         for (let x = startX; x <= endX; x += gridStep) {
@@ -4811,6 +4751,7 @@ class GraphFrontierView extends ItemView {
           ctx.lineTo(viewWidth, sy);
         }
         ctx.stroke();
+        ctx.restore();
       }
 
       function drawEdges() {
@@ -4837,7 +4778,6 @@ class GraphFrontierView extends ItemView {
 
       function drawNodes() {
         const selectedNeighbors = selectedNodeId ? neighborsById.get(selectedNodeId) || new Set() : new Set();
-        const labelFadeRange = Math.max(0.001, labelMinZoom * 0.35);
         for (const node of EXPORT_DATA.nodes) {
           const point = worldToScreen(node.x, node.y);
           if (point.x < -80 || point.x > viewWidth + 80 || point.y < -80 || point.y > viewHeight + 80) continue;
@@ -4857,7 +4797,8 @@ class GraphFrontierView extends ItemView {
 
           if (isHovered || isSelected) {
             ctx.save();
-            ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = EXPORT_DATA.theme.selection;
             ctx.lineWidth = isSelected ? 1.8 : 1.3;
             ctx.beginPath();
             ctx.arc(point.x, point.y, radius + 2, 0, Math.PI * 2);
@@ -4865,13 +4806,12 @@ class GraphFrontierView extends ItemView {
             ctx.restore();
           }
 
-          if (camera.zoom >= labelMinZoom) {
-            const labelAlpha = Math.min(1, 0.15 + (camera.zoom - labelMinZoom) / labelFadeRange);
+          const label = getLabelAppearance(camera.zoom, labelMinZoom, labelFontSize, alpha, isHovered || isSelected);
+          if (label.alpha > 0) {
             ctx.save();
-            ctx.globalAlpha = alpha * labelAlpha;
-            ctx.fillStyle = 'rgba(235,241,250,0.96)';
-            const fontPx = Math.max(8, labelFontSize * camera.zoom);
-            ctx.font = fontPx + 'px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+            ctx.globalAlpha = label.alpha;
+            ctx.fillStyle = EXPORT_DATA.theme.text;
+            ctx.font = label.fontSize + 'px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
             ctx.fillText(String(node.label || ''), point.x, point.y - radius - 4);
@@ -4901,7 +4841,8 @@ class GraphFrontierView extends ItemView {
         const boxX = Math.max(6, Math.min(viewWidth - boxWidth - 6, point.x - boxWidth / 2));
         const boxY = Math.max(6, point.y - boxHeight - 10);
 
-        ctx.fillStyle = 'rgba(9,12,17,0.75)';
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = EXPORT_DATA.theme.surface;
         ctx.beginPath();
         ctx.moveTo(boxX + radius, boxY);
         ctx.lineTo(boxX + boxWidth - radius, boxY);
@@ -4914,7 +4855,7 @@ class GraphFrontierView extends ItemView {
         ctx.arcTo(boxX, boxY, boxX + radius, boxY, radius);
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,1)';
+        ctx.fillStyle = EXPORT_DATA.theme.text;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.fillText(text, boxX + padX, boxY + padY);
@@ -5889,105 +5830,101 @@ class GraphFrontierView extends ItemView {
     const silent = !!options.silent;
     if (this.isSearchFilled()) {
       if (!silent) new Notice('Clear search field to save');
-      return;
+      return false;
     }
-    const savedPositions = {};
+    const sourceData = this.plugin.data;
+    const layoutName = this.plugin.normalizeLayoutFileName(
+      options.layoutFileName || this.plugin.getActiveLayoutFileName()
+    );
+    return this.plugin.runLayoutFileOperation(async () => {
+      // A queued save belongs to the layout on which it was requested.
+      if (this.plugin.data !== sourceData || this.isSearchFilled()) return false;
+      this.layoutAutosaveDirty = true;
+      const snapshot = this.captureLayoutSnapshot(layoutName);
+      const nodeCount = this.nodes.length;
+      const snapshotText = JSON.stringify(snapshot);
+      const editVersion = this.layoutEditVersion;
+      const persistRevision = this.plugin._persistRevision;
+      let written = false;
+      try {
+        written = await this.plugin.persistActiveLayoutFile(snapshot, layoutName);
+      } catch {
+        written = false;
+      }
+      if (!written) {
+        if (!silent) new Notice('Failed to save layout. Changes are still unsaved.');
+        return false;
+      }
+      if (this.plugin.data === sourceData) {
+        const unchanged =
+          this.layoutEditVersion === editVersion &&
+          this.plugin._persistRevision === persistRevision &&
+          JSON.stringify(this.captureLayoutSnapshot(layoutName)) === snapshotText;
+        for (const key of [
+          'saved_positions',
+          'saved_layout_settings',
+          'saved_layout_pins',
+          'saved_layout_orbit_pins',
+        ]) {
+          sourceData[key] = snapshot[key];
+        }
+        sourceData.active_layout_name = layoutName;
+        this.layoutAutosaveDirty = !unchanged;
+        if (unchanged) {
+          this.layoutStillFrames = 0;
+          for (const node of this.nodes) {
+            node.vx = 0;
+            node.vy = 0;
+          }
+        }
+        this.plugin.schedulePersist();
+        this.syncLayoutFileSelectionFromPlugin();
+      }
+      if (!silent) new Notice(`Layout saved: ${nodeCount} nodes`);
+      return true;
+    });
+  }
+
+  captureLayoutSnapshot(layoutName) {
+    const snapshot = JSON.parse(JSON.stringify(this.plugin.normalizeData(this.plugin.data)));
+    snapshot.active_layout_name = layoutName;
+    // Merge, rather than prune, positions omitted by filters or incomplete metadata.
     for (const node of this.nodes) {
-      savedPositions[node.id] = { x: node.x, y: node.y };
-      node.vx = 0;
-      node.vy = 0;
+      snapshot.saved_positions[node.id] = { x: node.x, y: node.y };
     }
-    this.plugin.data.saved_positions = savedPositions;
-    this.plugin.data.saved_layout_settings = Object.assign({}, this.plugin.data.settings);
-    this.plugin.data.saved_layout_pins = {};
-    for (const [nodeId, pinMeta] of Object.entries(this.plugin.data.pins || {})) {
-      if (!pinMeta || typeof pinMeta !== 'object') continue;
-      const x = Number(pinMeta.x);
-      const y = Number(pinMeta.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const mode = pinMeta.mode === 'grid' ? 'grid' : 'exact';
-      this.plugin.data.saved_layout_pins[nodeId] = { x, y, mode };
-    }
-    this.plugin.data.saved_layout_orbit_pins = {};
-    for (const [nodeId, orbitMeta] of Object.entries(this.plugin.data.orbit_pins || {})) {
-      if (!orbitMeta || typeof orbitMeta !== 'object') continue;
-      const anchorId = String(orbitMeta.anchor_id || '').trim();
-      const radius = Number(orbitMeta.radius);
-      const angle = Number(orbitMeta.angle);
-      if (!anchorId || anchorId === nodeId) continue;
-      if (!Number.isFinite(radius) || radius <= 0) continue;
-      if (!Number.isFinite(angle)) continue;
-      this.plugin.data.saved_layout_orbit_pins[nodeId] = {
-        anchor_id: anchorId,
-        radius,
-        angle,
-      };
-      delete this.plugin.data.saved_layout_pins[nodeId];
-    }
-    this.layoutAutosaveDirty = false;
-    this.layoutStillFrames = 0;
-    this.plugin.schedulePersist();
-    await this.plugin.persistActiveLayoutFile();
-    if (!silent) new Notice(`Layout saved: ${this.nodes.length} nodes`);
+    snapshot.saved_layout_settings = Object.assign({}, snapshot.settings);
+    snapshot.saved_layout_pins = Object.assign({}, snapshot.pins);
+    snapshot.saved_layout_orbit_pins = Object.assign({}, snapshot.orbit_pins);
+    snapshot.view_state.side_panel_sections = {};
+    return snapshot;
   }
 
   async loadSavedLayout(options = {}) {
     const silent = !!options.silent;
-    const loaded = this.applySavedLayoutStateDataOnly();
+    const layoutName = options.layoutFileName || this.plugin.getActiveLayoutFileName();
+    const loaded = await this.plugin.setActiveLayoutFile(layoutName, { loadFromFile: true });
     if (!loaded) {
-      if (!silent) new Notice('No saved layout');
-      return;
+      new Notice(`Cannot read layout: ${layoutName}. Current changes kept.`);
+      this.syncLayoutFileSelectionFromPlugin();
+      return false;
     }
-
-    this.refreshFromVault({ keepCamera: true, forceSavedPositions: true, skipLayoutKick: true });
-    this.buildSidePanel();
-    this.plugin.schedulePersist();
+    const views = this.app.workspace
+      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
+      .map((leaf) => leaf.view);
+    if (!views.includes(this)) views.push(this);
+    for (const view of views) {
+      view.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
+      view.sidePanelSectionState = this.plugin.getSidePanelSectionsState();
+      view.syncLayoutFileSelectionFromPlugin();
+      view.layoutAutosaveDirty = false;
+      view.layoutStillFrames = 0;
+      view.layoutPaused = true;
+      if (!view.isOpen) continue;
+      view.refreshFromVault({ keepCamera: true, forceSavedPositions: true, skipLayoutKick: true });
+      view.buildSidePanel();
+    }
     this.plugin.renderAllViews();
     if (!silent) new Notice('Layout loaded');
-  }
-
-  applySavedLayoutStateDataOnly() {
-    const savedPositions = this.plugin.data.saved_positions || {};
-    const savedSettings = this.plugin.data.saved_layout_settings || {};
-    const savedPins = this.plugin.data.saved_layout_pins || {};
-    const savedOrbitPins = this.plugin.data.saved_layout_orbit_pins || {};
-
-    const hasSomethingToLoad =
-      Object.keys(savedPositions).length > 0 ||
-      Object.keys(savedSettings).length > 0 ||
-      Object.keys(savedPins).length > 0 ||
-      Object.keys(savedOrbitPins).length > 0;
-    if (!hasSomethingToLoad) return false;
-
-    this.plugin.data.settings = Object.assign({}, this.plugin.data.settings, savedSettings);
-    this.plugin.data.pins = {};
-    for (const [nodeId, pinMeta] of Object.entries(savedPins)) {
-      if (!pinMeta || typeof pinMeta !== 'object') continue;
-      const x = Number(pinMeta.x);
-      const y = Number(pinMeta.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const mode = pinMeta.mode === 'grid' ? 'grid' : 'exact';
-      this.plugin.data.pins[nodeId] = { x, y, mode };
-    }
-    this.plugin.data.orbit_pins = {};
-    for (const [nodeId, orbitMeta] of Object.entries(savedOrbitPins)) {
-      if (!orbitMeta || typeof orbitMeta !== 'object') continue;
-      const anchorId = String(orbitMeta.anchor_id || '').trim();
-      const radius = Number(orbitMeta.radius);
-      const angle = Number(orbitMeta.angle);
-      if (!anchorId || anchorId === nodeId) continue;
-      if (!Number.isFinite(radius) || radius <= 0) continue;
-      if (!Number.isFinite(angle)) continue;
-      this.plugin.data.orbit_pins[nodeId] = {
-        anchor_id: anchorId,
-        radius,
-        angle,
-      };
-      delete this.plugin.data.pins[nodeId];
-    }
-    this.plugin.data = this.plugin.normalizeData(this.plugin.data);
-    this.layoutAutosaveDirty = false;
-    this.layoutStillFrames = 0;
     return true;
   }
 
@@ -6124,14 +6061,12 @@ class GraphFrontierView extends ItemView {
     const zoom = Math.max(this.camera.zoom, 0.0001);
     const maxCandidateRadius = 4 + 2 / zoom;
 
-    if (!this.nodeSpatialIndex) {
-      this.getNodeSpatialIndex();
-    }
-
-    const spatialIndex = this.nodeSpatialIndex;
-    if (!spatialIndex) {
+    if (!this.isNodeSpatialIndexFresh()) {
+      // Moving nodes may have crossed buckets. Scan current coordinates without
+      // rebuilding the index (and allocating buckets) on every pointer event.
       return this.getNodeAtWorldByScan(world, visibleNodeIds, hasFilter, zoom, maxCandidateRadius);
     }
+    const spatialIndex = this.nodeSpatialIndex;
     const cellSize = spatialIndex.cellSize;
     const centerGX = Math.floor(world.x / cellSize);
     const centerGY = Math.floor(world.y / cellSize);

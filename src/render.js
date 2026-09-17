@@ -1,4 +1,5 @@
 const { DEFAULT_DATA, MAX_ZOOM, ZOOM_STEP_FACTOR } = require('./constants');
+const { DARK_THEME, getLabelAppearance } = require('./theme');
 
 // Focus dimming helper: computes alpha of non-focused graph elements.
 function getHoverDimAlpha(plugin, focusProgress) {
@@ -119,7 +120,9 @@ function drawFocusedNodeTitle(view, ctx, node) {
   const boxX = Math.max(6, Math.min(view.viewWidth - boxWidth - 6, point.x - boxWidth / 2));
   const boxY = Math.max(6, point.y - boxHeight - 10);
 
-  ctx.fillStyle = 'rgba(9, 12, 17, 0.55)';
+  const theme = view.canvasTheme || DARK_THEME;
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = theme.surface;
   ctx.beginPath();
   ctx.moveTo(boxX + radius, boxY);
   ctx.lineTo(boxX + boxWidth - radius, boxY);
@@ -133,7 +136,7 @@ function drawFocusedNodeTitle(view, ctx, node) {
   ctx.closePath();
   ctx.fill();
 
-  ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+  ctx.fillStyle = theme.text;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText(labelText, boxX + padX, boxY + padY);
@@ -311,7 +314,10 @@ function drawGrid(view, ctx) {
   const startY = Math.floor(topWorld / step) * step;
   const endY = Math.ceil(bottomWorld / step) * step;
 
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+  const theme = view.canvasTheme || DARK_THEME;
+  ctx.save();
+  ctx.globalAlpha = theme.gridOpacity;
+  ctx.strokeStyle = theme.grid;
   ctx.lineWidth = 1;
 
   ctx.beginPath();
@@ -328,6 +334,7 @@ function drawGrid(view, ctx) {
     ctx.lineTo(view.viewWidth, crispY);
   }
   ctx.stroke();
+  ctx.restore();
 }
 
 // Draw all edges with focus/fade interpolation and painted-edge overrides.
@@ -492,7 +499,7 @@ function drawNodes(view, ctx) {
   const screenCenterY = view.viewHeight / 2;
   const labelMinZoom = getLabelZoomThreshold(view);
   const labelFontSize = getLabelFontSize(view);
-  const labelFadeRange = Math.max(0.001, labelMinZoom * 0.35);
+  const theme = view.canvasTheme || DARK_THEME;
   const nowMs = Date.now();
   const visibleNodeIds = view.getFilterVisibleNodeIds();
   const hasFilter = visibleNodeIds instanceof Set;
@@ -598,24 +605,25 @@ function drawNodes(view, ctx) {
       const selectedStrokeAlpha = isSelectedNode ? 0.95 : 0;
       const hoverLineWidth = 1 + hoverVisualProgress;
       const selectedLineWidth = isSelectedNode ? 1.4 : 0;
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(hoverStrokeAlpha, selectedStrokeAlpha)})`;
+      ctx.globalAlpha = Math.max(hoverStrokeAlpha, selectedStrokeAlpha);
+      ctx.strokeStyle = theme.selection;
       ctx.lineWidth = Math.max(hoverLineWidth, selectedLineWidth);
       ctx.beginPath();
       ctx.arc(pointX, pointY, radius + 2, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    const labelAlphaRaw = (zoom - labelMinZoom) / labelFadeRange;
-    const labelAlphaBase = Math.max(0, Math.min(1, labelAlphaRaw));
-    const hoverLabelBoost = hoverVisualProgress;
-    const labelAlpha = isAttachmentNode ? 0 : Math.max(labelAlphaBase, hoverLabelBoost);
-    if (labelAlpha > 0.01) {
-      const zoomedFontSize = Math.max(1, labelFontSize * zoom);
-      ctx.globalAlpha = labelAlpha * nodeAlpha;
-      ctx.fillStyle =
-        hoverLabelBoost > 0.001 ? 'rgba(255, 235, 164, 1)' : 'rgba(238, 243, 252, 0.95)';
-      ctx.font = `${zoomedFontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+    const label = getLabelAppearance(
+      zoom,
+      labelMinZoom,
+      labelFontSize,
+      nodeAlpha,
+      isSelectedNode || isHover || isFocusNode
+    );
+    if (!isAttachmentNode && label.alpha > 0) {
+      ctx.globalAlpha = label.alpha;
+      ctx.fillStyle = theme.text;
+      ctx.font = `${label.fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillText(node.label, pointX, pointY + radius + 8);
@@ -641,11 +649,14 @@ function drawSelectionBox(view, ctx) {
   if (width < 1 && height < 1) return;
 
   ctx.save();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  const theme = view.canvasTheme || DARK_THEME;
+  ctx.fillStyle = theme.selection;
+  ctx.strokeStyle = theme.selection;
   ctx.lineWidth = 1;
   ctx.setLineDash([5, 3]);
+  ctx.globalAlpha = 0.12;
   ctx.fillRect(left, top, width, height);
+  ctx.globalAlpha = 0.9;
   ctx.strokeRect(left, top, width, height);
   ctx.restore();
 }
