@@ -1,5 +1,6 @@
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
+const { addNoteNavigationActions } = require('./note-navigation');
 
 const {
   DEFAULT_DATA,
@@ -31,6 +32,7 @@ const {
   getNodeRadius: getNodeRadiusRender,
   getLabelZoomThreshold: getLabelZoomThresholdRender,
   getLabelFontSize: getLabelFontSizeRender,
+  getLabelMinimumSize: getLabelMinimumSizeRender,
   getGroupColorForNode: getGroupColorForNodeRender,
   nodeMatchesParsedGroup: nodeMatchesParsedGroupRender,
   drawGrid: drawGridRender,
@@ -3860,6 +3862,9 @@ class GraphFrontierView extends ItemView {
       typeof abstractFile.extension === 'string' &&
       abstractFile.extension.toLowerCase() === 'md';
 
+    if (isMarkdownNode) {
+      addNoteNavigationActions(menu, this.app, abstractFile, this.contentEl.win);
+    }
     if (isMarkdownNode && typeof this.app.workspace.trigger === 'function') {
       this.app.workspace.trigger('file-menu', menu, abstractFile, 'graphfrontier', this.leaf);
       this.removeLinkedViewMenuItems(menu);
@@ -3925,6 +3930,35 @@ class GraphFrontierView extends ItemView {
           })
       );
       menu.addSeparator();
+    }
+
+    menu.addItem((item) => {
+      item.setTitle('Text size').setIcon('type');
+      const controls = item.dom.createDiv({ cls: 'graphfrontier-node-text-size' });
+      const input = controls.createEl('input', { type: 'range' });
+      input.min = '5';
+      input.max = '20';
+      input.step = '1';
+      input.setAttribute('aria-label', 'Node text size');
+      input.value = String(
+        this.plugin.getNodeLabelSize(node.id) ?? this.plugin.getSettings().label_font_size
+      );
+      const value = controls.createSpan({ text: input.value });
+      controls.addEventListener('click', (event) => event.stopPropagation());
+      controls.addEventListener('mousedown', (event) => event.stopPropagation());
+      controls.addEventListener('keydown', (event) => event.stopPropagation());
+      input.addEventListener('input', () => {
+        value.setText(input.value);
+        this.plugin.setNodeLabelSize(node.id, Number(input.value));
+      });
+    });
+    if (this.plugin.getNodeLabelSize(node.id) !== null) {
+      menu.addItem((item) =>
+        item
+          .setTitle('Use global text size')
+          .setIcon('reset')
+          .onClick(() => this.plugin.setNodeLabelSize(node.id, null))
+      );
     }
 
     const isStrongPullNode = this.plugin.isStrongPullNode(node.id);
@@ -4437,6 +4471,11 @@ class GraphFrontierView extends ItemView {
         return {
           id: node.id,
           label: String(node.label || ''),
+          labelMinimumSize: getLabelMinimumSizeRender(this, node.id),
+          labelFontSize:
+            this.plugin.getNodeLabelSize(node.id) === null
+              ? null
+              : this.plugin.getNodeLabelSize(node.id) / 5,
           x: Number(node.x) || 0,
           y: Number(node.y) || 0,
           degree: Number(node.degree) || 0,
@@ -4836,7 +4875,7 @@ class GraphFrontierView extends ItemView {
             ctx.restore();
           }
 
-          const label = getLabelAppearance(camera.zoom, labelMinZoom, labelFontSize, alpha, isHovered || isSelected);
+          const label = getLabelAppearance(camera.zoom, labelMinZoom, node.labelFontSize ?? labelFontSize, alpha, isHovered || isSelected, node.labelMinimumSize ?? 10);
           if (label.alpha > 0) {
             ctx.save();
             ctx.globalAlpha = label.alpha;

@@ -725,6 +725,22 @@
   gap: 8px;
 }
 
+.graphfrontier-node-text-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.graphfrontier-node-text-size input {
+  width: 100px;
+}
+
+.graphfrontier-node-text-size span {
+  width: 2ch;
+  font-variant-numeric: tabular-nums;
+}
+
 .graphfrontier-coord-input {
   width: 100%;
 }

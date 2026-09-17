@@ -126,6 +126,39 @@ test('Find keeps all matching nodes bright while another node has hover focus', 
   assert.equal(alphas[2], 1);
 });
 
+test('canvas global text size changes ordinary labels but not individual overrides', (t) => {
+  const { plugin, view, ctx, calls } = graph(t, 'dark');
+  view.nodes.push({ id: 'beta.md', label: 'Beta', x: 30, y: 0, degree: 0 });
+  view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
+  view.getSearchHighlightNodeIds = () => new Set(['alpha.md', 'beta.md']);
+  plugin.setNodeLabelSize('alpha.md', 15);
+  for (const zoom of [0.5, 1, 2, 8, 12]) {
+    view.camera.zoom = zoom;
+    let fixedSize;
+    let previousGlobalSize = 0;
+    for (const size of [5, 9, 15, 20]) {
+      plugin.data.settings.label_font_size = size;
+      calls.length = 0;
+      render.drawNodes(view, ctx);
+      const fonts = new Map(
+        calls
+          .filter((call) => call.kind === 'text')
+          .map((call) => [call.text, parseFloat(call.font)])
+      );
+      assert.ok(fonts.has('Alpha') && fonts.has('Beta'));
+      fixedSize ??= fonts.get('Alpha');
+      assert.equal(fonts.get('Alpha'), fixedSize, `override at zoom ${zoom}`);
+      assert.ok(fonts.get('Beta') > previousGlobalSize, `global ${size} at zoom ${zoom}`);
+      previousGlobalSize = fonts.get('Beta');
+    }
+  }
+  plugin.setNodeLabelSize('alpha.md', null);
+  calls.length = 0;
+  render.drawNodes(view, ctx);
+  const fonts = calls.filter((call) => call.kind === 'text').map((call) => call.font);
+  assert.equal(fonts[0], fonts[1], 'reset returns to global size');
+});
+
 for (const scheme of ['light', 'dark']) {
   test(`${scheme}: readable labels near threshold, themed grid and selection, no opacity leak`, (t) => {
     const { view, ctx, calls } = graph(t, scheme);

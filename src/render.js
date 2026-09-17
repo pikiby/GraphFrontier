@@ -189,9 +189,13 @@ function getLabelZoomThreshold(view) {
 }
 
 // Base label font scale used before camera zoom multiplier.
-function getLabelFontSize(view) {
+function getLabelMinimumSize(view, nodeId) {
+  return (10 * getLabelFontSize(view, nodeId)) / (DEFAULT_DATA.settings.label_font_size / 5);
+}
+
+function getLabelFontSize(view, nodeId) {
   const baseSize = view.plugin.clampNumber(
-    view.plugin.getSettings().label_font_size,
+    view.plugin.getNodeLabelSize(nodeId) ?? view.plugin.getSettings().label_font_size,
     5,
     20,
     DEFAULT_DATA.settings.label_font_size
@@ -498,7 +502,6 @@ function drawNodes(view, ctx) {
   const screenCenterX = view.viewWidth / 2;
   const screenCenterY = view.viewHeight / 2;
   const labelMinZoom = getLabelZoomThreshold(view);
-  const labelFontSize = getLabelFontSize(view);
   const theme = view.canvasTheme || DARK_THEME;
   const nowMs = Date.now();
   const visibleNodeIds = view.getFilterVisibleNodeIds();
@@ -628,9 +631,10 @@ function drawNodes(view, ctx) {
     const label = getLabelAppearance(
       zoom,
       labelMinZoom,
-      labelFontSize,
+      getLabelFontSize(view, node.id),
       nodeAlpha,
-      isSelectedNode || isHover || isFocusNode
+      isSelectedNode || isHover || isFocusNode,
+      getLabelMinimumSize(view, node.id)
     );
     if (!isAttachmentNode && label.alpha > 0) {
       ctx.globalAlpha = label.alpha;
@@ -682,6 +686,7 @@ module.exports = {
   getNodeRadius,
   getLabelZoomThreshold,
   getLabelFontSize,
+  getLabelMinimumSize,
   getGroupColorForNode,
   nodeMatchesParsedGroup,
   drawGrid,

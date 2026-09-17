@@ -16,6 +16,7 @@ const DEFAULT_DATA = {
   node_force_multipliers: {},
   strong_pull_nodes: {},
   painted_edge_colors: {},
+  node_label_sizes: {},
   groups: [],
   blacklist: [],
   whitelist: [],

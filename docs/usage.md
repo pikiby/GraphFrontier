@@ -34,8 +34,24 @@ Flow:
 
 ## Right-Click Context Menu On Node
 
+Notes with a `url` or `path` string in YAML properties have **Open URL** or **Open path**
+actions in their node's right-click menu:
+
+```yaml
+---
+url: https://example.com
+path: /home/user/Documents/project
+---
+```
+
+Either property can be used on its own. URLs open in the default browser. Vault-relative file
+paths open in Obsidian; external files and folders open through the desktop's default application.
+Paths can be absolute, vault-relative, or start with `~/`. External paths must exist on the
+current device. The note and normal node click behavior are unchanged.
+
 Typical operations:
 
+- Text size: adjust this node's label directly with the menu slider, or reset it with **Use global text size**.
 - Strong pull / Clear strong pull
 - Paint edges / Clear painted edges
 - Pin node / Pin to grid / Unpin node
