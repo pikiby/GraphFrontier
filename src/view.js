@@ -1,6 +1,6 @@
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
-const { addNoteNavigationActions } = require('./note-navigation');
+const { buildNodeContextMenu } = require('./node-context-menu');
 
 const {
   DEFAULT_DATA,
@@ -3854,84 +3854,11 @@ class GraphFrontierView extends ItemView {
   }
 
   showNodeContextMenu(node, clientX, clientY, sourceMouseEvent = null) {
-    const menu = new Menu(this.app);
-    const abstractFile = this.app.vault.getAbstractFileByPath(node.id);
-    const isMarkdownNode =
-      !!abstractFile &&
-      typeof abstractFile.path === 'string' &&
-      typeof abstractFile.extension === 'string' &&
-      abstractFile.extension.toLowerCase() === 'md';
+    const menu = buildNodeContextMenu(this, node, clientX, clientY);
+    this.showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent);
+  }
 
-    if (isMarkdownNode) {
-      addNoteNavigationActions(menu, this.app, abstractFile, this.contentEl.win);
-    }
-    if (isMarkdownNode && typeof this.app.workspace.trigger === 'function') {
-      this.app.workspace.trigger('file-menu', menu, abstractFile, 'graphfrontier', this.leaf);
-      this.removeLinkedViewMenuItems(menu);
-      menu.addSeparator();
-      menu.addItem((item) =>
-        item
-          .setTitle('Copy linked names')
-          .setIcon('copy')
-          .onClick(async () => {
-            await this.copyLinkedNames(node.id);
-          })
-      );
-      menu.addItem((item) =>
-        item
-          .setTitle('Copy linked paths')
-          .setIcon('copy')
-          .onClick(async () => {
-            await this.copyLinkedPaths(node.id);
-          })
-      );
-      menu.addSeparator();
-      menu.addItem((item) =>
-        item
-          .setTitle('Add to search')
-          .setIcon('search')
-          .onClick(() => {
-            this.applySearchSelectionFromNode(node, { forceSource: 'name' });
-          })
-      );
-      menu.addItem((item) =>
-        item
-          .setTitle('Show local graph')
-          .setIcon('dot-network')
-          .onClick(async () => {
-            await this.openLocalGraphForNode(node.id);
-          })
-      );
-      menu.addSeparator();
-    } else {
-      menu.addItem((item) =>
-        item
-          .setTitle('Copy linked names')
-          .setIcon('copy')
-          .onClick(async () => {
-            await this.copyLinkedNames(node.id);
-          })
-      );
-      menu.addItem((item) =>
-        item
-          .setTitle('Copy linked paths')
-          .setIcon('copy')
-          .onClick(async () => {
-            await this.copyLinkedPaths(node.id);
-          })
-      );
-      menu.addSeparator();
-      menu.addItem((item) =>
-        item
-          .setTitle('Add to search')
-          .setIcon('search')
-          .onClick(() => {
-            this.applySearchSelectionFromNode(node, { forceSource: 'name' });
-          })
-      );
-      menu.addSeparator();
-    }
-
+  addVisualSettingsToMenu(menu, node, clientX, clientY) {
     menu.addItem((item) => {
       item.setTitle('Text size').setIcon('type');
       const controls = item.dom.createDiv({ cls: 'graphfrontier-node-text-size' });
@@ -4011,73 +3938,6 @@ class GraphFrontierView extends ItemView {
           })
       );
     }
-    menu.addSeparator();
-
-    menu.addItem((item) =>
-      item
-        .setTitle('Pin node')
-        .setIcon('pin')
-        .onClick(async () => {
-          await this.pinNodeExact(node.id, { x: node.x, y: node.y });
-          new Notice(`Pinned: ${node.id}`);
-        })
-    );
-
-    menu.addItem((item) =>
-      item
-        .setTitle('Pin to grid')
-        .setIcon('pin')
-        .onClick(async () => {
-          await this.pinNodeToGrid(node.id, { x: node.x, y: node.y });
-          new Notice(`Pinned to grid: ${node.id}`);
-        })
-    );
-
-    const hasPinState = this.plugin.isPinned(node.id) || this.plugin.isOrbitPinned(node.id);
-    if (hasPinState) {
-      menu.addItem((item) =>
-        item
-          .setTitle('Unpin node')
-          .setIcon('pin-off')
-          .onClick(async () => {
-            this.plugin.removePin(node.id);
-            this.plugin.removeOrbitPin(node.id);
-            this.kickLayoutSearch();
-            new Notice(`Unpinned: ${node.id}`);
-          })
-      );
-    }
-    menu.addSeparator();
-
-    menu.addItem((item) =>
-      item
-        .setTitle('Select linked nodes')
-        .setIcon('check-square')
-        .onClick(() => {
-          this.selectLinkedNodes(node.id);
-        })
-    );
-
-    this.addContextSubmenuItem(menu, {
-      title: 'Pin/unpin linked',
-      icon: 'git-branch',
-      clientX,
-      clientY,
-      fillSubmenu: (submenu) => {
-        this.addLinkedNodesActionsToMenu(submenu, node.id);
-      },
-    });
-    this.addContextSubmenuItem(menu, {
-      title: 'Pin/unpin attachments',
-      icon: 'paperclip',
-      clientX,
-      clientY,
-      fillSubmenu: (submenu) => {
-        this.addAttachmentNodesActionsToMenu(submenu, node.id);
-      },
-    });
-
-    this.showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent);
   }
 
   addContextSubmenuItem(menu, options) {
@@ -5544,7 +5404,9 @@ class GraphFrontierView extends ItemView {
 
   // Linked-node bulk actions: pin, unpin, and pin-to-grid for neighbor nodes.
   getLinkedTargetOptions(options = {}) {
-    const targetKind = options.targetKind === 'attachment' ? 'attachment' : 'regular';
+    const targetKind = ['attachment', 'regular'].includes(options.targetKind)
+      ? options.targetKind
+      : 'all';
     const targetLabel =
       typeof options.targetLabel === 'string' && options.targetLabel.trim()
         ? options.targetLabel.trim()

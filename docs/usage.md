@@ -49,16 +49,16 @@ paths open in Obsidian; external files and folders open through the desktop's de
 Paths can be absolute, vault-relative, or start with `~/`. External paths must exist on the
 current device. The note and normal node click behavior are unchanged.
 
-Typical operations:
+The menu is arranged in this order:
 
-- Text size: adjust this node's label directly with the menu slider, or reset it with **Use global text size**.
-- Strong pull / Clear strong pull
-- Paint edges / Clear painted edges
-- Pin node / Pin to grid / Unpin node
-- Pin linked nodes / Pin linked nodes to grid
-- Pin linked to orbit / Unpin linked nodes
-- Add to search
-- Show local graph (for markdown files)
+- **Copy system root**, then **Copy**: Obsidian URL, vault-relative path, linked names and linked paths.
+- **Open path**, **Open URL**, then **Open**: same tab, new window, default app, system explorer and file navigation.
+- **Pin node**, **Pin to grid**, **Pin linked**, and **Unpin node**. Linked actions include both notes and attachments.
+- **Visual settings**: text size, strong pull and edge painting, including their reset actions.
+- **Select linked nodes**, **Bookmark**, then **Other**: move, bookmark, merge, add to search and local graph.
+- **Delete** at the bottom uses Obsidian's normal deletion confirmation.
+
+Actions appear only when applicable: YAML actions require the corresponding property, unpin actions require matching pins, and linked actions require linked nodes. The text-size slider changes only this node; **Use global text size** removes its override.
 
 ## Layout Persistence
 
