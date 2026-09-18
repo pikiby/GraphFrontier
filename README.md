@@ -48,33 +48,6 @@ https://github.com/pikiby/GraphFrontier/releases/download/0.7.4/graphfrontier-0.
 - General linked-pin actions now include both notes and attachments.
 - Renamed the absolute-path copy action to **Copy system root**.
 
-## Previous Updates (0.7.3)
-
-- Added individual node text sizes through the context-menu slider, independently of the global text-size setting.
-- Added Open URL and Open path actions from note YAML properties.
-- Find mode highlights all matching nodes, with an optional Show connections toggle.
-- Hover highlights neighboring nodes and links in both Find and Filter modes.
-- HTML exports preserve individual text sizes.
-
-## Previous Updates (0.7.2)
-
-- Graph backgrounds, grid, labels, selection indicators, tooltips, and controls now follow the active light or dark theme.
-- Improved label readability across zoom levels; selected and hovered node labels remain visible.
-- Standalone HTML exports preserve the graph's theme colours and label behaviour.
-- More reliable layout saving, loading, switching, and autosave, including paused and fully pinned graphs.
-- Background vault refreshes preserve restored layouts, and hit testing uses current node positions.
-- Added regression tests and release checks for metadata consistency and packaged assets.
-
-## Previous Updates (0.7.1)
-
-- Improved performance and interaction responsiveness on large graphs.
-- Restored linked-node highlighting when selecting a node from search.
-- Fixed static HTML export so `Export to` always writes a working `.html` graph file.
-- Static HTML exports include pan, zoom, hover labels, node selection, and a file-content side panel.
-- Layout handling is now file-based: choose a layout, save/load it, and keep autosave tied to the active layout.
-- Added blacklist and whitelist filtering sections for always-on graph visibility rules.
-- Added multi-selection tools, linked-node selection, and copy-linked names/paths actions.
-
 ## Features
 
 <table style="border-collapse: collapse; width: 100%;">
