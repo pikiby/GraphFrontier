@@ -51,8 +51,15 @@ function readGraphTheme(element) {
 }
 
 // Self-contained: embedded verbatim into static exports to keep label rules identical.
-function getLabelAppearance(zoom, minZoom, baseSize, nodeAlpha = 1, emphasized = false) {
-  const fontSize = Math.max(10, baseSize * zoom);
+function getLabelAppearance(
+  zoom,
+  minZoom,
+  baseSize,
+  nodeAlpha = 1,
+  emphasized = false,
+  minimumSize = 10
+) {
+  const fontSize = Math.max(minimumSize, baseSize * zoom);
   if (emphasized) return { alpha: 1, fontSize };
   if (zoom < minZoom) return { alpha: 0, fontSize };
   const fade = Math.max(0, Math.min(1, (zoom - minZoom) / Math.max(0.001, minZoom * 0.35)));

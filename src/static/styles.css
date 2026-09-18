@@ -384,11 +384,21 @@
 }
 
 .graphfrontier-find-mode-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+}
+
+.graphfrontier-search-connections {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-normal);
 }
 
 .graphfrontier-find-mode-controls {
@@ -713,6 +723,22 @@
 .graphfrontier-coord-form {
   display: grid;
   gap: 8px;
+}
+
+.graphfrontier-node-text-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.graphfrontier-node-text-size input {
+  width: 100px;
+}
+
+.graphfrontier-node-text-size span {
+  width: 2ch;
+  font-variant-numeric: tabular-nums;
 }
 
 .graphfrontier-coord-input {

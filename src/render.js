@@ -40,9 +40,7 @@ function stepFocusSmoothing(view) {
   if (targetFocusNodeId) view.focusNodeId = targetFocusNodeId;
   else if (view.focusProgress <= 0.001) view.focusNodeId = null;
 
-  const baseSearchFocusNodeId = view.getFilterNodeId() || view.getFindFocusNodeId();
-  const hoverTargetNodeId =
-    view.hoverNodeId && view.hoverNodeId !== baseSearchFocusNodeId ? view.hoverNodeId : null;
+  const hoverTargetNodeId = view.hoverNodeId || null;
 
   if (hoverTargetNodeId && hoverTargetNodeId !== view.hoverFocusNodeId) {
     if (view.hoverFocusNodeId && view.hoverFocusProgress > 0.001) {
@@ -191,9 +189,13 @@ function getLabelZoomThreshold(view) {
 }
 
 // Base label font scale used before camera zoom multiplier.
-function getLabelFontSize(view) {
+function getLabelMinimumSize(view, nodeId) {
+  return (10 * getLabelFontSize(view, nodeId)) / (DEFAULT_DATA.settings.label_font_size / 5);
+}
+
+function getLabelFontSize(view, nodeId) {
   const baseSize = view.plugin.clampNumber(
-    view.plugin.getSettings().label_font_size,
+    view.plugin.getNodeLabelSize(nodeId) ?? view.plugin.getSettings().label_font_size,
     5,
     20,
     DEFAULT_DATA.settings.label_font_size
@@ -379,13 +381,12 @@ function drawEdges(view, ctx) {
   const combinedFocusProgress = Math.max(focusProgress, hoverFocusProgress, hoverFadeProgress);
   const searchHighlightNodeIds = view.getSearchHighlightNodeIds();
   const hasSearchHighlight =
-    !hasFilter &&
-    !hasAnyFocus &&
+    view.searchMode === 'find' &&
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
   const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
-  const normalEdgeAlpha = hasAnyFocus ? focusDimAlpha : hasSearchHighlight ? searchDimAlpha : 1;
+  const normalEdgeAlpha = hasSearchHighlight ? searchDimAlpha : hasAnyFocus ? focusDimAlpha : 1;
   const paintedEdgeColors = view.plugin.data?.painted_edge_colors || {};
   let hasNormalEdgeBatch = false;
 
@@ -433,17 +434,20 @@ function drawEdges(view, ctx) {
     const targetPaintColor = paintedEdgeColors[targetNode.id] || null;
     const paintedColor = sourcePaintColor || targetPaintColor;
 
-    const isPrimaryFocusEdge =
-      !!focusNodeId && (edge.source === focusNodeId || edge.target === focusNodeId);
     const isHoverFocusEdge =
       !!hoverFocusNodeId && (edge.source === hoverFocusNodeId || edge.target === hoverFocusNodeId);
     const isHoverFadeEdge =
       !!hoverFadeNodeId && (edge.source === hoverFadeNodeId || edge.target === hoverFadeNodeId);
-    const primaryFocusEdgeProgress = isPrimaryFocusEdge ? focusProgress : 0;
     const hoverFocusEdgeProgress = isHoverFocusEdge ? hoverFocusProgress : 0;
     const hoverFadeEdgeProgress = isHoverFadeEdge ? hoverFadeProgress : 0;
+    const searchEdgeProgress =
+      hasSearchHighlight &&
+      view.plugin.getSettings().show_search_connections &&
+      (searchHighlightNodeIds.has(edge.source) || searchHighlightNodeIds.has(edge.target))
+        ? 1
+        : 0;
     const focusEdgeProgress = Math.max(
-      primaryFocusEdgeProgress,
+      searchEdgeProgress,
       hoverFocusEdgeProgress,
       hoverFadeEdgeProgress
     );
@@ -456,10 +460,10 @@ function drawEdges(view, ctx) {
     }
 
     flushNormalEdgeBatch();
-    const edgeAlpha = hasAnyFocus
-      ? focusDimAlpha + (1 - focusDimAlpha) * focusEdgeProgress
-      : hasSearchHighlight
-        ? searchDimAlpha
+    const edgeAlpha = hasSearchHighlight
+      ? searchDimAlpha + (1 - searchDimAlpha) * focusEdgeProgress
+      : hasAnyFocus
+        ? focusDimAlpha + (1 - focusDimAlpha) * focusEdgeProgress
         : 1;
     ctx.globalAlpha = edgeAlpha;
 
@@ -498,7 +502,6 @@ function drawNodes(view, ctx) {
   const screenCenterX = view.viewWidth / 2;
   const screenCenterY = view.viewHeight / 2;
   const labelMinZoom = getLabelZoomThreshold(view);
-  const labelFontSize = getLabelFontSize(view);
   const theme = view.canvasTheme || DARK_THEME;
   const nowMs = Date.now();
   const visibleNodeIds = view.getFilterVisibleNodeIds();
@@ -506,7 +509,6 @@ function drawNodes(view, ctx) {
   const focusNodeId = view.focusNodeId;
   const focusProgress = view.focusProgress;
   const hasFocus = !!focusNodeId && focusProgress > 0.001;
-  const focusNeighbors = hasFocus ? view.neighborsById.get(focusNodeId) || new Set() : new Set();
   const hoverFocusNodeId = view.hoverFocusNodeId;
   const hoverFocusProgress = view.hoverFocusProgress;
   const hasHoverFocus = !!hoverFocusNodeId && hoverFocusProgress > 0.001;
@@ -523,13 +525,19 @@ function drawNodes(view, ctx) {
   const combinedFocusProgress = Math.max(focusProgress, hoverFocusProgress, hoverFadeProgress);
   const searchHighlightNodeIds = view.getSearchHighlightNodeIds();
   const hasSearchHighlight =
-    !hasFilter &&
-    !hasAnyFocus &&
+    view.searchMode === 'find' &&
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
   const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
   const groupColorByNodeId = getGroupColorMap(view);
+  const searchNeighbors = new Set();
+  if (hasSearchHighlight && view.plugin.getSettings().show_search_connections) {
+    for (const id of searchHighlightNodeIds) {
+      if (hasFilter && !visibleNodeIds.has(id)) continue;
+      for (const neighbor of view.neighborsById.get(id) || []) searchNeighbors.add(neighbor);
+    }
+  }
   const selectedNodeIds = view.selectedNodeIds instanceof Set ? view.selectedNodeIds : null;
 
   for (const node of view.nodes) {
@@ -546,11 +554,12 @@ function drawNodes(view, ctx) {
     const isHoverFocusNode = hasHoverFocus && node.id === hoverFocusNodeId;
     const isHoverNodeRaw = view.hoverNodeId === node.id;
     const isHoverFadeNode = hasHoverFade && node.id === hoverFadeNodeId;
-    const isSelectedNode = selectedNodeIds ? selectedNodeIds.has(node.id) : false;
+    const isSearchHighlightNode = hasSearchHighlight && searchHighlightNodeIds.has(node.id);
+    const isSelectedNode =
+      isSearchHighlightNode || (selectedNodeIds ? selectedNodeIds.has(node.id) : false);
     const focusNodeProgress = isFocusNode ? focusProgress : 0;
     const hoverFocusNodeProgress = isHoverFocusNode ? hoverFocusProgress : 0;
     const hoverFadeNodeProgress = isHoverFadeNode ? hoverFadeProgress : 0;
-    const focusNeighborProgress = hasFocus && focusNeighbors.has(node.id) ? focusProgress : 0;
     const hoverFocusNeighborProgress =
       hasHoverFocus && hoverFocusNeighbors.has(node.id) ? hoverFocusProgress : 0;
     const hoverFadeNeighborProgress =
@@ -559,7 +568,6 @@ function drawNodes(view, ctx) {
       focusNodeProgress,
       hoverFocusNodeProgress,
       hoverFadeNodeProgress,
-      focusNeighborProgress,
       hoverFocusNeighborProgress,
       hoverFadeNeighborProgress
     );
@@ -578,15 +586,22 @@ function drawNodes(view, ctx) {
     const isHover = hoverVisualProgress > 0.001;
     const isClickFlash = view.clickFlashNodeId === node.id && nowMs < view.clickFlashUntilMs;
     const groupColor = groupColorByNodeId instanceof Map ? groupColorByNodeId.get(node.id) : null;
-    const isSearchHighlightNode = hasSearchHighlight && searchHighlightNodeIds.has(node.id);
     const nodeAlpha = isClickFlash
       ? 1
-      : hasAnyFocus
-        ? focusDimAlpha + (1 - focusDimAlpha) * relationProgress
-        : hasSearchHighlight
-          ? isSearchHighlightNode
-            ? 1
-            : searchDimAlpha
+      : hasSearchHighlight
+        ? isSearchHighlightNode
+          ? 1
+          : searchDimAlpha +
+            (1 - searchDimAlpha) *
+              Math.max(
+                searchNeighbors.has(node.id) ? 1 : 0,
+                hoverFocusNodeProgress,
+                hoverFadeNodeProgress,
+                hoverFocusNeighborProgress,
+                hoverFadeNeighborProgress
+              )
+        : hasAnyFocus
+          ? focusDimAlpha + (1 - focusDimAlpha) * relationProgress
           : 1;
 
     const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
@@ -616,9 +631,10 @@ function drawNodes(view, ctx) {
     const label = getLabelAppearance(
       zoom,
       labelMinZoom,
-      labelFontSize,
+      getLabelFontSize(view, node.id),
       nodeAlpha,
-      isSelectedNode || isHover || isFocusNode
+      isSelectedNode || isHover || isFocusNode,
+      getLabelMinimumSize(view, node.id)
     );
     if (!isAttachmentNode && label.alpha > 0) {
       ctx.globalAlpha = label.alpha;
@@ -670,6 +686,7 @@ module.exports = {
   getNodeRadius,
   getLabelZoomThreshold,
   getLabelFontSize,
+  getLabelMinimumSize,
   getGroupColorForNode,
   nodeMatchesParsedGroup,
   drawGrid,

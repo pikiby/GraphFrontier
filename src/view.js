@@ -1,5 +1,6 @@
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
+const { buildNodeContextMenu } = require('./node-context-menu');
 
 const {
   DEFAULT_DATA,
@@ -31,6 +32,7 @@ const {
   getNodeRadius: getNodeRadiusRender,
   getLabelZoomThreshold: getLabelZoomThresholdRender,
   getLabelFontSize: getLabelFontSizeRender,
+  getLabelMinimumSize: getLabelMinimumSizeRender,
   getGroupColorForNode: getGroupColorForNodeRender,
   nodeMatchesParsedGroup: nodeMatchesParsedGroupRender,
   drawGrid: drawGridRender,
@@ -1028,6 +1030,20 @@ class GraphFrontierView extends ItemView {
     });
     this.searchClearButtonEl = clearButton;
 
+    const connectionsRow = section.createDiv({ cls: 'graphfrontier-search-connections' });
+    this.searchConnectionsToggleEl = connectionsRow.createEl('button', {
+      cls: 'graphfrontier-toggle-btn graphfrontier-search-mode-toggle',
+      attr: { type: 'button', role: 'switch', 'aria-label': 'Show connections' },
+    });
+    connectionsRow.createSpan({ text: 'Show connections' });
+    this.registerDomEvent(this.searchConnectionsToggleEl, 'click', () => {
+      this.plugin.data.settings.show_search_connections =
+        !this.plugin.getSettings().show_search_connections;
+      this.syncSearchModeToggleUi();
+      this.plugin.schedulePersist();
+    });
+    this.syncSearchModeToggleUi();
+
     const getSuggestionPack = () => {
       const rawQuery = String(searchInput.value || '');
       return this.getSearchSuggestionPack(rawQuery, Number.POSITIVE_INFINITY);
@@ -1073,6 +1089,7 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(modeToggle, 'click', () => {
       this.searchMode = this.searchMode === 'filter' ? 'find' : 'filter';
       this.plugin.data.settings.search_mode = this.searchMode;
+      this.syncSearchMatchesLive();
       this.markSearchVisibilityDirty();
       this.syncSearchModeToggleUi();
       this.kickLayoutSearch();
@@ -1146,6 +1163,11 @@ class GraphFrontierView extends ItemView {
   }
 
   syncSearchModeToggleUi() {
+    if (this.searchConnectionsToggleEl) {
+      const enabled = this.plugin.getSettings().show_search_connections === true;
+      this.searchConnectionsToggleEl.toggleClass('is-on', enabled);
+      this.searchConnectionsToggleEl.setAttr('aria-checked', String(enabled));
+    }
     if (!this.searchModeToggleEl) return;
     const safeMode = this.searchMode === 'filter' ? 'filter' : 'find';
     this.searchModeToggleEl.toggleClass('is-on', safeMode === 'filter');
@@ -1478,7 +1500,17 @@ class GraphFrontierView extends ItemView {
       return matches;
     }
 
-    if (parsed.source === 'name') return matches;
+    if (parsed.source === 'name') {
+      for (const node of this.nodes) {
+        if (
+          String(node.label || '')
+            .toLowerCase()
+            .includes(queryText)
+        )
+          matches.add(node.id);
+      }
+      return matches;
+    }
 
     for (const node of this.nodes) {
       const meta = this.getNodeMetaForSearch(node);
@@ -1511,7 +1543,7 @@ class GraphFrontierView extends ItemView {
   syncSearchMatchesLive() {
     const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
     const parsed = this.parseSearchQuery(rawText);
-    if (!parsed.query || parsed.source === 'name') {
+    if (!parsed.query || (parsed.source === 'name' && this.searchMode === 'filter')) {
       this.cancelContentSearchIndexBuild();
       this.searchMatchedNodeIds = new Set();
       this.markSearchVisibilityDirty();
@@ -1534,7 +1566,7 @@ class GraphFrontierView extends ItemView {
       if (this.searchMode === 'filter') this.kickLayoutSearch();
       return;
     }
-    if (parsed.source === 'name') {
+    if (parsed.source === 'name' && this.searchMode === 'filter') {
       this.searchMatchedNodeIds = new Set();
       const bestNode = this.getBestMatchingNodeByName(parsed.query);
       if (!bestNode) {
@@ -3822,79 +3854,38 @@ class GraphFrontierView extends ItemView {
   }
 
   showNodeContextMenu(node, clientX, clientY, sourceMouseEvent = null) {
-    const menu = new Menu(this.app);
-    const abstractFile = this.app.vault.getAbstractFileByPath(node.id);
-    const isMarkdownNode =
-      !!abstractFile &&
-      typeof abstractFile.path === 'string' &&
-      typeof abstractFile.extension === 'string' &&
-      abstractFile.extension.toLowerCase() === 'md';
+    const menu = buildNodeContextMenu(this, node, clientX, clientY);
+    this.showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent);
+  }
 
-    if (isMarkdownNode && typeof this.app.workspace.trigger === 'function') {
-      this.app.workspace.trigger('file-menu', menu, abstractFile, 'graphfrontier', this.leaf);
-      this.removeLinkedViewMenuItems(menu);
-      menu.addSeparator();
+  addVisualSettingsToMenu(menu, node, clientX, clientY) {
+    menu.addItem((item) => {
+      item.setTitle('Text size').setIcon('type');
+      const controls = item.dom.createDiv({ cls: 'graphfrontier-node-text-size' });
+      const input = controls.createEl('input', { type: 'range' });
+      input.min = '5';
+      input.max = '20';
+      input.step = '1';
+      input.setAttribute('aria-label', 'Node text size');
+      input.value = String(
+        this.plugin.getNodeLabelSize(node.id) ?? this.plugin.getSettings().label_font_size
+      );
+      const value = controls.createSpan({ text: input.value });
+      controls.addEventListener('click', (event) => event.stopPropagation());
+      controls.addEventListener('mousedown', (event) => event.stopPropagation());
+      controls.addEventListener('keydown', (event) => event.stopPropagation());
+      input.addEventListener('input', () => {
+        value.setText(input.value);
+        this.plugin.setNodeLabelSize(node.id, Number(input.value));
+      });
+    });
+    if (this.plugin.getNodeLabelSize(node.id) !== null) {
       menu.addItem((item) =>
         item
-          .setTitle('Copy linked names')
-          .setIcon('copy')
-          .onClick(async () => {
-            await this.copyLinkedNames(node.id);
-          })
+          .setTitle('Use global text size')
+          .setIcon('reset')
+          .onClick(() => this.plugin.setNodeLabelSize(node.id, null))
       );
-      menu.addItem((item) =>
-        item
-          .setTitle('Copy linked paths')
-          .setIcon('copy')
-          .onClick(async () => {
-            await this.copyLinkedPaths(node.id);
-          })
-      );
-      menu.addSeparator();
-      menu.addItem((item) =>
-        item
-          .setTitle('Add to search')
-          .setIcon('search')
-          .onClick(() => {
-            this.applySearchSelectionFromNode(node, { forceSource: 'name' });
-          })
-      );
-      menu.addItem((item) =>
-        item
-          .setTitle('Show local graph')
-          .setIcon('dot-network')
-          .onClick(async () => {
-            await this.openLocalGraphForNode(node.id);
-          })
-      );
-      menu.addSeparator();
-    } else {
-      menu.addItem((item) =>
-        item
-          .setTitle('Copy linked names')
-          .setIcon('copy')
-          .onClick(async () => {
-            await this.copyLinkedNames(node.id);
-          })
-      );
-      menu.addItem((item) =>
-        item
-          .setTitle('Copy linked paths')
-          .setIcon('copy')
-          .onClick(async () => {
-            await this.copyLinkedPaths(node.id);
-          })
-      );
-      menu.addSeparator();
-      menu.addItem((item) =>
-        item
-          .setTitle('Add to search')
-          .setIcon('search')
-          .onClick(() => {
-            this.applySearchSelectionFromNode(node, { forceSource: 'name' });
-          })
-      );
-      menu.addSeparator();
     }
 
     const isStrongPullNode = this.plugin.isStrongPullNode(node.id);
@@ -3947,73 +3938,6 @@ class GraphFrontierView extends ItemView {
           })
       );
     }
-    menu.addSeparator();
-
-    menu.addItem((item) =>
-      item
-        .setTitle('Pin node')
-        .setIcon('pin')
-        .onClick(async () => {
-          await this.pinNodeExact(node.id, { x: node.x, y: node.y });
-          new Notice(`Pinned: ${node.id}`);
-        })
-    );
-
-    menu.addItem((item) =>
-      item
-        .setTitle('Pin to grid')
-        .setIcon('pin')
-        .onClick(async () => {
-          await this.pinNodeToGrid(node.id, { x: node.x, y: node.y });
-          new Notice(`Pinned to grid: ${node.id}`);
-        })
-    );
-
-    const hasPinState = this.plugin.isPinned(node.id) || this.plugin.isOrbitPinned(node.id);
-    if (hasPinState) {
-      menu.addItem((item) =>
-        item
-          .setTitle('Unpin node')
-          .setIcon('pin-off')
-          .onClick(async () => {
-            this.plugin.removePin(node.id);
-            this.plugin.removeOrbitPin(node.id);
-            this.kickLayoutSearch();
-            new Notice(`Unpinned: ${node.id}`);
-          })
-      );
-    }
-    menu.addSeparator();
-
-    menu.addItem((item) =>
-      item
-        .setTitle('Select linked nodes')
-        .setIcon('check-square')
-        .onClick(() => {
-          this.selectLinkedNodes(node.id);
-        })
-    );
-
-    this.addContextSubmenuItem(menu, {
-      title: 'Pin/unpin linked',
-      icon: 'git-branch',
-      clientX,
-      clientY,
-      fillSubmenu: (submenu) => {
-        this.addLinkedNodesActionsToMenu(submenu, node.id);
-      },
-    });
-    this.addContextSubmenuItem(menu, {
-      title: 'Pin/unpin attachments',
-      icon: 'paperclip',
-      clientX,
-      clientY,
-      fillSubmenu: (submenu) => {
-        this.addAttachmentNodesActionsToMenu(submenu, node.id);
-      },
-    });
-
-    this.showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent);
   }
 
   addContextSubmenuItem(menu, options) {
@@ -4407,6 +4331,11 @@ class GraphFrontierView extends ItemView {
         return {
           id: node.id,
           label: String(node.label || ''),
+          labelMinimumSize: getLabelMinimumSizeRender(this, node.id),
+          labelFontSize:
+            this.plugin.getNodeLabelSize(node.id) === null
+              ? null
+              : this.plugin.getNodeLabelSize(node.id) / 5,
           x: Number(node.x) || 0,
           y: Number(node.y) || 0,
           degree: Number(node.degree) || 0,
@@ -4806,7 +4735,7 @@ class GraphFrontierView extends ItemView {
             ctx.restore();
           }
 
-          const label = getLabelAppearance(camera.zoom, labelMinZoom, labelFontSize, alpha, isHovered || isSelected);
+          const label = getLabelAppearance(camera.zoom, labelMinZoom, node.labelFontSize ?? labelFontSize, alpha, isHovered || isSelected, node.labelMinimumSize ?? 10);
           if (label.alpha > 0) {
             ctx.save();
             ctx.globalAlpha = label.alpha;
@@ -5475,7 +5404,9 @@ class GraphFrontierView extends ItemView {
 
   // Linked-node bulk actions: pin, unpin, and pin-to-grid for neighbor nodes.
   getLinkedTargetOptions(options = {}) {
-    const targetKind = options.targetKind === 'attachment' ? 'attachment' : 'regular';
+    const targetKind = ['attachment', 'regular'].includes(options.targetKind)
+      ? options.targetKind
+      : 'all';
     const targetLabel =
       typeof options.targetLabel === 'string' && options.targetLabel.trim()
         ? options.targetLabel.trim()

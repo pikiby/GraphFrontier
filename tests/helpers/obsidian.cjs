@@ -19,6 +19,10 @@ function element() {
     addClass() {},
     removeClass() {},
     setAttr() {},
+    setAttribute() {},
+    addEventListener(name, callback) {
+      this.events[name] = callback;
+    },
     setText() {},
     toggleClass() {},
     createDiv(options) {
@@ -59,12 +63,54 @@ class ItemView {
   }
 }
 
+class Menu {
+  constructor() {
+    this.items = [];
+  }
+  addItem(build) {
+    const item = {
+      dom: element(),
+      setTitle(value) {
+        this.title = value;
+        return this;
+      },
+      setIcon(value) {
+        this.icon = value;
+        return this;
+      },
+      setDisabled(value) {
+        this.disabled = value;
+        return this;
+      },
+      setWarning(value) {
+        this.warning = value;
+        return this;
+      },
+      onClick(callback) {
+        this.callback = callback;
+        return this;
+      },
+      setSubmenu() {
+        this.submenu = new Menu();
+        return this.submenu;
+      },
+    };
+    build(item);
+    this.items.push(item);
+    return this;
+  }
+  addSeparator() {
+    this.items.push({ separator: true });
+    return this;
+  }
+}
+
 const obsidian = {
   Notice,
   Plugin,
   ItemView,
   Modal: class {},
-  Menu: class {},
+  Menu,
   MarkdownRenderer: {},
 };
 const sourceCache = new Map();

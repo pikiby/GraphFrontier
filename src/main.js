@@ -343,6 +343,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       node_force_multipliers: {},
       strong_pull_nodes: {},
       painted_edge_colors: {},
+      node_label_sizes: {},
       groups: [],
       blacklist: [],
       whitelist: [],
@@ -351,6 +352,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       view_state: Object.assign({}, DEFAULT_DATA.view_state, viewState),
     };
 
+    for (const [nodeId, size] of Object.entries(safe.node_label_sizes || {})) {
+      if (typeof size !== 'number' || !Number.isFinite(size)) continue;
+      normalized.node_label_sizes[nodeId] = this.clampNumber(size, 5, 20, 9);
+    }
     for (const [nodeId, position] of Object.entries(pins)) {
       if (!position || typeof position !== 'object') continue;
       const x = Number(position.x);
@@ -544,6 +549,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.hide_orphans = !!normalized.settings.hide_orphans;
     normalized.settings.hide_attachments = !!normalized.settings.hide_attachments;
     normalized.settings.existing_files_only = !!normalized.settings.existing_files_only;
+    normalized.settings.show_search_connections =
+      normalized.settings.show_search_connections === true;
     normalized.settings.search_mode =
       normalized.settings.search_mode === 'filter' || normalized.settings.search_mode === 'filtr'
         ? 'filter'
@@ -1154,6 +1161,19 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     if (!this.data.orbit_pins?.[nodeId]) return;
     delete this.data.orbit_pins[nodeId];
     this.schedulePersist();
+  }
+
+  getNodeLabelSize(nodeId) {
+    return this.data.node_label_sizes?.[nodeId] ?? null;
+  }
+
+  setNodeLabelSize(nodeId, size) {
+    if (size !== null && (typeof size !== 'number' || !Number.isFinite(size))) return;
+    this.data.node_label_sizes ??= {};
+    if (size === null) delete this.data.node_label_sizes[nodeId];
+    else this.data.node_label_sizes[nodeId] = this.clampNumber(size, 5, 20, 9);
+    this.schedulePersist();
+    this.renderAllViews();
   }
 
   getNodeMultiplier(nodeId) {
