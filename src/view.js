@@ -2782,7 +2782,7 @@ class GraphFrontierView extends ItemView {
       this.hasSeenMetadataResolvedRefresh = true;
     }
     const graphData = this.plugin.collectGraphData();
-    this.syncGraphRuntimeState(graphData, { forceSavedPositions });
+    const { topologyChanged } = this.syncGraphRuntimeState(graphData, { forceSavedPositions });
     this.markGraphVisibilityDirty();
 
     if (this.searchSelectedNodeId && !this.nodeById.has(this.searchSelectedNodeId)) {
@@ -2809,7 +2809,7 @@ class GraphFrontierView extends ItemView {
       this.layoutPaused = true;
       this.layoutStillFrames = 0;
       if (forceSavedPositions) this.layoutAutosaveDirty = false;
-    } else if (!passive) {
+    } else if (!passive || topologyChanged) {
       this.kickLayoutSearch();
     }
     this.render();
@@ -2870,6 +2870,7 @@ class GraphFrontierView extends ItemView {
    */
   syncGraphRuntimeState(graphData, options = {}) {
     const oldNodes = this.nodeById;
+    const oldNeighborsById = this.neighborsById;
     const { nextNodes, nextNodeById } = this.buildNextNodesFromGraphData(
       graphData.nodes,
       oldNodes,
@@ -2880,6 +2881,11 @@ class GraphFrontierView extends ItemView {
       nextNodeById,
       nextNodes
     );
+    const topologyChanged =
+      oldNodes.size !== nextNodeById.size ||
+      nextNodes.some((node) => !oldNodes.has(node.id)) ||
+      this.edges.length !== nextEdges.length ||
+      nextEdges.some((edge) => !oldNeighborsById.get(edge.source)?.has(edge.target));
 
     this.applyOrbitPinnedPositions(nextNodes, nextNodeById);
 
@@ -2906,6 +2912,7 @@ class GraphFrontierView extends ItemView {
     this.nodeSpatialIndex = null;
     this.nodeSpatialIndexBuildVersion = -1;
     this.markNodeSpatialIndexDirty();
+    return { topologyChanged };
   }
 
   buildNextNodesFromGraphData(rawNodes, oldNodes, options = {}) {

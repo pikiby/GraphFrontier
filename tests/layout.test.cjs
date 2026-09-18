@@ -439,8 +439,8 @@ test('onOpen synchronizes search mode from disk before building controls', async
   assert.deepEqual(modesAtBuild, ['filter']);
 });
 
-test('metadata/vault refresh preserves restored pause, coordinates and clean or dirty state', async (t) => {
-  const { plugin, view, putLayout, events, flushTimers, graph } = fixture(t);
+test('topology-neutral metadata/vault refresh preserves pause, coordinates and dirty state', async (t) => {
+  const { plugin, view, putLayout, events, flushTimers } = fixture(t);
   putLayout({ saved_positions: { 'alpha.md': { x: 15, y: 25 }, hidden: { x: 70, y: 80 } } });
   await plugin.onload();
   await view.onOpen();
@@ -459,12 +459,38 @@ test('metadata/vault refresh preserves restored pause, coordinates and clean or 
     assert.equal(view.nodeById.get('alpha.md').x, 15);
     assert.deepEqual(plugin.data.saved_positions.hidden, { x: 70, y: 80 });
   }
+});
+
+test('adding a node through a passive vault refresh wakes settled physics', async (t) => {
+  const { plugin, view, putLayout, events, flushTimers, graph } = fixture(t);
+  putLayout({ saved_positions: { 'alpha.md': { x: 15, y: 25 } } });
+  await plugin.onload();
+  await view.onOpen();
+  assert.equal(view.layoutPaused, true);
+
   graph.nodes.push({ id: 'late.md', label: 'late' });
   plugin.data.saved_positions['late.md'] = { x: 600, y: 700 };
   events.create({ path: 'late.md' });
   flushTimers();
   assert.equal(view.nodeById.get('late.md').x, 600);
-  assert.equal(view.layoutPaused, true);
+  assert.equal(view.layoutPaused, false);
+  assert.equal(view.layoutAutosaveDirty, true);
+  assert.equal(view.layoutStillFrames, 0);
+});
+
+test('adding an edge through a passive metadata refresh wakes settled physics', (t) => {
+  const { view, graph } = fixture(t);
+  graph.nodes.push({ id: 'beta.md', label: 'beta' });
+  view.refreshFromVault({ keepCamera: true, skipLayoutKick: true });
+  view.layoutAutosaveDirty = false;
+  view.layoutStillFrames = 5;
+
+  graph.edges.push({ source: 'alpha.md', target: 'beta.md' });
+  view.refreshFromVault({ keepCamera: true, passive: true, metadataResolved: true });
+
+  assert.equal(view.layoutPaused, false);
+  assert.equal(view.layoutAutosaveDirty, true);
+  assert.equal(view.layoutStillFrames, 0);
 });
 
 test('passive refresh preserves an already-running layout, while deliberate settings still kick', (t) => {

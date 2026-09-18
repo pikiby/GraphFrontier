@@ -32,21 +32,19 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.7.4/graphfrontier-0.7.4.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.7.5/graphfrontier-0.7.5.zip
 
-1. Download `graphfrontier-0.7.4.zip` from Releases
+1. Download `graphfrontier-0.7.5.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
    - `Settings -> Community plugins -> GraphFrontier -> Enable`
 
-## Recent Updates (0.7.4)
+## Recent Updates (0.7.5)
 
-- Reorganized the node context menu into Copy, Open, Pin linked, Visual settings, and Other groups.
-- Added Delete at the bottom, using Obsidian's normal deletion confirmation.
-- Hide actions when they do not apply: missing YAML properties, absent pins, unavailable native actions, or no linked nodes.
-- General linked-pin actions now include both notes and attachments.
-- Renamed the absolute-path copy action to **Copy system root**.
+- New notes now enter the physics simulation immediately instead of remaining stationary until a node is moved.
+- Added and removed links now wake settled physics so graph topology updates arrange themselves automatically.
+- Ordinary content-only note updates remain passive and do not disturb an already settled layout.
 
 ## Features
 
