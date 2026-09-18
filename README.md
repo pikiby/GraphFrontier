@@ -32,15 +32,31 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.7.2/graphfrontier-0.7.2.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.7.4/graphfrontier-0.7.4.zip
 
-1. Download `graphfrontier-0.7.2.zip` from Releases
+1. Download `graphfrontier-0.7.4.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
    - `Settings -> Community plugins -> GraphFrontier -> Enable`
 
-## Recent Updates (0.7.2)
+## Recent Updates (0.7.4)
+
+- Reorganized the node context menu into Copy, Open, Pin linked, Visual settings, and Other groups.
+- Added Delete at the bottom, using Obsidian's normal deletion confirmation.
+- Hide actions when they do not apply: missing YAML properties, absent pins, unavailable native actions, or no linked nodes.
+- General linked-pin actions now include both notes and attachments.
+- Renamed the absolute-path copy action to **Copy system root**.
+
+## Previous Updates (0.7.3)
+
+- Added individual node text sizes through the context-menu slider, independently of the global text-size setting.
+- Added Open URL and Open path actions from note YAML properties.
+- Find mode highlights all matching nodes, with an optional Show connections toggle.
+- Hover highlights neighboring nodes and links in both Find and Filter modes.
+- HTML exports preserve individual text sizes.
+
+## Previous Updates (0.7.2)
 
 - Graph backgrounds, grid, labels, selection indicators, tooltips, and controls now follow the active light or dark theme.
 - Improved label readability across zoom levels; selected and hovered node labels remain visible.
