@@ -155,30 +155,33 @@ test('a settled movable graph saves once after eight still frames', async (t) =>
   assert.equal(f.calls.length, 1);
 });
 
-test('a three-second forced pause still saves a layout that never settled', async (t) => {
+test('forces keep moving nodes after three seconds, then equilibrium pauses and saves', async (t) => {
   const f = fixture(t, {
     nodes: [{ id: 'a', x: 100 }],
     settings: { center_strength: 100 },
   });
   f.advance(3000);
   f.frames(1);
-  const pausedX = f.view.nodes[0].x;
-  assert.notEqual(pausedX, 100);
-  assert.equal(f.view.layoutPaused, true);
+  const movingX = f.view.nodes[0].x;
+  assert.notEqual(movingX, 100);
+  assert.equal(f.view.layoutPaused, false);
   assert.equal(f.view.layoutStillFrames, 0);
   assert.equal(f.calls.length, 0);
-  f.frames(8);
+  f.frames(3000);
   await flushSaves();
+  assert.equal(f.view.layoutPaused, true);
   assert.equal(f.calls.length, 1);
-  assert.equal(f.calls[0].positions[0].x, pausedX);
-  assert.equal(f.view.nodes[0].x, pausedX);
+  assert(Math.abs(f.view.nodes[0].x) < Math.abs(movingX));
+  const settledX = f.view.nodes[0].x;
+  f.frames(100);
+  assert.equal(f.view.nodes[0].x, settledX);
 });
 
-test('a pause before eight still frames finishes the debounce on paused frames', async (t) => {
+test('eight quiet frames pause the simulation and finish the autosave debounce', async (t) => {
   const f = fixture(t);
   f.advance(3000);
   f.frames(7);
-  assert.equal(f.view.layoutPaused, true);
+  assert.equal(f.view.layoutPaused, false);
   assert.equal(f.calls.length, 0);
   f.frames(1);
   await flushSaves();
@@ -462,6 +465,7 @@ test('simulation movement while saving stays dirty for a subsequent save', async
   f.frames(8);
   assert.equal(f.calls.length, 1);
   f.view.nodes[0].vx = 10;
+  kickLayoutSearch(f.view);
   f.frames(1);
   assert.ok(f.view.nodes[0].x > 0);
   f.frames(30);
@@ -485,4 +489,32 @@ test('new kicks restart the debounce instead of saving an intermediate fixed lay
   f.frames(1);
   await flushSaves();
   assert.equal(f.calls.length, 1);
+});
+
+test('sleeping nodes ignore tiny force changes but wake for meaningful attraction during a drag', (t) => {
+  const f = fixture(t, {
+    nodes: [{ id: 'a' }, { id: 'drag' }],
+    settings: { center_strength: 100, layout_autosave: false },
+  });
+  f.view.dragNodeId = 'drag';
+  f.frames(8);
+  const node = f.view.nodes[0];
+  node.x = 10; // Net acceleration 0.025, between sleep and wake thresholds.
+  f.frames(10);
+  assert.equal(node.x, 10);
+  node.x = 100;
+  f.frames(1);
+  assert(node.x < 100);
+  assert(node.vx < 0);
+});
+
+test('explicit layout changes wake a fully settled graph even below the hysteresis threshold', (t) => {
+  const f = fixture(t, { settings: { center_strength: 100, layout_autosave: false } });
+  f.frames(8);
+  assert.equal(f.view.layoutPaused, true);
+  f.view.nodes[0].x = 10;
+  kickLayoutSearch(f.view);
+  f.frames(1);
+  assert(f.view.nodes[0].x < 10);
+  assert.equal(f.view.layoutPaused, false);
 });

@@ -56,6 +56,11 @@ function buildNodeContextMenu(view, node, clientX, clientY) {
   const linkedIds = view.getLinkedNodeIds(node.id);
   const hasLinked = linkedIds.length > 0;
   const hasLinkedPins = linkedIds.some((id) => plugin.isPinned(id) || plugin.isOrbitPinned(id));
+  if (node.meta?.darkEnergy) {
+    add(menu, 'Edit gravity node', 'settings', () => view.editDarkEnergy(node));
+    add(menu, 'Delete gravity node', 'trash', () => view.removeDarkEnergy(node));
+    menu.addSeparator();
+  }
   const copy = async (text) => {
     if (!(await view.copyTextToClipboard(text))) throw new Error('Clipboard is unavailable');
   };
@@ -67,23 +72,19 @@ function buildNodeContextMenu(view, node, clientX, clientY) {
     () => copy(app.vault.adapter.getFullPath(file.path)),
     isFile && typeof app.vault.adapter.getFullPath === 'function'
   );
-  submenu(
-    'Copy',
-    'copy',
-    (target) => {
-      add(
-        target,
-        'As Obsidian URL',
-        'link',
-        () => app.copyObsidianUrl(file),
-        isFile && typeof app.copyObsidianUrl === 'function'
-      );
-      add(target, 'From vault folder', 'vault', () => copy(file.path), isFile);
-      add(target, 'Copy linked names', 'copy', () => view.copyLinkedNames(node.id), hasLinked);
-      add(target, 'Copy linked paths', 'copy', () => view.copyLinkedPaths(node.id), hasLinked);
-    },
-    isFile || hasLinked
-  );
+  submenu('Copy', 'copy', (target) => {
+    add(target, 'Copy name', 'copy', () => copy(String(node.label || node.id)));
+    add(
+      target,
+      'As Obsidian URL',
+      'link',
+      () => app.copyObsidianUrl(file),
+      isFile && typeof app.copyObsidianUrl === 'function'
+    );
+    add(target, 'From vault folder', 'vault', () => copy(file.path), isFile);
+    add(target, 'Copy linked names', 'copy', () => view.copyLinkedNames(node.id), hasLinked);
+    add(target, 'Copy linked paths', 'copy', () => view.copyLinkedPaths(node.id), hasLinked);
+  });
   if (isFile) menu.addSeparator();
 
   const properties = isFile ? app.metadataCache.getFileCache(file)?.frontmatter : null;
@@ -179,6 +180,7 @@ function buildNodeContextMenu(view, node, clientX, clientY) {
   submenu('Visual settings', 'settings-2', (target) => {
     view.addVisualSettingsToMenu(target, node, clientX, clientY);
   });
+  if (node.meta?.darkEnergy) return menu;
   menu.addSeparator();
 
   add(

@@ -3,6 +3,58 @@ const test = require('node:test');
 const { fixture, element } = require('./helpers/obsidian.cjs');
 const render = require('../src/render');
 
+test('Search always starts with a type and untyped legacy queries become name queries', (t) => {
+  const { view } = fixture(t);
+  view.buildFindSection(element());
+  assert.equal(view.searchInputEl.value, 'name:');
+  assert.equal(view.isSearchFilled(), false);
+  assert.equal(view.searchClearButtonEl.disabled, true);
+  assert.equal(view.parseSearchQuery('Grafana').source, 'name');
+  assert.equal(view.parseSearchQuery('Grafana').hasExplicitSource, true);
+  view.commitSearchSelectionFromInput('Grafana');
+  assert.equal(view.searchInputEl.value, 'name:Grafana');
+  assert.equal(view.normalizeSearchInput('path:Folder/'), 'path:Folder/');
+  assert.equal(view.normalizeSearchInput('[status]:done'), '[status]:done');
+});
+
+test('Search protects its prefix, keeps type when clearing, and switches via dropdown', (t) => {
+  const { view } = fixture(t);
+  view.searchInputValue = 'path:Folder/';
+  view.buildFindSection(element());
+  const input = view.searchInputEl;
+  input.setSelectionRange = (start, end) => {
+    input.selectionStart = start;
+    input.selectionEnd = end;
+  };
+  input.focus = () => {};
+  let prevented = false;
+  input.setSelectionRange(5, 5);
+  input.events.beforeinput({
+    inputType: 'deleteContentBackward',
+    preventDefault() {
+      prevented = true;
+    },
+  });
+  assert.equal(prevented, true);
+  input.setSelectionRange(0, input.value.length);
+  input.events.beforeinput({ inputType: 'insertText' });
+  assert.equal(input.selectionStart, 5);
+  view.searchClearButtonEl.events.click({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(input.value, 'path:');
+  assert.equal(view.isSearchFilled(), false);
+  view.searchSuggestSuppressUntilMs = 0;
+  view.showInputSuggestMenu = (el, items, select) => {
+    assert(items.some((item) => item.value === 'tag:'));
+    select('tag:', { kind: 'source' });
+  };
+  view.contentEl.win.setTimeout = () => {};
+  input.events.click();
+  assert.equal(input.value, 'tag:');
+  input.value = '';
+  input.events.input();
+  assert.equal(input.value, 'tag:');
+});
+
 test('Find selects only matches; hover highlights neighbors and links in both modes', (t) => {
   const { view, plugin } = fixture(t, {
     blacklist: [{ id: 'completed', query: 'tag:complited', enabled: true }],

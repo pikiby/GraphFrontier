@@ -32,19 +32,25 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.7.5/graphfrontier-0.7.5.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.7.6/graphfrontier-0.7.6.zip
 
-1. Download `graphfrontier-0.7.5.zip` from Releases
+1. Download `graphfrontier-0.7.6.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
    - `Settings -> Community plugins -> GraphFrontier -> Enable`
 
-## Recent Updates (0.7.5)
+## Recent Updates (0.7.6)
 
-- New notes now enter the physics simulation immediately instead of remaining stationary until a node is moved.
-- Added and removed links now wake settled physics so graph topology updates arrange themselves automatically.
-- Ordinary content-only note updates remain passive and do not disturb an already settled layout.
+- **Gravity nodes:** create movable attraction centers with search-based rules and adjustable strength.
+- **Individual appearance:** customize node colors, size, labels, dimming and edge widths, with one shared reset action.
+- **Color auras:** add soft gradients around individual nodes with adjustable radius and brightness.
+- **Expanded controls:** node size up to x4 and Text zoom up to 40 steps.
+- **Equilibrium-based settling:** removed the forced three-second physics stop; nodes now sleep near equilibrium to suppress small oscillations.
+- **Search and navigation:** explicit query types, Copy name, and Obsidian vault links through the note's `path` property.
+- **HTML export:** carries the new individual visual settings and auras.
+
+[Read the full release notes](docs/releases/0.7.6.md).
 
 ## Features
 

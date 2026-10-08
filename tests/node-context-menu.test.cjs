@@ -68,6 +68,7 @@ test('node menu follows requested sections and puts Delete last', (t) => {
     'Delete',
   ]);
   assert.deepEqual(titles(item(menu, 'Copy').submenu), [
+    'Copy name',
     'As Obsidian URL',
     'From vault folder',
     'Copy linked names',
@@ -88,7 +89,16 @@ test('node menu follows requested sections and puts Delete last', (t) => {
     'Unpin linked nodes',
   ]);
   assert.deepEqual(titles(item(menu, 'Visual settings').submenu), [
+    'Node size',
+    'Node color',
+    'Color aura',
+    'Aura brightness',
+    'Edge width',
+    'Painted edge width',
+    'Text zoom',
     'Text size',
+    'Hover dimming',
+    'Reset visual settings',
     'Strong pull',
     'Paint edges',
   ]);
@@ -105,6 +115,7 @@ test('node menu follows requested sections and puts Delete last', (t) => {
 test('copy and native actions retain their target file and deletion prompts first', async (t) => {
   const { menu, calls, file } = setup(t);
   assert.deepEqual(calls, []);
+  await item(item(menu, 'Copy').submenu, 'Copy name').callback();
   await item(menu, 'Copy system root').callback();
   await item(item(menu, 'Copy').submenu, 'From vault folder').callback();
   await item(item(menu, 'Copy').submenu, 'As Obsidian URL').callback();
@@ -113,6 +124,7 @@ test('copy and native actions retain their target file and deletion prompts firs
   await item(item(menu, 'Other').submenu, 'Merge entire file with').callback();
   await item(menu, 'Delete').callback();
   assert.deepEqual(calls, [
+    'alpha',
     `/vault/${file.path}`,
     file.path,
     ['url', file.path],
@@ -121,6 +133,17 @@ test('copy and native actions retain their target file and deletion prompts firs
     'Merge entire file with...',
     ['delete', file.path],
   ]);
+});
+
+test('Copy name is available for an unlinked node without a file', async (t) => {
+  const { view, app, node, calls } = setup(t);
+  app.vault.getAbstractFileByPath = () => null;
+  view.neighborsById = new Map();
+  node.label = 'Node display name';
+  const copyMenu = item(buildNodeContextMenu(view, node, 10, 20), 'Copy').submenu;
+  assert.deepEqual(titles(copyMenu), ['Copy name']);
+  await item(copyMenu, 'Copy name').callback();
+  assert.deepEqual(calls, ['Node display name']);
 });
 
 test('all general linked pin modes and unpin include notes and attachments', async (t) => {
@@ -178,7 +201,6 @@ test('unavailable file and linked actions disappear without leaving empty groups
   const menu = buildNodeContextMenu(view, node, 10, 20);
   for (const title of [
     'Copy system root',
-    'Copy',
     'Open',
     'Open URL',
     'Open path',

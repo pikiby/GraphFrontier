@@ -98,6 +98,53 @@ test('local files and folders use native paths on Linux, macOS and Windows', asy
   }
 });
 
+test('Open path dispatches an Obsidian open URI without treating it as a local file', async (t) => {
+  const { app } = fixture(t);
+  const target = 'obsidian://open?vault=Clickhouse-analytics';
+  app.metadataCache.getFileCache = () => ({ frontmatter: { path: target } });
+  app.vault.getAbstractFileByPath = () => assert.fail('URI must not be resolved as a file');
+  const opened = [];
+  const host = {
+    require(name) {
+      assert.equal(name, 'electron');
+      return { shell: { openExternal: async (uri) => opened.push(uri) } };
+    },
+  };
+  const actions = menu();
+  addNoteNavigationActions(actions, app, {}, host);
+  assert.deepEqual(
+    actions.items.map((item) => item.title),
+    ['Open path']
+  );
+  await actions.items[0].click();
+  assert.deepEqual(opened, [target]);
+});
+
+test('Obsidian URIs remain forbidden in url and non-open actions are rejected in path', async () => {
+  const host = { require: () => assert.fail('No application should launch') };
+  await assert.rejects(
+    openNoteTarget({}, 'url', 'obsidian://open?vault=Clickhouse-analytics', host),
+    /URL must use http:\/\/ or https:\/\//
+  );
+  for (const target of [
+    'obsidian://new?vault=Other',
+    'obsidian://open',
+    'obsidian://open?',
+    'obsidian://open/other?vault=Other',
+    'obsidian://open.evil?vault=Other',
+    'obsidian://[broken',
+  ]) {
+    await assert.rejects(openNoteTarget({}, 'path', target, host), /Obsidian/);
+  }
+});
+
+test('Obsidian path URI preserves encoded values through the non-Electron fallback', async () => {
+  const target = 'obsidian://open?vault=My%20vault&file=Folder%2FNote.md';
+  const opened = [];
+  await openNoteTarget({}, 'path', target, { open: (...args) => opened.push(args) });
+  assert.deepEqual(opened, [[target, '_blank', 'noopener,noreferrer']]);
+});
+
 test('malformed URL and missing path report errors without launching an application', async (t) => {
   const { app } = fixture(t);
   app.metadataCache.getFileCache = () => ({

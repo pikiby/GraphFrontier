@@ -32,6 +32,13 @@ function recordingCanvas() {
     fillStyle: '',
     strokeStyle: '',
     font: '',
+    createRadialGradient() {
+      return {
+        addColorStop(offset, color) {
+          calls.push({ kind: 'gradient', offset, color });
+        },
+      };
+    },
     save() {
       stack.push({
         alpha: this.globalAlpha,
@@ -250,8 +257,12 @@ test('CSS changes refresh cached custom colours through the graph owner window',
   render.renderFrame(view);
 });
 
-async function exportGraph(t, scheme, variables) {
+async function exportGraph(t, scheme, variables, aura = false) {
   const f = graph(t, scheme, variables);
+  if (aura) {
+    f.plugin.setNodeVisualSetting('alpha.md', 'node_color', '#123456');
+    f.plugin.setNodeVisualSetting('alpha.md', 'aura_radius', 5000);
+  }
   let html;
   f.view.contentEl.win.require = (name) => {
     if (name === 'path') return path;
@@ -312,6 +323,19 @@ function runExport(html) {
   vm.runInNewContext(script, sandbox, { timeout: 1000 });
   return { calls, canvasEvents, windowEvents, elements };
 }
+
+test('exported HTML executes aura drawing with the node color and transparent outer edge', async (t) => {
+  const { html } = await exportGraph(t, 'dark', undefined, true);
+  const { calls } = runExport(html);
+  assert.deepEqual(
+    calls.filter((call) => call.kind === 'gradient'),
+    [
+      { kind: 'gradient', offset: 0, color: '#12345638' },
+      { kind: 'gradient', offset: 0.4, color: '#1234561f' },
+      { kind: 'gradient', offset: 1, color: '#12345600' },
+    ]
+  );
+});
 
 for (const scheme of ['light', 'dark']) {
   test(`${scheme}: generated HTML executes themed drawing, hover, selection, zoom and panel updates`, async (t) => {

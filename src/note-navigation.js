@@ -17,6 +17,20 @@ async function openNoteTarget(app, type, target, hostWindow) {
     return;
   }
 
+  if (type === 'path' && /^obsidian:/i.test(target)) {
+    let uri;
+    try {
+      uri = new URL(target);
+    } catch {
+      throw new Error('Invalid Obsidian URI in path');
+    }
+    if (!/^obsidian:\/\/open\?/i.test(target) || uri.hostname !== 'open' || !uri.search)
+      throw new Error('Obsidian path must use obsidian://open?...');
+    if (nodeRequire) await nodeRequire('electron').shell.openExternal(uri.href);
+    else hostWindow.open(uri.href, '_blank', 'noopener,noreferrer');
+    return;
+  }
+
   const file = app.vault.getAbstractFileByPath(target);
   if (file && typeof file.extension === 'string') {
     await app.workspace.getLeaf(true).openFile(file);

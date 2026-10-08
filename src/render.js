@@ -1,11 +1,12 @@
 const { DEFAULT_DATA, MAX_ZOOM, ZOOM_STEP_FACTOR } = require('./constants');
 const { DARK_THEME, getLabelAppearance } = require('./theme');
+const { getNodeVisualSetting, getEdgeVisualSetting, getNodeColor } = require('./node-visuals');
 
 // Focus dimming helper: computes alpha of non-focused graph elements.
-function getHoverDimAlpha(plugin, focusProgress) {
+function getHoverDimAlpha(plugin, focusProgress, nodeId) {
   const clampedProgress = Math.max(0, Math.min(1, Number(focusProgress) || 0));
   const dimStrength = plugin.clampNumber(
-    plugin.getSettings().hover_dim_strength,
+    getNodeVisualSetting(plugin, nodeId, 'hover_dim_strength'),
     0,
     100,
     DEFAULT_DATA.settings.hover_dim_strength
@@ -92,6 +93,7 @@ function renderFrame(view) {
     drawGrid(view, ctx);
   }
 
+  drawNodeAuras(view, ctx);
   drawEdges(view, ctx);
   drawNodes(view, ctx);
   drawSelectionBox(view, ctx);
@@ -157,34 +159,34 @@ function getNodeFileTypeLabel(node) {
 // Node radius formula with attachment-specific size multiplier.
 function getNodeRadius(view, node) {
   const nodeScaleRaw = view.plugin.clampNumber(
-    view.plugin.getSettings().node_size_scale,
+    getNodeVisualSetting(view.plugin, node.id, 'node_size_scale'),
     0.1,
-    2,
+    4,
     DEFAULT_DATA.settings.node_size_scale
   );
   const attachmentSizeMultiplier = view.plugin.clampNumber(
-    view.plugin.getSettings().attachment_size_multiplier,
+    getNodeVisualSetting(view.plugin, node.id, 'attachment_size_multiplier'),
     0.1,
     1,
     DEFAULT_DATA.settings.attachment_size_multiplier
   );
-  // New node-size scale: 0.1 -> 1, max -> 20.
+  // New node-size scale: 0.1 -> 1, max -> 40.
   const nodeScale = nodeScaleRaw * 10;
   const raw = (3 + Math.log2(node.degree + 2) * 1.4) * (nodeScale / 4);
   const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
   const scaledRaw = isAttachmentNode ? raw * attachmentSizeMultiplier : raw;
-  return Math.max(0.2, Math.min(4, scaledRaw / 5));
+  return Math.max(0.2, Math.min(4 * Math.max(1, nodeScaleRaw / 2), scaledRaw / 5));
 }
 
 // Convert slider steps into zoom threshold for label visibility.
-function getLabelZoomThreshold(view) {
+function getLabelZoomThreshold(view, nodeId) {
   const steps = view.plugin.clampNumber(
-    view.plugin.getSettings().label_zoom_steps,
+    getNodeVisualSetting(view.plugin, nodeId, 'label_zoom_steps'),
     1,
-    20,
+    40,
     DEFAULT_DATA.settings.label_zoom_steps
   );
-  // 1 => only at max zoom, 20 => visible 20 wheel-steps back from max zoom.
+  // Each step extends label visibility by one wheel-zoom step.
   return MAX_ZOOM / Math.pow(ZOOM_STEP_FACTOR, steps - 1);
 }
 
@@ -351,18 +353,6 @@ function drawEdges(view, ctx) {
   const maxWorldY = view.camera.y + halfHeightWorld + edgePadWorld;
   const screenCenterX = view.viewWidth / 2;
   const screenCenterY = view.viewHeight / 2;
-  const edgeScale = view.plugin.clampNumber(
-    view.plugin.getSettings().edge_width_scale,
-    0.01,
-    1,
-    DEFAULT_DATA.settings.edge_width_scale
-  );
-  const paintedEdgeScale = view.plugin.clampNumber(
-    view.plugin.getSettings().painted_edge_width,
-    0.01,
-    1,
-    DEFAULT_DATA.settings.painted_edge_width
-  );
   const visibleNodeIds = view.getFilterVisibleNodeIds();
   const hasFilter = visibleNodeIds instanceof Set;
   const filterNodeId = hasFilter ? view.getFilterNodeId() : null;
@@ -389,9 +379,12 @@ function drawEdges(view, ctx) {
   const normalEdgeAlpha = hasSearchHighlight ? searchDimAlpha : hasAnyFocus ? focusDimAlpha : 1;
   const paintedEdgeColors = view.plugin.data?.painted_edge_colors || {};
   let hasNormalEdgeBatch = false;
+  let normalEdgeBatchWidth;
 
-  const beginNormalEdgeBatch = () => {
+  const beginNormalEdgeBatch = (edgeScale) => {
+    if (hasNormalEdgeBatch && normalEdgeBatchWidth !== edgeScale) flushNormalEdgeBatch();
     if (hasNormalEdgeBatch) return;
+    normalEdgeBatchWidth = edgeScale;
     ctx.globalAlpha = normalEdgeAlpha;
     ctx.strokeStyle = 'rgba(145, 160, 187, 0.35)';
     ctx.lineWidth = edgeScale;
@@ -433,6 +426,18 @@ function drawEdges(view, ctx) {
     const sourcePaintColor = paintedEdgeColors[sourceNode.id] || null;
     const targetPaintColor = paintedEdgeColors[targetNode.id] || null;
     const paintedColor = sourcePaintColor || targetPaintColor;
+    const edgeScale = getEdgeVisualSetting(
+      view.plugin,
+      edge.source,
+      edge.target,
+      'edge_width_scale'
+    );
+    const paintedEdgeScale = getEdgeVisualSetting(
+      view.plugin,
+      edge.source,
+      edge.target,
+      'painted_edge_width'
+    );
 
     const isHoverFocusEdge =
       !!hoverFocusNodeId && (edge.source === hoverFocusNodeId || edge.target === hoverFocusNodeId);
@@ -453,7 +458,7 @@ function drawEdges(view, ctx) {
     );
 
     if (!paintedColor && focusEdgeProgress <= 0.001) {
-      beginNormalEdgeBatch();
+      beginNormalEdgeBatch(edgeScale);
       ctx.moveTo(sourcePointX, sourcePointY);
       ctx.lineTo(targetPointX, targetPointY);
       continue;
@@ -490,6 +495,37 @@ function drawEdges(view, ctx) {
 }
 
 // Draw nodes, labels, hover outlines, and hovered title popup.
+function drawNodeAuras(view, ctx) {
+  const visible = view.getFilterVisibleNodeIds();
+  const colors = getGroupColorMap(view);
+  for (const node of view.nodes) {
+    if (visible instanceof Set && !visible.has(node.id)) continue;
+    const radius =
+      (getNodeVisualSetting(view.plugin, node.id, 'aura_radius') * view.camera.zoom) / 10;
+    const brightness = getNodeVisualSetting(view.plugin, node.id, 'aura_brightness') / 100;
+    if (!(radius > 0) || !(brightness > 0)) continue;
+    const point = view.worldToScreen(node.x, node.y);
+    if (
+      point.x + radius < 0 ||
+      point.y + radius < 0 ||
+      point.x - radius > view.viewWidth ||
+      point.y - radius > view.viewHeight
+    )
+      continue;
+    const color = getNodeColor(view.plugin, node, colors?.get(node.id));
+    const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
+    gradient.addColorStop(0, hexToRgba(color, brightness));
+    gradient.addColorStop(0.4, hexToRgba(color, brightness * (6 / 11)));
+    gradient.addColorStop(1, hexToRgba(color, 0));
+    ctx.save();
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawNodes(view, ctx) {
   const zoom = Math.max(view.camera.zoom, 0.0001);
   const halfWidthWorld = view.viewWidth / (2 * zoom);
@@ -501,7 +537,6 @@ function drawNodes(view, ctx) {
   const maxWorldY = view.camera.y + halfHeightWorld + nodePadWorld;
   const screenCenterX = view.viewWidth / 2;
   const screenCenterY = view.viewHeight / 2;
-  const labelMinZoom = getLabelZoomThreshold(view);
   const theme = view.canvasTheme || DARK_THEME;
   const nowMs = Date.now();
   const visibleNodeIds = view.getFilterVisibleNodeIds();
@@ -528,8 +563,6 @@ function drawNodes(view, ctx) {
     view.searchMode === 'find' &&
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
-  const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
-  const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
   const groupColorByNodeId = getGroupColorMap(view);
   const searchNeighbors = new Set();
   if (hasSearchHighlight && view.plugin.getSettings().show_search_connections) {
@@ -586,6 +619,8 @@ function drawNodes(view, ctx) {
     const isHover = hoverVisualProgress > 0.001;
     const isClickFlash = view.clickFlashNodeId === node.id && nowMs < view.clickFlashUntilMs;
     const groupColor = groupColorByNodeId instanceof Map ? groupColorByNodeId.get(node.id) : null;
+    const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1, node.id) : 1;
+    const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress, node.id);
     const nodeAlpha = isClickFlash
       ? 1
       : hasSearchHighlight
@@ -605,8 +640,7 @@ function drawNodes(view, ctx) {
           : 1;
 
     const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
-    let fillColor = isAttachmentNode ? '#f2e7a0' : '#7aa2f7';
-    if (groupColor && !isAttachmentNode) fillColor = groupColor;
+    let fillColor = getNodeColor(view.plugin, node, groupColor);
     if (isClickFlash) fillColor = '#ffffff';
 
     ctx.globalAlpha = nodeAlpha;
@@ -615,6 +649,13 @@ function drawNodes(view, ctx) {
     ctx.arc(pointX, pointY, radius, 0, Math.PI * 2);
     ctx.fill();
 
+    if (node.meta?.darkEnergy) {
+      ctx.strokeStyle = fillColor;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(pointX, pointY, radius + 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     if (isHover || isSelectedNode) {
       const hoverStrokeAlpha = Math.max(0.12, 0.95 * hoverVisualProgress);
       const selectedStrokeAlpha = isSelectedNode ? 0.95 : 0;
@@ -630,7 +671,7 @@ function drawNodes(view, ctx) {
 
     const label = getLabelAppearance(
       zoom,
-      labelMinZoom,
+      getLabelZoomThreshold(view, node.id),
       getLabelFontSize(view, node.id),
       nodeAlpha,
       isSelectedNode || isHover || isFocusNode,
@@ -692,5 +733,6 @@ module.exports = {
   drawGrid,
   drawEdges,
   drawNodes,
+  drawNodeAuras,
   drawSelectionBox,
 };

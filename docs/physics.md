@@ -4,11 +4,12 @@ This page explains GraphFrontier movement in simple terms.
 
 ## Core Idea
 
-Every free node is affected by three force families:
+Free nodes can be affected by these force families:
 
 - Link force: connected nodes pull/push toward target link distance
 - Repel force: nodes push away from each other
-- Center force: free nodes are pulled toward current layout center
+- Center force: free nodes are pulled toward the graph origin
+- Gravity-node force: query-matched free nodes are attracted to configured centers
 
 Then velocity is damped and position is updated each frame.
 
@@ -36,10 +37,15 @@ Derived radii:
 
 ## Stabilization Logic
 
-The solver has a short “search boost” window after major changes:
+There is no fixed three-second stop or additional timed velocity brake.
+Ordinary Damping remains active while nodes move toward equilibrium.
 
-- after layout-changing action, movement boost decays over about 2 seconds
-- this helps nodes move quickly first, then settle
+- A node sleeps after eight consecutive frames with speed and net acceleration below 0.02.
+- During active simulation, a sleeping node wakes at speed or acceleration of 0.04 or higher.
+- The higher wake threshold suppresses small oscillations near equilibrium.
+- Physics pauses once all movable nodes are asleep and no nodes are being dragged.
+- Layout-changing actions clear sleep state and restart simulation.
+- Competing forces can still prevent convergence; a fixed settling time is not guaranteed.
 
 Autosave stabilization:
 
@@ -65,7 +71,7 @@ Where:
 - `orbitDistance`: slider value
 - `minRadius`: typically not smaller than link distance
 
-Attachments can also be auto-distributed around anchors using similar logic.
+Explicit orbit pinning can also arrange attachments around an anchor.
 
 ## Node Classes In Simulation
 
@@ -73,7 +79,7 @@ GraphFrontier now treats several node classes differently for stability:
 
 - Main nodes: regular non-attachment nodes with regular links
 - Orphans: nodes with `degree = 0`
-- Attachments: non-markdown files, usually auto-orbited around anchors
+- Attachments: non-Markdown files; isolation mode limits interaction to their main node and sibling attachments
 - Attachment-only anchors: regular nodes linked only to attachments
 
 Attachment-only anchors use orphan-like mechanics with reduced force.  

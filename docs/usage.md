@@ -18,6 +18,26 @@ The view opens as a regular tab and can be moved between panes/sidebars.
 - Drag node: move node
 - Left click node: open markdown file (if node is a markdown file)
 
+## Gravity Nodes
+
+Right-click empty graph space and choose **Create gravity node**. Set a name, attraction
+strength using the slider (0-100), and one or more query rules. Rules reuse the search types: `name:`,
+`path:`, `file:`, `tag:`, `line:`, `section:`, and `[property]:`. Matching any rule is enough.
+Click the type prefix to change it through the existing dropdown. Enter keeps your typed
+rule; click a suggestion or press Tab to accept one.
+
+The colored ring marks a movable attraction center, not a note or folder. Drag it to move
+the center; click it or use **Edit gravity node** in its context menu to edit it. **Delete
+gravity node** removes only the object. No Markdown files or links are created.
+
+Matching free nodes are attracted to the center while ordinary graph forces continue.
+Pinned, orbit-pinned and actively dragged nodes are not pulled. Attachment isolation
+settings still apply. Multiple centers combine their attraction. Centers stay visible
+when search or blacklist/whitelist hide notes, but hidden notes do not participate in physics.
+
+Objects, rules, strength and positions belong to the active layout and follow its existing
+Save, Load and autosave behavior. They remain stationary unless moved manually.
+
 ## Search Row (Find / Filter)
 
 The top search row supports two modes:
@@ -28,11 +48,29 @@ The top search row supports two modes:
 Flow:
 
 1. Choose mode (`find` or `filter`).
-2. Type query.
+2. Enter a value after the default `name:` prefix, or choose another query type from the dropdown.
 3. Select a suggestion to apply target node.
-4. Clear the search row to reset highlighting/filter.
+4. Clear the query value to reset highlighting/filter; the type prefix remains.
 
 ## Right-Click Context Menu On Node
+
+**Visual settings** provides per-node sliders for node size, edge width, painted edge width,
+text zoom, text size and hover dimming. Attachment nodes also offer attachment size.
+Node size supports up to x4 in both menus. **Text zoom** supports 1-40 steps in both menus. **Node color** sets the global base color or
+an individual override; individual color takes priority over Groups, then the global base.
+**Color aura** is available only in individual settings: 0 disables it (the default),
+and its 0-5000 scale corresponds to a radius of 0-500 graph units.
+**Aura brightness** controls opacity from 0 to 50%, defaulting to 22%.
+Both controls are individual-only; the gradient uses the node's color.
+The aura does not affect physics or the mouse hit area.
+Each value inherits the main panel setting until changed; one **Reset visual settings**
+action restores all visual inheritance and clears this node's edge painting.
+Gravity nodes omit edge settings, edge painting and Strong pull.
+Hover dimming controls how much this node fades when another node is focused. Edge widths
+apply to incident edges; if both endpoints override a width, the larger override wins.
+Visual changes do not restart physics. Overrides follow layout Save, Load and autosave,
+and are included in static HTML export. Grid, graph-wide visibility and physics settings
+are not individual visual overrides.
 
 Notes with a `url` or `path` string in YAML properties have **Open URL** or **Open path**
 actions in their node's right-click menu:
@@ -73,3 +111,10 @@ If search row is active, save is blocked to avoid saving filtered/focus state as
 - Settings: `settings.md`
 - Hotkeys: `hotkeys.md`
 - Physics model: `physics.md`
+
+## Motion Settling
+
+Damping controls velocity loss without an additional timed brake. Simulation continues
+past three seconds while nodes remain unsettled. Nodes sleep after eight consecutive
+frames of low speed and low net force; a higher wake threshold suppresses tiny oscillations.
+Layout-changing actions wake the simulation. Once every movable node sleeps, physics pauses.

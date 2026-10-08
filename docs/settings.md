@@ -17,12 +17,24 @@ If `Show attachments` is enabled, additional controls appear:
 ## Visual Controls
 
 - `Grid step`: world-space grid spacing
-- `Node size`: node radius scale
+- `Node size`: node radius scale, 0.1-4
+- `Node color`: base color for nodes without a group or individual color
 - `Edge width`: regular edge thickness
 - `Painted edge width`: thickness for painted edges only
-- `Text zoom`: how far labels stay visible when zooming out
+- `Text zoom`: how far labels stay visible when zooming out, 1-40 steps
 - `Text size`: base label font size
 - `Hover dimming`: how strongly non-focused elements are dimmed
+
+## Individual Visual Settings
+
+Right-click a node and open **Visual settings** to override applicable visual controls.
+Individual color overrides Groups; otherwise the first matching group overrides the base color.
+One **Reset visual settings** action clears visual overrides and edge painting, not pins or forces.
+
+Only this menu exposes **Color aura** (0-5000, corresponding to 0-500 graph units)
+and **Aura brightness** (0-50%, default 22%). Auras default off and do not affect physics.
+Gravity nodes omit edge controls and Strong pull. Overrides are stored with the layout and
+included in static HTML exports.
 
 ## Force And Layout Controls
 

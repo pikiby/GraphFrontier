@@ -1,6 +1,15 @@
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
 const { buildNodeContextMenu } = require('./node-context-menu');
+const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
+const { DarkEnergyModal } = require('./dark-energy-modal');
+const {
+  NODE_VISUAL_SETTINGS,
+  getNodeColor,
+  getNodeVisualOverride,
+  getNodeVisualSetting,
+  getEdgeVisualSetting,
+} = require('./node-visuals');
 
 const {
   DEFAULT_DATA,
@@ -105,7 +114,7 @@ class GraphFrontierView extends ItemView {
     this.whitelistEditorRows = [];
     this.draggingQueryRuleRow = null;
     this.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
-    this.searchInputValue = '';
+    this.searchInputValue = 'name:';
     this.searchSelectedNodeId = null;
     this.searchMatchedNodeIds = new Set();
     this.searchModeToggleEl = null;
@@ -417,7 +426,17 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(displaySection, 'Grid step', 'grid_step', 5, 50, 5, 'render', {
       hint: 'Grid cell size in world coordinates',
     });
-    this.addSideSlider(displaySection, 'Node size', 'node_size_scale', 0.1, 2, 0.01, 'render', {
+    const colorRow = displaySection.createDiv({ cls: 'graphfrontier-sidepanel-row' });
+    colorRow.createSpan({ text: 'Node color', cls: 'graphfrontier-sidepanel-label' });
+    const colorInput = colorRow.createEl('input', { type: 'color' });
+    colorInput.setAttribute('aria-label', 'Node color');
+    colorInput.value = this.plugin.getSettings().node_color;
+    this.sideControls.set('node_color', { type: 'color', input: colorInput });
+    this.registerDomEvent(colorInput, 'input', () => {
+      this.plugin.data.settings.node_color = colorInput.value;
+      this.plugin.persistNodeVisualSettings();
+    });
+    this.addSideSlider(displaySection, 'Node size', 'node_size_scale', 0.1, 4, 0.01, 'render', {
       hint: 'Visual node radius scale',
     });
     this.addSideSlider(displaySection, 'Edge width', 'edge_width_scale', 0.01, 1, 0.01, 'render', {
@@ -435,7 +454,7 @@ class GraphFrontierView extends ItemView {
         hint: 'Visual thickness for painted edges only',
       }
     );
-    this.addSideSlider(displaySection, 'Text zoom', 'label_zoom_steps', 1, 20, 1, 'render', {
+    this.addSideSlider(displaySection, 'Text zoom', 'label_zoom_steps', 1, 40, 1, 'render', {
       hint: 'How far labels stay visible when zooming out',
     });
     this.addSideSlider(displaySection, 'Text size', 'label_font_size', 5, 20, 1, 'render', {
@@ -1021,6 +1040,7 @@ class GraphFrontierView extends ItemView {
       type: 'text',
       placeholder: 'Enter query...',
     });
+    this.searchInputValue = this.normalizeSearchInput(this.searchInputValue);
     searchInput.value = this.searchInputValue;
     this.searchInputEl = searchInput;
     const clearButton = searchInputWrap.createEl('button', {
@@ -1046,6 +1066,13 @@ class GraphFrontierView extends ItemView {
 
     const getSuggestionPack = () => {
       const rawQuery = String(searchInput.value || '');
+      const prefix = this.getSearchInputPrefix(rawQuery);
+      if (!this.parseSearchQuery(rawQuery).query || searchInput.selectionStart < prefix.length) {
+        return {
+          items: this.getQueryTypeSuggestions('', { allowName: true }),
+          menuTitle: 'Search options',
+        };
+      }
       return this.getSearchSuggestionPack(rawQuery, Number.POSITIVE_INFINITY);
     };
 
@@ -1064,6 +1091,7 @@ class GraphFrontierView extends ItemView {
             const suffixQuery = String(parsed.query || '').trim();
             const nextText = suffixQuery ? `${selectedText}${suffixQuery}` : selectedText;
             searchInput.value = nextText;
+            searchInput.setSelectionRange(nextText.length, nextText.length);
             this.searchInputValue = nextText;
             this.searchSelectedNodeId = null;
             this.syncSearchMatchesLive();
@@ -1096,7 +1124,14 @@ class GraphFrontierView extends ItemView {
       this.plugin.schedulePersist();
     });
 
+    this.registerDomEvent(searchInput, 'beforeinput', (event) => {
+      this.protectQueryInputPrefix(searchInput, event);
+    });
     this.registerDomEvent(searchInput, 'input', () => {
+      searchInput.value = this.normalizeSearchInput(
+        searchInput.value,
+        this.getSearchInputPrefix(this.searchInputValue)
+      );
       this.searchInputValue = String(searchInput.value || '');
       this.searchSelectedNodeId = null;
       this.syncSearchMatchesLive();
@@ -1148,11 +1183,11 @@ class GraphFrontierView extends ItemView {
       event.preventDefault();
       event.stopPropagation();
       this.searchSuggestSuppressUntilMs = Date.now() + 220;
-      this.searchInputValue = '';
+      this.searchInputValue = this.getSearchInputPrefix(searchInput.value);
       this.searchSelectedNodeId = null;
       this.searchMatchedNodeIds = new Set();
       this.markSearchVisibilityDirty();
-      if (this.searchInputEl) this.searchInputEl.value = '';
+      if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
       this.syncSearchClearButtonVisibility();
       if (this.searchMode === 'filter') this.kickLayoutSearch();
       this.closeInputSuggestMenu();
@@ -1211,10 +1246,36 @@ class GraphFrontierView extends ItemView {
     };
   }
 
+  getSearchInputPrefix(rawQueryText) {
+    return (
+      /^(?:name|tag|path|file|line|section|\[[^\]]+\])\s*:\s*/i.exec(
+        String(rawQueryText || '')
+      )?.[0] || 'name:'
+    );
+  }
+
+  protectQueryInputPrefix(input, event) {
+    const length = this.getSearchInputPrefix(input.value).length;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    if (start === end && start <= length && event.inputType.startsWith('delete')) {
+      if (start < length || event.inputType.includes('Backward')) {
+        event.preventDefault();
+        return;
+      }
+    }
+    if (start < length) input.setSelectionRange(length, Math.max(length, end));
+  }
+
+  normalizeSearchInput(rawQueryText, prefix = 'name:') {
+    const text = String(rawQueryText || '');
+    return this.plugin.parseGroupQuery(text) ? text.trimStart() : `${prefix}${text}`;
+  }
+
   parseSearchQuery(rawQueryText) {
-    return this.parseDropdownQuery(rawQueryText, {
+    return this.parseDropdownQuery(this.normalizeSearchInput(rawQueryText), {
       allowName: true,
-      implicitSource: 'content',
+      implicitSource: 'name',
     });
   }
 
@@ -1374,9 +1435,9 @@ class GraphFrontierView extends ItemView {
   }
 
   getSearchSuggestionPack(rawQueryText, limit = Number.POSITIVE_INFINITY) {
-    return this.getQuerySuggestionPack(rawQueryText, {
+    return this.getQuerySuggestionPack(this.normalizeSearchInput(rawQueryText), {
       allowName: true,
-      implicitSource: 'content',
+      implicitSource: 'name',
       showTypeSuggestionsWhenTyping: false,
       limit,
     });
@@ -1555,8 +1616,9 @@ class GraphFrontierView extends ItemView {
   }
 
   commitSearchSelectionFromInput(rawText) {
-    const text = String(rawText || '');
+    const text = this.normalizeSearchInput(rawText);
     this.searchInputValue = text;
+    if (this.searchInputEl) this.searchInputEl.value = text;
     const parsed = this.parseSearchQuery(text);
     if (!parsed.query) {
       this.searchSelectedNodeId = null;
@@ -1623,7 +1685,7 @@ class GraphFrontierView extends ItemView {
     if (!this.searchClearButtonEl) return;
     const textFromInput = this.searchInputEl ? this.searchInputEl.value : '';
     const effectiveText = String(textFromInput || this.searchInputValue || '').trim();
-    const hasText = effectiveText.length > 0;
+    const hasText = this.parseSearchQuery(effectiveText).query.length > 0;
     this.searchClearButtonEl.toggleClass('is-visible', hasText);
     this.searchClearButtonEl.disabled = !hasText;
   }
@@ -1719,6 +1781,10 @@ class GraphFrontierView extends ItemView {
         if (searchVisibleNodeIds.has(nodeId)) combined.add(nodeId);
       }
       finalVisibleNodeIds = combined;
+    }
+    if (finalVisibleNodeIds instanceof Set && this.plugin.data.dark_energy?.length) {
+      finalVisibleNodeIds = new Set(finalVisibleNodeIds);
+      for (const item of this.plugin.data.dark_energy) finalVisibleNodeIds.add(item.id);
     }
     this.filterVisibilityCache.finalVisibleKey = finalKey;
     this.filterVisibilityCache.finalVisibleNodeIds = finalVisibleNodeIds;
@@ -2687,6 +2753,10 @@ class GraphFrontierView extends ItemView {
         continue;
       }
 
+      if (meta.type === 'color' && activeEl !== meta.input) {
+        meta.input.value = currentValue;
+        continue;
+      }
       if (meta.type === 'slider' && activeEl !== meta.input) {
         const clamped = Math.max(meta.min, Math.min(meta.max, Number(currentValue)));
         const nextValue = String(clamped);
@@ -2968,6 +3038,9 @@ class GraphFrontierView extends ItemView {
       y = Number(savedPosition.y);
       vx = 0;
       vy = 0;
+    } else if (rawNode.meta?.darkEnergy) {
+      x = rawNode.meta.darkEnergy.x;
+      y = rawNode.meta.darkEnergy.y;
     } else {
       const angle = (index % 360) * (Math.PI / 180);
       const radius = 80 + 10 * Math.sqrt(index + 1);
@@ -3856,8 +3929,74 @@ class GraphFrontierView extends ItemView {
     this.lastCursorScreen = { x: screenX, y: screenY };
 
     const node = this.getNodeAtScreen(screenX, screenY);
-    if (!node) return;
+    if (!node) {
+      const menu = new Menu(this.app);
+      const position = this.screenToWorld(screenX, screenY);
+      menu.addItem((item) =>
+        item
+          .setTitle('Create gravity node')
+          .setIcon('orbit')
+          .onClick(() => this.editDarkEnergy(null, position))
+      );
+      this.showMenuAtPointer(menu, event.clientX, event.clientY, event);
+      return;
+    }
     this.showNodeContextMenu(node, event.clientX, event.clientY, event);
+  }
+
+  editDarkEnergy(node = null, position = { x: 0, y: 0 }) {
+    const sourceData = this.plugin.data;
+    const initial = node?.meta?.darkEnergy || {
+      id: `${PREFIX}${this.plugin.createGroupId()}`,
+      name: 'Gravity node',
+      queries: ['name:'],
+      strength: 10,
+      ...position,
+    };
+    new DarkEnergyModal(this, initial, (item) => {
+      if (this.plugin.data !== sourceData) {
+        new Notice('Layout changed. Reopen the gravity node editor.');
+        return;
+      }
+      this.setDarkEnergy(item);
+    }).open();
+  }
+
+  setDarkEnergy(item) {
+    const items = (this.plugin.data.dark_energy || []).filter((entry) => entry.id !== item.id);
+    this.plugin.data.dark_energy = normalizeDarkEnergy([...items, item], (query) =>
+      this.plugin.parseGroupQuery(query)
+    );
+    this.plugin.schedulePersist();
+    this.plugin.refreshAllViews();
+    this.kickLayoutSearch();
+  }
+
+  removeDarkEnergy(node) {
+    const data = this.plugin.data;
+    data.dark_energy = (data.dark_energy || []).filter((item) => item.id !== node.id);
+    for (const key of [
+      'pins',
+      'orbit_pins',
+      'saved_positions',
+      'saved_layout_pins',
+      'saved_layout_orbit_pins',
+      'node_force_multipliers',
+      'strong_pull_nodes',
+      'painted_edge_colors',
+      'node_label_sizes',
+      'node_visual_settings',
+    ]) {
+      delete data[key]?.[node.id];
+    }
+    for (const key of ['orbit_pins', 'saved_layout_orbit_pins']) {
+      for (const [id, pin] of Object.entries(data[key])) {
+        if (pin.anchor_id === node.id) delete data[key][id];
+      }
+    }
+    this.plugin.schedulePersist();
+    this.plugin.refreshAllViews();
+    this.kickLayoutSearch();
   }
 
   showNodeContextMenu(node, clientX, clientY, sourceMouseEvent = null) {
@@ -3866,34 +4005,62 @@ class GraphFrontierView extends ItemView {
   }
 
   addVisualSettingsToMenu(menu, node, clientX, clientY) {
-    menu.addItem((item) => {
-      item.setTitle('Text size').setIcon('type');
-      const controls = item.dom.createDiv({ cls: 'graphfrontier-node-text-size' });
-      const input = controls.createEl('input', { type: 'range' });
-      input.min = '5';
-      input.max = '20';
-      input.step = '1';
-      input.setAttribute('aria-label', 'Node text size');
-      input.value = String(
-        this.plugin.getNodeLabelSize(node.id) ?? this.plugin.getSettings().label_font_size
-      );
-      const value = controls.createSpan({ text: input.value });
-      controls.addEventListener('click', (event) => event.stopPropagation());
-      controls.addEventListener('mousedown', (event) => event.stopPropagation());
-      controls.addEventListener('keydown', (event) => event.stopPropagation());
-      input.addEventListener('input', () => {
-        value.setText(input.value);
-        this.plugin.setNodeLabelSize(node.id, Number(input.value));
+    const syncControls = [];
+    for (const spec of NODE_VISUAL_SETTINGS) {
+      if (spec.edges && node.meta?.darkEnergy) continue;
+      if (spec.attachment && !node.meta?.isAttachment) continue;
+      menu.addItem((item) => {
+        item.setTitle(spec.label).setIcon('sliders-horizontal');
+        const controls = item.dom.createDiv({
+          cls: 'graphfrontier-node-text-size graphfrontier-node-visual-control',
+        });
+        const input = controls.createEl('input', {
+          type: spec.type === 'color' ? 'color' : 'range',
+          cls:
+            spec.type === 'color'
+              ? 'graphfrontier-group-color-input'
+              : 'graphfrontier-sidepanel-slider',
+        });
+        input.min = String(spec.min);
+        input.max = String(spec.max);
+        input.step = String(spec.step);
+        input.setAttribute('aria-label', `Node ${spec.label.toLowerCase()}`);
+        const value =
+          spec.type === 'color'
+            ? null
+            : controls.createSpan({ cls: 'graphfrontier-sidepanel-value' });
+        const sync = () => {
+          const inherited = getNodeVisualOverride(this.plugin, node.id, spec.key) === null;
+          input.value = String(getNodeVisualSetting(this.plugin, node.id, spec.key));
+          value?.setText(this.formatSliderValue(Number(input.value), spec.step));
+          input.setAttribute('title', inherited ? 'Global value' : 'Individual value');
+        };
+        syncControls.push(sync);
+        sync();
+        for (const eventName of ['click', 'mousedown', 'keydown']) {
+          controls.addEventListener(eventName, (event) => event.stopPropagation());
+        }
+        input.addEventListener('input', () => {
+          this.plugin.setNodeVisualSetting(
+            node.id,
+            spec.key,
+            spec.type === 'color' ? input.value : Number(input.value)
+          );
+          sync();
+        });
       });
-    });
-    if (this.plugin.getNodeLabelSize(node.id) !== null) {
-      menu.addItem((item) =>
-        item
-          .setTitle('Use global text size')
-          .setIcon('reset')
-          .onClick(() => this.plugin.setNodeLabelSize(node.id, null))
-      );
     }
+
+    menu.addItem((item) =>
+      item
+        .setTitle('Reset visual settings')
+        .setIcon('rotate-ccw')
+        .onClick(() => {
+          this.plugin.resetNodeVisualSettings(node.id);
+          syncControls.forEach((sync) => sync());
+        })
+    );
+    if (node.meta?.darkEnergy) return;
 
     const isStrongPullNode = this.plugin.isStrongPullNode(node.id);
     if (!isStrongPullNode) {
@@ -4333,12 +4500,17 @@ class GraphFrontierView extends ItemView {
         }
 
         const groupColor = this.getGroupColorForNode(node);
-        const fillColor = isAttachment ? '#f2e7a0' : groupColor || '#7aa2f7';
+        const fillColor = getNodeColor(this.plugin, node, groupColor);
 
         return {
           id: node.id,
           label: String(node.label || ''),
           labelMinimumSize: getLabelMinimumSizeRender(this, node.id),
+          labelMinZoom: getLabelZoomThresholdRender(this, node.id),
+          dimAlpha:
+            getNodeVisualOverride(this.plugin, node.id, 'hover_dim_strength') === null
+              ? null
+              : getHoverDimAlpha(this.plugin, 1, node.id),
           labelFontSize:
             this.plugin.getNodeLabelSize(node.id) === null
               ? null
@@ -4348,6 +4520,8 @@ class GraphFrontierView extends ItemView {
           degree: Number(node.degree) || 0,
           radius: Number(this.getNodeRadius(node)) || 1,
           color: fillColor,
+          auraRadius: getNodeVisualSetting(this.plugin, node.id, 'aura_radius') / 10,
+          auraBrightness: getNodeVisualSetting(this.plugin, node.id, 'aura_brightness'),
           isAttachment,
           fileType,
           path: nodePath,
@@ -4366,6 +4540,13 @@ class GraphFrontierView extends ItemView {
     const exportedEdges = sourceEdges.map((edge) => ({
       source: edge.source,
       target: edge.target,
+      width: getEdgeVisualSetting(this.plugin, edge.source, edge.target, 'edge_width_scale'),
+      paintedWidth: getEdgeVisualSetting(
+        this.plugin,
+        edge.source,
+        edge.target,
+        'painted_edge_width'
+      ),
       paintedColor:
         this.plugin.getPaintedEdgeColor(edge.source) ||
         this.plugin.getPaintedEdgeColor(edge.target) ||
@@ -4703,11 +4884,32 @@ class GraphFrontierView extends ItemView {
           ctx.save();
           ctx.globalAlpha = selectedNodeId ? (isActive ? 1 : 0.24) : 1;
           ctx.strokeStyle = edge.paintedColor || 'rgba(145,160,187,0.7)';
-          ctx.lineWidth = edge.paintedColor ? paintedEdgeWidth : edgeWidth;
+          ctx.lineWidth = edge.paintedColor ? (edge.paintedWidth ?? paintedEdgeWidth) : (edge.width ?? edgeWidth);
           ctx.beginPath();
           ctx.moveTo(sourcePoint.x, sourcePoint.y);
           ctx.lineTo(targetPoint.x, targetPoint.y);
           ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      function drawAuras() {
+        for (const node of EXPORT_DATA.nodes) {
+          const radius = Number(node.auraRadius || 0) * camera.zoom;
+          const brightness = (node.auraBrightness ?? 22) / 100;
+          if (!(radius > 0) || !(brightness > 0)) continue;
+          const point = worldToScreen(node.x, node.y);
+          if (point.x + radius < 0 || point.y + radius < 0 || point.x - radius > viewWidth || point.y - radius > viewHeight) continue;
+          const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
+          const alphaHex = (alpha) => Math.round(alpha * 255).toString(16).padStart(2, '0');
+          gradient.addColorStop(0, node.color + alphaHex(brightness));
+          gradient.addColorStop(0.4, node.color + alphaHex(brightness * (6 / 11)));
+          gradient.addColorStop(1, node.color + '00');
+          ctx.save();
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+          ctx.fill();
           ctx.restore();
         }
       }
@@ -4721,7 +4923,7 @@ class GraphFrontierView extends ItemView {
           const isHovered = hoveredNodeId === node.id;
           const isSelected = selectedNodeId === node.id;
           const isNeighbor = selectedNodeId && selectedNeighbors.has(node.id);
-          const alpha = selectedNodeId ? (isSelected || isNeighbor ? 1 : 0.32) : 1;
+          const alpha = selectedNodeId ? (isSelected || isNeighbor ? 1 : (node.dimAlpha ?? 0.32)) : 1;
 
           ctx.save();
           ctx.globalAlpha = alpha;
@@ -4742,7 +4944,7 @@ class GraphFrontierView extends ItemView {
             ctx.restore();
           }
 
-          const label = getLabelAppearance(camera.zoom, labelMinZoom, node.labelFontSize ?? labelFontSize, alpha, isHovered || isSelected, node.labelMinimumSize ?? 10);
+          const label = getLabelAppearance(camera.zoom, node.labelMinZoom ?? labelMinZoom, node.labelFontSize ?? labelFontSize, alpha, isHovered || isSelected, node.labelMinimumSize ?? 10);
           if (label.alpha > 0) {
             ctx.save();
             ctx.globalAlpha = label.alpha;
@@ -5001,6 +5203,7 @@ class GraphFrontierView extends ItemView {
         ctx.fillStyle = EXPORT_DATA.theme.background || '#111418';
         ctx.fillRect(0, 0, viewWidth, viewHeight);
         drawGrid();
+        drawAuras();
         drawEdges();
         drawNodes();
         drawHoverTooltip();
@@ -5959,6 +6162,11 @@ class GraphFrontierView extends ItemView {
   }
 
   async openNodeFile(nodeId) {
+    const node = this.nodeById.get(nodeId);
+    if (node?.meta?.darkEnergy) {
+      this.editDarkEnergy(node);
+      return;
+    }
     const abstractFile = this.app.vault.getAbstractFileByPath(nodeId);
     if (!abstractFile) return;
     if (typeof abstractFile.extension === 'string' && abstractFile.extension.toLowerCase() !== 'md')

@@ -1,4 +1,6 @@
 const { Plugin, Notice } = require('obsidian');
+const { normalizeDarkEnergy, darkEnergyNodes } = require('./dark-energy');
+const { NODE_VISUAL_SETTINGS, normalizeNodeVisuals } = require('./node-visuals');
 
 const {
   GRAPHFRONTIER_VIEW_TYPE,
@@ -344,7 +346,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       strong_pull_nodes: {},
       painted_edge_colors: {},
       node_label_sizes: {},
+      node_visual_settings: normalizeNodeVisuals(safe.node_visual_settings),
       groups: [],
+      dark_energy: normalizeDarkEnergy(safe.dark_energy, (query) => this.parseGroupQuery(query)),
       blacklist: [],
       whitelist: [],
       hotkeys: {},
@@ -460,9 +464,18 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.node_size_scale = this.clampNumber(
       normalized.settings.node_size_scale,
       0.1,
-      2,
+      4,
       DEFAULT_DATA.settings.node_size_scale
     );
+    if (!/^#[0-9a-f]{6}$/i.test(normalized.settings.node_color))
+      normalized.settings.node_color = DEFAULT_DATA.settings.node_color;
+    normalized.settings.aura_brightness = this.clampNumber(
+      normalized.settings.aura_brightness,
+      0,
+      50,
+      22
+    );
+    normalized.settings.aura_radius = this.clampNumber(normalized.settings.aura_radius, 0, 5000, 0);
     normalized.settings.edge_width_scale = this.clampNumber(
       normalized.settings.edge_width_scale,
       0.01,
@@ -485,7 +498,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.label_zoom_steps = this.clampNumber(
       normalized.settings.label_zoom_steps,
       1,
-      20,
+      40,
       DEFAULT_DATA.settings.label_zoom_steps
     );
     normalized.settings.label_font_size = this.clampNumber(
@@ -1167,11 +1180,51 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     return this.data.node_label_sizes?.[nodeId] ?? null;
   }
 
+  setNodeVisualSetting(nodeId, key, value) {
+    const spec = NODE_VISUAL_SETTINGS.find((item) => item.key === key);
+    if (!spec) return;
+    if (
+      value !== null &&
+      (spec.type === 'color'
+        ? !/^#[0-9a-f]{6}$/i.test(value)
+        : typeof value !== 'number' || !Number.isFinite(value))
+    )
+      return;
+    if (key === 'label_font_size') {
+      this.setNodeLabelSize(nodeId, value);
+      return;
+    }
+    const settings = { ...this.data.node_visual_settings?.[nodeId] };
+    if (value === null) delete settings[key];
+    else
+      settings[key] = spec.type === 'color' ? value : Math.max(spec.min, Math.min(spec.max, value));
+    this.data.node_visual_settings = { ...this.data.node_visual_settings, [nodeId]: settings };
+    if (!Object.keys(settings).length) delete this.data.node_visual_settings[nodeId];
+    this.persistNodeVisualSettings();
+  }
+
   setNodeLabelSize(nodeId, size) {
     if (size !== null && (typeof size !== 'number' || !Number.isFinite(size))) return;
     this.data.node_label_sizes ??= {};
     if (size === null) delete this.data.node_label_sizes[nodeId];
     else this.data.node_label_sizes[nodeId] = this.clampNumber(size, 5, 20, 9);
+    this.persistNodeVisualSettings();
+  }
+
+  resetNodeVisualSettings(nodeId) {
+    delete this.data.node_visual_settings?.[nodeId];
+    delete this.data.node_label_sizes?.[nodeId];
+    delete this.data.painted_edge_colors?.[nodeId];
+    this.persistNodeVisualSettings();
+  }
+
+  persistNodeVisualSettings() {
+    for (const leaf of this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)) {
+      if (!leaf.view) continue;
+      leaf.view.layoutEditVersion = (leaf.view.layoutEditVersion || 0) + 1;
+      leaf.view.layoutAutosaveDirty = true;
+      leaf.view.layoutStillFrames = 0;
+    }
     this.schedulePersist();
     this.renderAllViews();
   }
@@ -1692,6 +1745,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     }
 
     this.groupSuggestionIndex = this.buildGroupSuggestionIndex(markdownFiles);
+    nodes.push(...darkEnergyNodes(this.data.dark_energy));
     return { nodes, edges: filteredEdges };
   }
 

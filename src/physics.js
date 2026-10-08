@@ -1,6 +1,8 @@
 const { TWO_PI, DEFAULT_DATA } = require('./constants');
+const { getDarkEnergyTargets, applyDarkEnergyForce } = require('./dark-energy');
 
 const layoutAutosaveStates = new WeakMap();
+const layoutSleepStates = new WeakMap();
 
 // Pausing physics must not pause persistence or discard pending layout changes.
 function stepLayoutAutosave(view, moving = false) {
@@ -41,6 +43,7 @@ function stepLayoutAutosave(view, moving = false) {
 
 // Simulation restart marker used after manual layout-changing actions.
 function kickLayoutSearch(view) {
+  layoutSleepStates.delete(view);
   view.layoutKickAtMs = Date.now();
   view.layoutStillFrames = 0;
   view.layoutAutosaveDirty = true;
@@ -181,9 +184,10 @@ function stepSimulation(view) {
       node.vy = 0;
     }
   }
-  const nodes = hasPhysicsFilter
+  let nodes = hasPhysicsFilter
     ? view.nodes.filter((node) => filterVisibleNodeIds.has(node.id))
     : view.nodes;
+  if (view.plugin.data?.dark_energy?.length) nodes = nodes.filter((node) => !node.meta?.darkEnergy);
   const nodeCount = nodes.length;
   if (nodeCount === 0) {
     stepLayoutAutosave(view);
@@ -205,15 +209,12 @@ function stepSimulation(view) {
 
   const settings = view.plugin.getSettings();
   const attachmentIsolationMode = settings.attachments_on_orbits !== false;
-  const nowMs = Date.now();
-  const layoutSearchMs = 3000;
-  const elapsedSearchMs = nowMs - view.layoutKickAtMs;
   const layoutSearchFactor = 1;
-  const settleProgress = view.dragNodeId
-    ? 0
-    : Math.max(0, Math.min(1, elapsedSearchMs / layoutSearchMs));
-  // Gradual global slowdown during settle window to imitate increasing damping.
-  const settleVelocityBrake = 1 - settleProgress * 0.7;
+  let sleepStates = layoutSleepStates.get(view);
+  if (!sleepStates) {
+    sleepStates = new WeakMap();
+    layoutSleepStates.set(view, sleepStates);
+  }
 
   const repelStrength = settings.repel_strength * 1 * layoutSearchFactor;
   const centerStrength = settings.center_strength * 0.000025 * layoutSearchFactor;
@@ -255,7 +256,8 @@ function stepSimulation(view) {
       (edge) => filterVisibleNodeIds.has(edge.source) && filterVisibleNodeIds.has(edge.target)
     );
   }
-  const noForces = !hasRepel && !hasCenter && !hasLink;
+  const hasDarkEnergy = view.plugin.data?.dark_energy?.some((item) => item.strength > 0);
+  const noForces = !hasRepel && !hasCenter && !hasLink && !hasDarkEnergy;
   const minRepelDistance = 28;
   const maxRepelForce = 16;
   const maxSpringForce = 20;
@@ -359,6 +361,7 @@ function stepSimulation(view) {
     }
   }
   let movingNodeCount = 0;
+  let awakeNodeCount = 0;
 
   if (hasRepel) {
     const nodeSpatialIndex = buildSpatialIndex(nodes, repelRadius);
@@ -654,6 +657,7 @@ function stepSimulation(view) {
     }
   }
 
+  const darkEnergyTargets = getDarkEnergyTargets(view);
   for (const node of nodes) {
     const pin = pinsById.get(node.id) || null;
     const orbitPin = orbitPinsById.get(node.id) || null;
@@ -661,6 +665,15 @@ function stepSimulation(view) {
     const accel = accelById.get(node.id) || { ax: 0, ay: 0 };
 
     const isAttachmentNode = !!node?.meta?.isAttachment;
+    if (
+      !pin &&
+      !orbitPin &&
+      !autoAttachmentOrbit &&
+      !activelyDraggedNodeIds.has(node.id) &&
+      !(attachmentIsolationMode && isAttachmentNode)
+    ) {
+      applyDarkEnergyForce(view, node, accel, darkEnergyTargets);
+    }
     if (
       hasCenter &&
       !pin &&
@@ -712,6 +725,20 @@ function stepSimulation(view) {
       continue;
     }
 
+    const accelMag = Math.hypot(accel.ax, accel.ay);
+    let stillFrames = sleepStates.get(node) || 0;
+    // A higher wake threshold prevents tiny force fluctuations from causing jitter.
+    if (
+      stillFrames >= 8 &&
+      accelMag < settleAccelEps * 2 &&
+      Math.hypot(node.vx, node.vy) < settleVelocityEps * 2
+    ) {
+      node.vx = 0;
+      node.vy = 0;
+      continue;
+    }
+    if (stillFrames >= 8) stillFrames = 0;
+
     if (noForces) {
       const calmFactor = layoutSearchFactor <= 0 ? 0.3 : 0.5;
       node.vx *= calmFactor;
@@ -730,10 +757,6 @@ function stepSimulation(view) {
       node.vx *= velocityRetention;
       node.vy *= velocityRetention;
     }
-    node.vx *= settleVelocityBrake;
-    node.vy *= settleVelocityBrake;
-
-    const accelMag = Math.sqrt(accel.ax * accel.ax + accel.ay * accel.ay);
     const speedNow = Math.sqrt(node.vx * node.vx + node.vy * node.vy);
     if (speedNow > maxSpeed) {
       const ratio = maxSpeed / speedNow;
@@ -743,9 +766,14 @@ function stepSimulation(view) {
     if (speedNow < settleVelocityEps && accelMag < settleAccelEps) {
       node.vx = 0;
       node.vy = 0;
+      stillFrames += 1;
     } else {
+      stillFrames = 0;
       movingNodeCount += 1;
     }
+
+    sleepStates.set(node, stillFrames);
+    if (stillFrames < 8) awakeNodeCount += 1;
 
     node.x += node.vx;
     node.y += node.vy;
@@ -761,7 +789,7 @@ function stepSimulation(view) {
   }
   stepLayoutAutosave(view, movingNodeCount > 0);
 
-  if (!view.dragNodeId && elapsedSearchMs >= layoutSearchMs) {
+  if (!view.dragNodeId && !activelyDraggedNodeIds.size && awakeNodeCount === 0) {
     view.layoutPaused = true;
   }
 }
