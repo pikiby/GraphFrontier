@@ -31,6 +31,10 @@ the center; click it or use **Edit gravity node** in its context menu to edit it
 gravity node** removes only the object. No Markdown files or links are created.
 
 Matching free nodes are attracted to the center while ordinary graph forces continue.
+The **Repulsion** slider (0-100, default 0/off) pushes nonmatching nodes away without
+changing attraction. Repulsion fades smoothly to zero at 1000 graph units from the center.
+Like attraction, it respects pins, active dragging and attachment isolation, and is saved
+with the layout. Gravity centers do not repel each other.
 Pinned, orbit-pinned and actively dragged nodes are not pulled. Attachment isolation
 settings still apply. Multiple centers combine their attraction. Centers stay visible
 when search or blacklist/whitelist hide notes, but hidden notes do not participate in physics.
@@ -105,6 +109,25 @@ Actions appear only when applicable: YAML actions require the corresponding prop
 - `Autosave`: optionally saves layout after graph stabilizes
 
 If search row is active, save is blocked to avoid saving filtered/focus state as final layout.
+
+## Static HTML Export on Mobile
+
+On desktop, **Export to** still accepts an absolute filesystem path. On mobile, enter
+a path relative to the current vault, such as `Exports/graph.html`. Missing folders
+are created; an existing HTML file at that path is replaced. An existing folder or
+a path ending in `/` uses `graphfrontier-static.html` inside that folder.
+
+The initial path is empty. Desktop and mobile export paths are remembered separately
+after a successful export. Absolute paths, URLs, parent traversal and hidden folders
+are not accepted by mobile export. The HTML contains note previews and metadata;
+review its contents before sharing it.
+
+On mobile, **Open URL** and Obsidian `path` links are passed to the host without
+Electron. Vault files open in Obsidian. Opening arbitrary external files or folders
+is desktop-only. Actual link handling depends on the device and installed apps.
+
+Mobile export and navigation have automated coverage with a simulated platform and
+vault API. This is not yet verification on a physical Android or iOS device.
 
 ## Related Docs
 

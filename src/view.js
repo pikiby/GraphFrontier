@@ -1,4 +1,5 @@
-const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
+const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Platform } = require('obsidian');
+const { resolveMobileExportPath, writeMobileExport } = require('./mobile-export');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
 const { buildNodeContextMenu } = require('./node-context-menu');
 const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
@@ -4373,8 +4374,10 @@ class GraphFrontierView extends ItemView {
   }
 
   async commandExportStaticHtml(options = {}) {
+    const mobile = Platform.isMobile;
+    const pathSetting = mobile ? 'export_static_html_mobile_path' : 'export_static_html_path';
     const preselectedPath = String(options?.exportPath || '').trim();
-    const savedPath = String(this.plugin.data?.settings?.export_static_html_path || '').trim();
+    const savedPath = String(this.plugin.data?.settings?.[pathSetting] || '').trim();
     let exportPath = preselectedPath;
     if (!exportPath) {
       exportPath = await ExportStaticHtmlPathModal.openFor(this.app, savedPath);
@@ -4385,60 +4388,65 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
-    let nodeRequire = null;
-    if (this.contentEl?.win && typeof this.contentEl.win.require === 'function') {
-      nodeRequire = this.contentEl.win.require.bind(this.contentEl.win);
-    } else if (typeof window !== 'undefined' && typeof window.require === 'function') {
-      nodeRequire = window.require.bind(window);
-    }
-    if (!nodeRequire) {
-      new Notice('Static HTML export is available only in desktop app');
-      return;
-    }
-
+    let normalizedExportPath;
     let fs = null;
     let path = null;
-    try {
-      fs = nodeRequire('fs');
-      path = nodeRequire('path');
-    } catch {
-      new Notice('Cannot access filesystem APIs for export');
-      return;
-    }
-    const rawExportPath = String(exportPath || '').trim();
-    if (!rawExportPath) {
-      new Notice('Export path is empty');
-      return;
-    }
-    if (!path.isAbsolute(rawExportPath)) {
-      new Notice('Use absolute path for export');
-      return;
-    }
-
-    const defaultExportFileName = 'graphfrontier-static.html';
-    let normalizedExportPath = rawExportPath;
-    try {
-      const exportPathStat = await fs.promises.stat(normalizedExportPath);
-      if (exportPathStat.isDirectory()) {
-        normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
+    if (mobile) {
+      try {
+        normalizedExportPath = resolveMobileExportPath(this.app.vault, exportPath);
+      } catch (error) {
+        new Notice(error.message);
+        return;
       }
-    } catch {
-      // Missing paths are normal here: the parent folder is created below.
-    }
-    if (/[\\/]$/u.test(normalizedExportPath)) {
-      normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
     } else {
-      const extension = path.extname(normalizedExportPath).toLowerCase();
-      if (extension !== '.html' && extension !== '.htm') {
-        const parsedPath = path.parse(normalizedExportPath);
-        const fileName = parsedPath.name ? `${parsedPath.name}.html` : defaultExportFileName;
-        normalizedExportPath = path.join(parsedPath.dir, fileName);
+      let nodeRequire = null;
+      if (this.contentEl?.win && typeof this.contentEl.win.require === 'function') {
+        nodeRequire = this.contentEl.win.require.bind(this.contentEl.win);
+      } else if (typeof window !== 'undefined' && typeof window.require === 'function') {
+        nodeRequire = window.require.bind(window);
       }
-    }
+      if (!nodeRequire) {
+        new Notice('Static HTML export is available only in desktop app');
+        return;
+      }
 
-    if (this.plugin.data.settings.export_static_html_path !== normalizedExportPath) {
-      this.plugin.data.settings.export_static_html_path = normalizedExportPath;
-      this.plugin.schedulePersist();
+      try {
+        fs = nodeRequire('fs');
+        path = nodeRequire('path');
+      } catch {
+        new Notice('Cannot access filesystem APIs for export');
+        return;
+      }
+      const rawExportPath = String(exportPath || '').trim();
+      if (!rawExportPath) {
+        new Notice('Export path is empty');
+        return;
+      }
+      if (!path.isAbsolute(rawExportPath)) {
+        new Notice('Use absolute path for export');
+        return;
+      }
+
+      const defaultExportFileName = 'graphfrontier-static.html';
+      normalizedExportPath = rawExportPath;
+      try {
+        const exportPathStat = await fs.promises.stat(normalizedExportPath);
+        if (exportPathStat.isDirectory()) {
+          normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
+        }
+      } catch {
+        // Missing paths are normal here: the parent folder is created below.
+      }
+      if (/[\\/]$/u.test(normalizedExportPath)) {
+        normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
+      } else {
+        const extension = path.extname(normalizedExportPath).toLowerCase();
+        if (extension !== '.html' && extension !== '.htm') {
+          const parsedPath = path.parse(normalizedExportPath);
+          const fileName = parsedPath.name ? `${parsedPath.name}.html` : defaultExportFileName;
+          normalizedExportPath = path.join(parsedPath.dir, fileName);
+        }
+      }
     }
 
     const visibleNodeIds = this.getFilterVisibleNodeIds();
@@ -5311,8 +5319,16 @@ class GraphFrontierView extends ItemView {
 `;
 
     try {
-      await fs.promises.mkdir(path.dirname(normalizedExportPath), { recursive: true });
-      await fs.promises.writeFile(normalizedExportPath, html, 'utf8');
+      if (mobile) {
+        await writeMobileExport(this.app.vault, normalizedExportPath, html);
+      } else {
+        await fs.promises.mkdir(path.dirname(normalizedExportPath), { recursive: true });
+        await fs.promises.writeFile(normalizedExportPath, html, 'utf8');
+      }
+      if (this.plugin.data.settings[pathSetting] !== normalizedExportPath) {
+        this.plugin.data.settings[pathSetting] = normalizedExportPath;
+        this.plugin.schedulePersist();
+      }
       new Notice(
         `Static HTML exported: ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} edges)`
       );
@@ -6312,7 +6328,9 @@ class ExportStaticHtmlPathModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.createEl('h3', {
-      text: 'Write the folder path and the file name for saving.',
+      text: Platform.isMobile
+        ? 'Write the folder path and the file name inside the vault.'
+        : 'Write the folder path and the file name for saving.',
     });
 
     const form = contentEl.createDiv({ cls: 'graphfrontier-coord-form' });

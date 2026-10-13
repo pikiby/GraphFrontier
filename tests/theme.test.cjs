@@ -3,6 +3,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const path = require('node:path');
 const { fixture, loadSource } = require('./helpers/obsidian.cjs');
+const { mobileVault } = require('./helpers/mobile-vault.cjs');
 const { readGraphTheme } = require('../src/theme');
 const render = require('../src/render');
 const { GraphFrontierView } = loadSource('view.js');
@@ -323,6 +324,39 @@ function runExport(html) {
   vm.runInNewContext(script, sandbox, { timeout: 1000 });
   return { calls, canvasEvents, windowEvents, elements };
 }
+
+test('mobile export produces executable graph HTML through Vault without any Node access', async (t) => {
+  const { view, app, plugin } = graph(t, 'light');
+  const { vault, contents, file } = mobileVault(t);
+  Object.assign(app.vault, vault);
+  Object.defineProperty(view.contentEl.win, 'require', {
+    get() {
+      return assert.fail('Mobile export must not access Node/Electron');
+    },
+  });
+  file('alpha.md', '# Mobile preview');
+  plugin.data.settings.export_static_html_path = '/desktop/graph.html';
+  assert.equal(plugin.data.settings.export_static_html_mobile_path, '');
+  await view.commandExportStaticHtml({ exportPath: 'Exports/graph.html' });
+  const html = contents.get('Exports/graph.html');
+  assert.equal(typeof html, 'string');
+  const { canvasEvents, windowEvents, elements } = runExport(html);
+  const point = { button: 0, clientX: 300, clientY: 200 };
+  canvasEvents.mousedown(point);
+  windowEvents.mouseup(point);
+  assert.equal(elements.get('panel-title').textContent, 'Alpha');
+  assert.match(elements.get('panel-content-html').innerHTML, /Mobile preview/);
+  assert.equal(plugin.data.settings.export_static_html_mobile_path, 'Exports/graph.html');
+  assert.equal(plugin.data.settings.export_static_html_path, '/desktop/graph.html');
+  vault.create = async () => {
+    throw new Error('read-only');
+  };
+  app.vault.create = vault.create;
+  await view.commandExportStaticHtml({ exportPath: 'failed.html' });
+  assert.equal(plugin.data.settings.export_static_html_mobile_path, 'Exports/graph.html');
+  await view.commandExportStaticHtml({ exportPath: '/desktop/invalid.html' });
+  assert.equal(contents.has('/desktop/invalid.html'), false);
+});
 
 test('exported HTML executes aura drawing with the node color and transparent outer edge', async (t) => {
   const { html } = await exportGraph(t, 'dark', undefined, true);

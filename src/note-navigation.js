@@ -1,8 +1,10 @@
-const { Notice } = require('obsidian');
+const { Notice, Platform } = require('obsidian');
 
 async function openNoteTarget(app, type, target, hostWindow) {
   const nodeRequire =
-    typeof hostWindow?.require === 'function' ? hostWindow.require.bind(hostWindow) : null;
+    !Platform.isMobile && typeof hostWindow?.require === 'function'
+      ? hostWindow.require.bind(hostWindow)
+      : null;
   if (type === 'url') {
     let url;
     try {
@@ -36,7 +38,9 @@ async function openNoteTarget(app, type, target, hostWindow) {
     await app.workspace.getLeaf(true).openFile(file);
     return;
   }
-  if (!nodeRequire) throw new Error('External files and folders require desktop Obsidian');
+  if (!nodeRequire) {
+    throw new Error('On mobile, Open path supports vault files and obsidian://open links only');
+  }
   const path = nodeRequire('path');
   if (path.sep !== '\\' && path.win32.isAbsolute(target) && !path.posix.isAbsolute(target)) {
     throw new Error('This Windows path is not available on this device');

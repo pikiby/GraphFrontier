@@ -592,6 +592,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       typeof normalized.settings.export_static_html_path === 'string'
         ? normalized.settings.export_static_html_path.trim()
         : '';
+    normalized.settings.export_static_html_mobile_path =
+      typeof normalized.settings.export_static_html_mobile_path === 'string'
+        ? normalized.settings.export_static_html_mobile_path.trim()
+        : '';
     delete normalized.settings.max_multiplier;
     delete normalized.settings.label_min_zoom;
     delete normalized.settings.orbit_distance_multiplier;

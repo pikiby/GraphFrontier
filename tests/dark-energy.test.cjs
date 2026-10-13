@@ -11,6 +11,7 @@ const center = (overrides = {}) => ({
   name: 'Center',
   queries: ['tag:database'],
   strength: 10,
+  repulsion: 0,
   x: 200,
   y: 0,
   ...overrides,
@@ -69,6 +70,18 @@ test('dark energy normalization preserves valid settings and rejects invalid ide
   assert.equal(data.dark_energy.length, 1);
   assert.equal(data.dark_energy[0].strength, 10);
   assert.equal(data.dark_energy[0].x, 0);
+  for (const [repulsion, expected] of [
+    [undefined, 0],
+    [Infinity, 0],
+    [-5, 0],
+    [120, 100],
+    [30, 30],
+  ]) {
+    assert.equal(
+      plugin.normalizeData({ dark_energy: [center({ repulsion })] }).dark_energy[0].repulsion,
+      expected
+    );
+  }
 });
 
 test('all search query types use the existing matcher and union rules without duplicate forces', (t) => {
@@ -262,6 +275,13 @@ test('compact gravity editor uses sidebar slider styles and saves the slider val
     false
   );
   const slider = els.find((el) => el.type === 'range');
+  const repelSlider = els.filter((el) => el.type === 'range')[1];
+  assert.equal(repelSlider.cls, slider.cls);
+  assert.equal(repelSlider.value, '0');
+  assert.equal(repelSlider.min, '0');
+  assert.equal(repelSlider.max, '100');
+  repelSlider.value = '40';
+  repelSlider.events.input();
   assert.equal(slider.cls, 'graphfrontier-sidepanel-slider');
   assert.equal(slider.min, '0');
   assert.equal(slider.max, '100');
@@ -272,6 +292,7 @@ test('compact gravity editor uses sidebar slider styles and saves the slider val
   assert.equal(setText.mock.calls[0].arguments[0], '25');
   els.find((el) => el.text === 'Save').events.click();
   assert.equal(saved[0].strength, 25);
+  assert.equal(saved[0].repulsion, 40);
   assert.equal(saved[0].name, 'Gravity node');
   assert.equal(
     plugin.normalizeData({ dark_energy: [center({ name: 'Dark energy' })] }).dark_energy[0].name,
@@ -322,4 +343,73 @@ test('orbit-pinned and hidden nodes remain unaffected by attraction', (t) => {
   view.kickLayoutSearch();
   view.stepSimulation();
   assert.equal(node.x, 220);
+});
+
+test('repulsion affects only nonmatching nodes, fades with distance and reuses matching cache', (t) => {
+  const { view, node } = setup(t, [center({ repulsion: 50 })]);
+  const targets = getDarkEnergyTargets(view);
+  const match = t.mock.method(view, 'nodeMatchesParsedGroup');
+  const other = view.nodeById.get('other.md');
+  const acceleration = (target) => {
+    const accel = { ax: 0, ay: 0 };
+    applyDarkEnergyForce(view, target, accel, getDarkEnergyTargets(view));
+    return accel;
+  };
+  assert.equal(acceleration(node).ax, 0.15);
+  const near = acceleration(other).ax;
+  assert.ok(near < 0);
+  assert.equal(near, (-0.004 * 50 * (1 - 400 / 1000) ** 2) / 2);
+  other.x = -600;
+  assert.ok(acceleration(other).ax > near);
+  for (const x of [-800, -1000]) {
+    other.x = x;
+    assert.equal(acceleration(other).ax, 0);
+  }
+  other.x = 200;
+  const coincident = acceleration(other);
+  assert.ok(Math.hypot(coincident.ax, coincident.ay) > 0);
+  assert.deepEqual(acceleration(other), coincident);
+  assert.equal(getDarkEnergyTargets(view), targets);
+  assert.equal(match.mock.callCount(), 0);
+  assert.equal(targets.has(center().id), false);
+});
+
+test('repulsion runs with attraction disabled but respects pins, orbits, drag, isolation and visibility', (t) => {
+  const { view, plugin } = setup(t, [center({ strength: 0, repulsion: 50 })]);
+  const other = view.nodeById.get('other.md');
+  plugin.setPin(other.id, { x: -200, y: 0 });
+  view.stepSimulation();
+  assert.equal(other.x, -200);
+  plugin.removePin(other.id);
+  view.dragNodeId = other.id;
+  view.stepSimulation();
+  assert.equal(other.x, -200);
+  view.dragNodeId = null;
+  other.meta.isAttachment = true;
+  view.kickLayoutSearch();
+  view.stepSimulation();
+  assert.equal(other.x, -200);
+  other.meta.isAttachment = false;
+  plugin.setOrbitPin(other.id, { anchor_id: center().id, radius: 20, angle: 0 });
+  view.stepSimulation();
+  assert.equal(other.x, 220);
+  plugin.removeOrbitPin(other.id);
+  plugin.data.blacklist = [{ id: 'hidden', query: 'name:Other', enabled: true }];
+  view.markQueryRuleVisibilityDirty();
+  view.kickLayoutSearch();
+  view.stepSimulation();
+  assert.equal(other.x, 220);
+  plugin.data.blacklist = [];
+  view.markQueryRuleVisibilityDirty();
+  view.kickLayoutSearch();
+  view.stepSimulation();
+  assert.ok(other.x > 220);
+});
+
+test('layout save and reload preserve repulsion', async (t) => {
+  const { view, plugin } = setup(t, [center({ repulsion: 35 })]);
+  assert.equal(await view.saveCurrentLayout({ silent: true }), true);
+  plugin.data.dark_energy = [center({ repulsion: 0 })];
+  assert.equal(await view.loadSavedLayout(), true);
+  assert.equal(plugin.data.dark_energy[0].repulsion, 35);
 });

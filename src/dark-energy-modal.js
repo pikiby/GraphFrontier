@@ -89,24 +89,29 @@ class DarkEnergyModal extends Modal {
     };
     for (const query of initial.queries?.length ? initial.queries : ['name:']) addRule(query);
     addButton.addEventListener('click', () => addRule());
-    const strengthRow = contentEl.createDiv({ cls: 'graphfrontier-sidepanel-row is-slider' });
-    strengthRow.createSpan({ text: 'Attraction', cls: 'graphfrontier-sidepanel-label' });
-    const strength = strengthRow.createEl('input', {
-      type: 'range',
-      cls: 'graphfrontier-sidepanel-slider',
-    });
-    strength.setAttribute('aria-label', 'Gravity node attraction');
-    strength.min = '0';
-    strength.max = '100';
-    strength.step = '1';
-    strength.value = String(initial.strength ?? 10);
-    const strengthValue = strengthRow.createSpan({
-      cls: 'graphfrontier-sidepanel-value',
-      text: strength.value,
-    });
-    strength.addEventListener('input', () =>
-      strengthValue.setText(view.formatSliderValue(Number(strength.value), 1))
-    );
+    const addForceSlider = (label, value) => {
+      const strengthRow = contentEl.createDiv({ cls: 'graphfrontier-sidepanel-row is-slider' });
+      strengthRow.createSpan({ text: label, cls: 'graphfrontier-sidepanel-label' });
+      const strength = strengthRow.createEl('input', {
+        type: 'range',
+        cls: 'graphfrontier-sidepanel-slider',
+      });
+      strength.setAttribute('aria-label', `Gravity node ${label.toLowerCase()}`);
+      strength.min = '0';
+      strength.max = '100';
+      strength.step = '1';
+      strength.value = String(value);
+      const strengthValue = strengthRow.createSpan({
+        cls: 'graphfrontier-sidepanel-value',
+        text: strength.value,
+      });
+      strength.addEventListener('input', () =>
+        strengthValue.setText(view.formatSliderValue(Number(strength.value), 1))
+      );
+      return strength;
+    };
+    const strength = addForceSlider('Attraction', initial.strength ?? 10);
+    const repulsion = addForceSlider('Repulsion', initial.repulsion ?? 0);
     const footer = contentEl.createDiv({ cls: 'graphfrontier-sidepanel-actions' });
     const actions = footer.createDiv({ cls: 'graphfrontier-sidepanel-actions-row' });
     actions
@@ -122,11 +127,26 @@ class DarkEnergyModal extends Modal {
           return;
         }
         const value = Number(strength.value);
-        if (!strength.value.trim() || !Number.isFinite(value) || value < 0 || value > 100) {
+        const repulsionValue = Number(repulsion.value);
+        if (
+          [strength, repulsion].some(
+            (input) =>
+              !input.value.trim() ||
+              !Number.isFinite(Number(input.value)) ||
+              Number(input.value) < 0 ||
+              Number(input.value) > 100
+          )
+        ) {
           new Notice('Strength must be between 0 and 100');
           return;
         }
-        this.onSave({ ...initial, name: name.value.trim(), queries, strength: value });
+        this.onSave({
+          ...initial,
+          name: name.value.trim(),
+          queries,
+          strength: value,
+          repulsion: repulsionValue,
+        });
         this.close();
       });
     actions

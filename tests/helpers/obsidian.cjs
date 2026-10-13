@@ -106,6 +106,10 @@ class Menu {
 }
 
 const obsidian = {
+  Platform: { isMobile: false, isDesktop: true },
+  TFile: class {},
+  TFolder: class {},
+  normalizePath: (value) => value.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, ''),
   Notice,
   Plugin,
   ItemView,
@@ -246,4 +250,4 @@ function fixture(t, data = {}) {
   };
 }
 
-module.exports = { loadSource, notices, element, deferred, fixture };
+module.exports = { loadSource, notices, element, deferred, fixture, obsidian };

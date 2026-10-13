@@ -3,6 +3,7 @@ const test = require('node:test');
 const path = require('node:path');
 const { fixture, loadSource, notices } = require('./helpers/obsidian.cjs');
 const { addNoteNavigationActions, openNoteTarget } = loadSource('note-navigation.js');
+const { mobileVault } = require('./helpers/mobile-vault.cjs');
 
 function menu() {
   return {
@@ -27,6 +28,32 @@ function menu() {
     },
   };
 }
+
+test('mobile navigation never uses Electron even when emulation exposes require', async (t) => {
+  const { vault, file } = mobileVault(t);
+  const opened = [];
+  const app = {
+    vault,
+    workspace: { getLeaf: () => ({ openFile: async (f) => opened.push(f.path) }) },
+  };
+  const host = {
+    get require() {
+      return assert.fail('Mobile must not access Node/Electron');
+    },
+    open: (...args) => opened.push(args),
+  };
+  file('Note.md');
+  await openNoteTarget(app, 'url', 'https://example.com', host);
+  await openNoteTarget(app, 'path', 'obsidian://open?vault=Other', host);
+  await openNoteTarget(app, 'path', 'Note.md', host);
+  assert.deepEqual(opened, [
+    ['https://example.com/', '_blank', 'noopener,noreferrer'],
+    ['obsidian://open?vault=Other', '_blank', 'noopener,noreferrer'],
+    'Note.md',
+  ]);
+  await assert.rejects(openNoteTarget(app, 'path', '/external/file', host), /On mobile/);
+  await assert.rejects(openNoteTarget(app, 'url', 'javascript:alert(1)', host), /URL must use/);
+});
 
 test('menu reads current note YAML and provides only applicable quick-open actions', async (t) => {
   const { app } = fixture(t);

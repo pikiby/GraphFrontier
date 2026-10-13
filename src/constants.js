@@ -56,6 +56,7 @@ const DEFAULT_DATA = {
     damping: 0.18,
     layout_autosave: false,
     export_static_html_path: '',
+    export_static_html_mobile_path: '',
   },
   view_state: {
     pan_x: 0,

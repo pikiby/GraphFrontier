@@ -32,25 +32,23 @@ https://github.com/pikiby/GraphFrontier/issues
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.7.6/graphfrontier-0.7.6.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.7.7/graphfrontier-0.7.7.zip
 
-1. Download `graphfrontier-0.7.6.zip` from Releases
+1. Download `graphfrontier-0.7.7.zip` from Releases
 2. Extract it into your vault plugins folder:
    - `<vault>/.obsidian/plugins/graphfrontier/`
 3. In Obsidian enable the plugin:
    - `Settings -> Community plugins -> GraphFrontier -> Enable`
 
-## Recent Updates (0.7.6)
+## Recent Updates (0.7.7)
 
-- **Gravity nodes:** create movable attraction centers with search-based rules and adjustable strength.
-- **Individual appearance:** customize node colors, size, labels, dimming and edge widths, with one shared reset action.
-- **Color auras:** add soft gradients around individual nodes with adjustable radius and brightness.
-- **Expanded controls:** node size up to x4 and Text zoom up to 40 steps.
-- **Equilibrium-based settling:** removed the forced three-second physics stop; nodes now sleep near equilibrium to suppress small oscillations.
-- **Search and navigation:** explicit query types, Copy name, and Obsidian vault links through the note's `path` property.
-- **HTML export:** carries the new individual visual settings and auras.
+- **Gravity-node repulsion:** repel notes that do not match a center's rules with a separate Repulsion slider. It defaults to 0 and leaves attraction unchanged.
+- **Localized force:** repulsion fades smoothly to zero at 1000 graph units and respects pins, dragging, visibility and attachment isolation.
+- **Mobile HTML export:** save a standalone graph inside the vault using Obsidian's Vault API, with desktop and mobile paths remembered separately after successful export.
+- **Mobile navigation:** open URLs and Obsidian vault links without Electron; arbitrary external files and folders remain desktop-only.
+- **Validation:** automated mobile tests are included; physical Android and iOS device testing is still pending.
 
-[Read the full release notes](docs/releases/0.7.6.md).
+[Read the full release notes](docs/releases/0.7.7.md).
 
 ## Features
 
