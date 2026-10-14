@@ -57,7 +57,11 @@ Autosave stabilization:
 - `Pin to grid`: node snaps to nearest free grid cell when pinned/drag released
 - `Orbit pin`: node is constrained around anchor node at a fixed radius/angle
 
-Pinned/orbit nodes do not behave like fully free simulation nodes.
+Pinning constrains movement, not influence. Exact/grid/orbit-pinned nodes still
+repel eligible free neighbors and exert link forces, including Strong pull.
+The pinned node itself does not move under those forces; orbit-pinned nodes
+follow their anchor's position. Force calculations between two fixed nodes are
+skipped because neither can move. Attachment-isolation rules still apply.
 
 ## Orbit Geometry
 

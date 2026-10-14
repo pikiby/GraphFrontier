@@ -325,16 +325,16 @@ function stepSimulation(view) {
     stepLayoutAutosave(view);
     return;
   }
-  const freeOrphanNodes = [];
+  const orphanNodes = [];
   const attachmentOnlyAnchorNodes = [];
   const attachmentOnlyAnchorIds = new Set();
   const mainNodesForOrphanRepel = [];
+  // Pins constrain movement, not the forces a node exerts on movable neighbors.
   for (const node of nodes) {
-    if (fixedNodeIds.has(node.id)) continue;
     const nodeDegree = getNodeDegree(node);
     if (autoAttachmentOrbitNodeIds.has(node.id)) continue;
     if (nodeDegree === 0) {
-      if (!attachmentIsolationMode || !node?.meta?.isAttachment) freeOrphanNodes.push(node);
+      if (!attachmentIsolationMode || !node?.meta?.isAttachment) orphanNodes.push(node);
     }
     if (nodeDegree > 0 && !node?.meta?.isAttachment) {
       const neighborIds = view.neighborsById.get(node.id);
@@ -380,12 +380,11 @@ function stepSimulation(view) {
       }
       if (autoAttachmentOrbitNodeIds.has(nodeA.id) || autoAttachmentOrbitNodeIds.has(nodeB.id))
         return;
-      if (fixedNodeIds.has(nodeA.id) || fixedNodeIds.has(nodeB.id)) return;
+      if (fixedNodeIds.has(nodeA.id) && fixedNodeIds.has(nodeB.id)) return;
       if (getNodeDegree(nodeA) === 0 || getNodeDegree(nodeB) === 0) return;
       if (attachmentOnlyAnchorIds.has(nodeA.id) || attachmentOnlyAnchorIds.has(nodeB.id)) return;
       const nodeAIsOrbitPinned = orbitNodeIds.has(nodeA.id);
       const nodeBIsOrbitPinned = orbitNodeIds.has(nodeB.id);
-      if (nodeAIsOrbitPinned && nodeBIsOrbitPinned) return;
       const dx = nodeB.x - nodeA.x;
       const dy = nodeB.y - nodeA.y;
       const distSq = dx * dx + dy * dy;
@@ -410,9 +409,10 @@ function stepSimulation(view) {
     });
 
     const orphanRepelStrength = repelStrength * orphanRepelScale;
-    if (orphanRepelStrength > 0 && freeOrphanNodes.length > 1) {
-      const orphanSpatialIndex = buildSpatialIndex(freeOrphanNodes, orphanRepelRadius);
+    if (orphanRepelStrength > 0 && orphanNodes.length > 1) {
+      const orphanSpatialIndex = buildSpatialIndex(orphanNodes, orphanRepelRadius);
       forEachNearbyNodePair(orphanSpatialIndex, orphanRepelRadius, (nodeA, nodeB) => {
+        if (fixedNodeIds.has(nodeA.id) && fixedNodeIds.has(nodeB.id)) return;
         const dx = nodeB.x - nodeA.x;
         const dy = nodeB.y - nodeA.y;
         const distSq = dx * dx + dy * dy;
@@ -441,7 +441,7 @@ function stepSimulation(view) {
       forEachNearbyNodePair(attachmentOnlySpatialIndex, orphanRepelRadius, (nodeA, nodeB) => {
         const nodeAIsOrbitPinned = orbitNodeIds.has(nodeA.id);
         const nodeBIsOrbitPinned = orbitNodeIds.has(nodeB.id);
-        if (nodeAIsOrbitPinned && nodeBIsOrbitPinned) return;
+        if (fixedNodeIds.has(nodeA.id) && fixedNodeIds.has(nodeB.id)) return;
         const dx = nodeB.x - nodeA.x;
         const dy = nodeB.y - nodeA.y;
         const distSq = dx * dx + dy * dy;
@@ -469,19 +469,20 @@ function stepSimulation(view) {
       repelStrength * ((orphanRepelScale + attachmentOnlyRepelScale) / 2);
     if (
       orphanToAttachmentOnlyRepelStrength > 0 &&
-      freeOrphanNodes.length > 0 &&
+      orphanNodes.length > 0 &&
       attachmentOnlyAnchorNodes.length > 0
     ) {
       const attachmentOnlySpatialIndex = buildSpatialIndex(
         attachmentOnlyAnchorNodes,
         orphanRepelRadius
       );
-      for (const orphanNode of freeOrphanNodes) {
+      for (const orphanNode of orphanNodes) {
         forEachNearbyNodeFromIndex(
           attachmentOnlySpatialIndex,
           orphanNode,
           orphanRepelRadius,
           (attachmentOnlyNode) => {
+            if (fixedNodeIds.has(orphanNode.id) && fixedNodeIds.has(attachmentOnlyNode.id)) return;
             const attachmentOnlyIsOrbitPinned = orbitNodeIds.has(attachmentOnlyNode.id);
             const dx = attachmentOnlyNode.x - orphanNode.x;
             const dy = attachmentOnlyNode.y - orphanNode.y;
@@ -512,16 +513,17 @@ function stepSimulation(view) {
     const orphanToMainRepelStrength = repelStrength * orphanToMainRepelScale;
     if (
       orphanToMainRepelStrength > 0 &&
-      freeOrphanNodes.length > 0 &&
+      orphanNodes.length > 0 &&
       mainNodesForOrphanRepel.length > 0
     ) {
       const mainSpatialIndex = buildSpatialIndex(mainNodesForOrphanRepel, orphanToMainRepelRadius);
-      for (const orphanNode of freeOrphanNodes) {
+      for (const orphanNode of orphanNodes) {
         forEachNearbyNodeFromIndex(
           mainSpatialIndex,
           orphanNode,
           orphanToMainRepelRadius,
           (mainNode) => {
+            if (fixedNodeIds.has(orphanNode.id) && fixedNodeIds.has(mainNode.id)) return;
             const dx = mainNode.x - orphanNode.x;
             const dy = mainNode.y - orphanNode.y;
             const distSq = dx * dx + dy * dy;
@@ -563,6 +565,7 @@ function stepSimulation(view) {
           attachmentOnlyNode,
           orphanToMainRepelRadius,
           (mainNode) => {
+            if (fixedNodeIds.has(attachmentOnlyNode.id) && fixedNodeIds.has(mainNode.id)) return;
             const dx = mainNode.x - attachmentOnlyNode.x;
             const dy = mainNode.y - attachmentOnlyNode.y;
             const distSq = dx * dx + dy * dy;

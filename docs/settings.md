@@ -70,8 +70,20 @@ Behavior:
 ## Save/Load Row
 
 - `Autosave`: saves layout after movement settles
-- `Save layout`: save positions + settings + pin states
+- `Save layout`: save positions, settings, pins, camera and any exact API node subset
 - `Load layout`: restore saved layout snapshot
+
+MCP `save_layout` additionally permits saving a nonempty search query. Manual
+Save and normal autosave retain their existing nonempty-search restriction.
+Collapsed sections are stored as global UI preferences rather than per-layout
+state. See [API layouts and backups](mcp.md#layouts-and-backups).
+
+## Local MCP
+
+Desktop Obsidian's `Settings -> GraphFrontier -> Local MCP` provides the optional
+server toggle, port, status, token management and client configuration examples.
+MCP is off by default and listens on localhost only. Its private `mcp.json`
+configuration is separate from layout data. See [setup and API reference](mcp.md).
 
 ## Related Docs
 

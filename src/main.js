@@ -1,6 +1,8 @@
 const { Plugin, Notice } = require('obsidian');
 const { normalizeDarkEnergy, darkEnergyNodes } = require('./dark-energy');
 const { NODE_VISUAL_SETTINGS, normalizeNodeVisuals } = require('./node-visuals');
+const { GraphFrontierApi } = require('./api');
+const { McpController, GraphFrontierMcpSettingTab } = require('./mcp-settings');
 
 const {
   GRAPHFRONTIER_VIEW_TYPE,
@@ -286,9 +288,16 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
     // Subscribe to vault/workspace changes and refresh all open GraphFrontier views.
     registerGraphFrontierRefreshEvents(this);
+    this.api = new GraphFrontierApi(this);
+    this.mcp = new McpController(this);
+    await this.mcp.load();
+    this.addSettingTab(new GraphFrontierMcpSettingTab(this.app, this));
+    if (this.mcp.error) new Notice(this.mcp.error);
   }
 
   onunload() {
+    this.api?.close();
+    void this.mcp?.stop();
     if (this._persistTimer) window.clearTimeout(this._persistTimer);
     if (this._refreshTimer) window.clearTimeout(this._refreshTimer);
     this._pendingRefreshOptions = {};
@@ -548,7 +557,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     if (
       Number.isFinite(attachmentLinkDistanceSetting) &&
       attachmentLinkDistanceSetting > 0 &&
-      attachmentLinkDistanceSetting <= 1
+      attachmentLinkDistanceSetting < 1
     ) {
       attachmentLinkDistanceSetting *= normalized.settings.link_distance;
     }
@@ -693,6 +702,18 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       nextSidePanelSections[sectionId] = !!rawState;
     }
     normalized.view_state.side_panel_sections = nextSidePanelSections;
+    normalized.view_state.camera_saved = viewState.camera_saved === true;
+    normalized.view_state.search_query =
+      typeof viewState.search_query === 'string' && this.parseGroupQuery(viewState.search_query)
+        ? viewState.search_query.slice(0, 4096)
+        : 'name:';
+    normalized.view_state.node_filter = Array.isArray(viewState.node_filter)
+      ? [
+          ...new Set(
+            viewState.node_filter.filter((id) => typeof id === 'string' && id.length <= 4096)
+          ),
+        ]
+      : null;
 
     return normalized;
   }
@@ -949,7 +970,11 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     }
   }
 
-  async deleteLayoutFile(layoutFileName) {
+  async deleteLayoutFile(layoutFileName, options = {}) {
+    return this.runLayoutFileOperation(() => this.deleteLayoutFileNow(layoutFileName, options));
+  }
+
+  async deleteLayoutFileNow(layoutFileName, options = {}) {
     const fileName = this.normalizeLayoutFileName(layoutFileName);
     const existingLayoutNames = await this.listLayoutFileNames();
     if (!existingLayoutNames.includes(fileName)) {
@@ -958,6 +983,18 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     if (existingLayoutNames.length <= 1) {
       return { ok: false, reason: 'last-layout' };
     }
+
+    const wasActiveLayout = this.getActiveLayoutFileName() === fileName;
+    const remainingLayoutNames = existingLayoutNames.filter((name) => name !== fileName);
+    const preferredFallback = this.normalizeLayoutFileName(DEFAULT_DATA.active_layout_name);
+    const nextActiveLayoutName = remainingLayoutNames.includes(preferredFallback)
+      ? preferredFallback
+      : remainingLayoutNames[0];
+    // Validate the fallback before deleting the active file, not after it is gone.
+    if (wasActiveLayout && (await this.readLayoutFileData(nextActiveLayoutName)).status !== 'ok') {
+      return { ok: false, reason: 'invalid-fallback' };
+    }
+    if (options.beforeDelete) await options.beforeDelete();
 
     const filePath = this.getLayoutFileRelativePath(fileName);
     const adapter = this.app?.vault?.adapter;
@@ -988,7 +1025,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       return { ok: false, reason: 'delete-failed' };
     }
 
-    const wasActiveLayout = this.getActiveLayoutFileName() === fileName;
     if (!wasActiveLayout) {
       return {
         ok: true,
@@ -998,16 +1034,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       };
     }
 
-    const remainingLayoutNames = existingLayoutNames.filter((name) => name !== fileName);
-    const preferredFallback = this.normalizeLayoutFileName(DEFAULT_DATA.active_layout_name);
-    const nextActiveLayoutName = remainingLayoutNames.includes(preferredFallback)
-      ? preferredFallback
-      : remainingLayoutNames[0];
     if (!nextActiveLayoutName) {
       return { ok: false, reason: 'no-fallback' };
     }
 
-    const switched = await this.setActiveLayoutFile(nextActiveLayoutName, { loadFromFile: true });
+    const switched = await this.setActiveLayoutFileNow(nextActiveLayoutName, {
+      loadFromFile: true,
+    });
     if (!switched) {
       return { ok: false, reason: 'active-switch-failed' };
     }
@@ -1066,33 +1099,37 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   async setActiveLayoutFile(layoutFileName, options = {}) {
-    return this.runLayoutFileOperation(async () => {
-      const nextLayoutName = this.normalizeLayoutFileName(layoutFileName);
-      const shouldLoadFromFile = options.loadFromFile !== false;
-      let nextData = this.normalizeData(this.data);
-      if (shouldLoadFromFile) {
-        const result = await this.readLayoutFileData(nextLayoutName);
-        if (result.status !== 'ok') return false;
-        nextData = this.normalizeData(result.data);
-      }
-      if (this._persistTimer) {
-        window.clearTimeout(this._persistTimer);
-        this._persistTimer = null;
-      }
-      nextData.active_layout_name = nextLayoutName;
-      this.applySidePanelSectionsState(nextData);
-      try {
-        await this.saveData(nextData);
-      } catch {
-        new Notice('Layout selected, but plugin preferences could not be saved');
-      }
-      // Publish after the last await so queued saves still identify the old layout
-      // until the full-file switch is ready to update its views.
-      this.applySidePanelSectionsState(nextData);
-      this.data = nextData;
-      if (shouldLoadFromFile) this._layoutReadFailedName = null;
-      return true;
-    });
+    return this.runLayoutFileOperation(() => this.setActiveLayoutFileNow(layoutFileName, options));
+  }
+
+  async setActiveLayoutFileNow(layoutFileName, options = {}) {
+    options.assertCurrent?.();
+    const nextLayoutName = this.normalizeLayoutFileName(layoutFileName);
+    const shouldLoadFromFile = options.loadFromFile !== false;
+    let nextData = this.normalizeData(this.data);
+    if (shouldLoadFromFile) {
+      const result = await this.readLayoutFileData(nextLayoutName);
+      if (result.status !== 'ok') return false;
+      nextData = this.normalizeData(result.data);
+    }
+    options.assertCurrent?.();
+    if (this._persistTimer) {
+      window.clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+    }
+    nextData.active_layout_name = nextLayoutName;
+    this.applySidePanelSectionsState(nextData);
+    try {
+      await this.saveData(nextData);
+    } catch {
+      new Notice('Layout selected, but plugin preferences could not be saved');
+    }
+    // Publish after the last await so queued saves still identify the old layout
+    // until the full-file switch is ready to update its views.
+    this.applySidePanelSectionsState(nextData);
+    this.data = nextData;
+    if (shouldLoadFromFile) this._layoutReadFailedName = null;
+    return true;
   }
 
   // Node-state management: pin/grid/orbit modes, strong pull, and painted edges.

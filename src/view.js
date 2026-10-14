@@ -200,6 +200,7 @@ class GraphFrontierView extends ItemView {
     if (!loaded) new Notice('Cannot read active layout. File left unchanged.');
     this.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
     this.sidePanelSectionState = this.plugin.getSidePanelSectionsState();
+    this.restoreLayoutViewState();
     this.contentEl.empty();
     this.contentEl.addClass('graphfrontier-host');
 
@@ -217,10 +218,17 @@ class GraphFrontierView extends ItemView {
 
     const hasSavedLayoutPositions = Object.keys(this.plugin.data.saved_positions || {}).length > 0;
     this.refreshFromVault({
-      keepCamera: false,
+      keepCamera: !!(loaded && this.plugin.data.view_state.camera_saved),
       forceSavedPositions: loaded,
       skipLayoutKick: !loaded || hasSavedLayoutPositions,
     });
+    if (this.plugin.data.view_state.search_query && this.isSearchFilled()) {
+      this.commitSearchSelectionFromInput(this.searchInputValue);
+      if (hasSavedLayoutPositions) {
+        this.layoutPaused = true;
+        this.layoutAutosaveDirty = false;
+      }
+    }
 
     this.isOpen = true;
     this.runFrame();
@@ -1787,6 +1795,15 @@ class GraphFrontierView extends ItemView {
       finalVisibleNodeIds = new Set(finalVisibleNodeIds);
       for (const item of this.plugin.data.dark_energy) finalVisibleNodeIds.add(item.id);
     }
+    if (this.apiVisibleNodeIds instanceof Set) {
+      finalVisibleNodeIds = new Set(
+        [...this.apiVisibleNodeIds].filter(
+          (id) =>
+            this.nodeById.has(id) &&
+            (!(finalVisibleNodeIds instanceof Set) || finalVisibleNodeIds.has(id))
+        )
+      );
+    }
     this.filterVisibilityCache.finalVisibleKey = finalKey;
     this.filterVisibilityCache.finalVisibleNodeIds = finalVisibleNodeIds;
     return finalVisibleNodeIds;
@@ -3121,8 +3138,8 @@ class GraphFrontierView extends ItemView {
     // is still resolving. Never prune persisted layout state from this filtered snapshot.
   }
 
-  fitCameraToNodes() {
-    if (this.nodes.length === 0) {
+  fitCameraToNodes(nodes = this.nodes) {
+    if (nodes.length === 0) {
       this.camera.x = 0;
       this.camera.y = 0;
       this.camera.zoom = 1;
@@ -3137,7 +3154,7 @@ class GraphFrontierView extends ItemView {
     let minY = Infinity;
     let maxY = -Infinity;
 
-    for (const node of this.nodes) {
+    for (const node of nodes) {
       minX = Math.min(minX, node.x);
       maxX = Math.max(maxX, node.x);
       minY = Math.min(minY, node.y);
@@ -4451,9 +4468,10 @@ class GraphFrontierView extends ItemView {
 
     const visibleNodeIds = this.getFilterVisibleNodeIds();
     const hasFilter = visibleNodeIds instanceof Set;
-    const sourceNodes = hasFilter
-      ? this.nodes.filter((node) => visibleNodeIds.has(node.id))
-      : this.nodes.slice();
+    const explicitIds = Array.isArray(options.nodeIds) ? new Set(options.nodeIds) : null;
+    const sourceNodes = this.nodes.filter((node) =>
+      explicitIds ? explicitIds.has(node.id) : !hasFilter || visibleNodeIds.has(node.id)
+    );
     const sourceNodeIdSet = new Set(sourceNodes.map((node) => node.id));
     const sourceEdges = this.edges.filter(
       (edge) => sourceNodeIdSet.has(edge.source) && sourceNodeIdSet.has(edge.target)
@@ -4491,7 +4509,7 @@ class GraphFrontierView extends ItemView {
         }
 
         let contentPreview = '';
-        if (!isAttachment) {
+        if (!isAttachment && options.includeContents !== false) {
           const abstractFile = this.app.vault.getAbstractFileByPath(node.id);
           const isMarkdownFile =
             !!abstractFile &&
@@ -5318,20 +5336,39 @@ class GraphFrontierView extends ItemView {
 </html>
 `;
 
+    options.assertCurrent?.();
     try {
       if (mobile) {
+        if (
+          options.overwrite === false &&
+          this.app.vault.getAbstractFileByPath(normalizedExportPath)
+        )
+          throw new Error('Export already exists');
         await writeMobileExport(this.app.vault, normalizedExportPath, html);
       } else {
         await fs.promises.mkdir(path.dirname(normalizedExportPath), { recursive: true });
-        await fs.promises.writeFile(normalizedExportPath, html, 'utf8');
+        options.assertCurrent?.();
+        await fs.promises.writeFile(
+          normalizedExportPath,
+          html,
+          options.overwrite === false ? { encoding: 'utf8', flag: 'wx' } : 'utf8'
+        );
       }
-      if (this.plugin.data.settings[pathSetting] !== normalizedExportPath) {
+      if (
+        options.rememberPath !== false &&
+        this.plugin.data.settings[pathSetting] !== normalizedExportPath
+      ) {
         this.plugin.data.settings[pathSetting] = normalizedExportPath;
         this.plugin.schedulePersist();
       }
       new Notice(
         `Static HTML exported: ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} edges)`
       );
+      return {
+        path: normalizedExportPath,
+        nodeCount: exportedNodes.length,
+        edgeCount: exportedEdges.length,
+      };
     } catch {
       new Notice('Failed to write static HTML export');
     }
@@ -5985,7 +6022,7 @@ class GraphFrontierView extends ItemView {
   // Layout persistence: save/load full graph layout including settings and pin modes.
   async saveCurrentLayout(options = {}) {
     const silent = !!options.silent;
-    if (this.isSearchFilled()) {
+    if (!options.allowSearch && this.isSearchFilled()) {
       if (!silent) new Notice('Clear search field to save');
       return false;
     }
@@ -5995,7 +6032,11 @@ class GraphFrontierView extends ItemView {
     );
     return this.plugin.runLayoutFileOperation(async () => {
       // A queued save belongs to the layout on which it was requested.
-      if (this.plugin.data !== sourceData || this.isSearchFilled()) return false;
+      if (this.plugin.data !== sourceData || (!options.allowSearch && this.isSearchFilled()))
+        return false;
+      if (options.beforeWrite) await options.beforeWrite();
+      if (this.plugin.data !== sourceData || (!options.allowSearch && this.isSearchFilled()))
+        return false;
       this.layoutAutosaveDirty = true;
       const snapshot = this.captureLayoutSnapshot(layoutName);
       const nodeCount = this.nodes.length;
@@ -6052,14 +6093,39 @@ class GraphFrontierView extends ItemView {
     snapshot.saved_layout_settings = Object.assign({}, snapshot.settings);
     snapshot.saved_layout_pins = Object.assign({}, snapshot.pins);
     snapshot.saved_layout_orbit_pins = Object.assign({}, snapshot.orbit_pins);
+    snapshot.view_state.pan_x = this.cameraTarget.x;
+    snapshot.view_state.pan_y = this.cameraTarget.y;
+    snapshot.view_state.zoom = this.cameraTarget.zoom;
+    snapshot.view_state.camera_saved = true;
+    snapshot.view_state.search_query = this.searchInputEl?.value || this.searchInputValue;
+    snapshot.view_state.node_filter =
+      this.apiVisibleNodeIds instanceof Set ? [...this.apiVisibleNodeIds] : null;
     snapshot.view_state.side_panel_sections = {};
     return snapshot;
+  }
+
+  restoreLayoutViewState() {
+    const state = this.plugin.data.view_state;
+    this.searchInputValue = state.search_query || 'name:';
+    if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
+    this.searchSelectedNodeId = null;
+    this.searchMatchedNodeIds = new Set();
+    this.focusNodeId = null;
+    this.apiVisibleNodeIds = Array.isArray(state.node_filter) ? new Set(state.node_filter) : null;
+    if (state.camera_saved) {
+      this.camera = { x: state.pan_x, y: state.pan_y, zoom: state.zoom };
+      this.cameraTarget = { ...this.camera };
+    }
+    this.markSearchVisibilityDirty();
   }
 
   async loadSavedLayout(options = {}) {
     const silent = !!options.silent;
     const layoutName = options.layoutFileName || this.plugin.getActiveLayoutFileName();
-    const loaded = await this.plugin.setActiveLayoutFile(layoutName, { loadFromFile: true });
+    const loaded = await this.plugin.setActiveLayoutFile(layoutName, {
+      loadFromFile: true,
+      assertCurrent: options.assertCurrent,
+    });
     if (!loaded) {
       new Notice(`Cannot read layout: ${layoutName}. Current changes kept.`);
       this.syncLayoutFileSelectionFromPlugin();
@@ -6071,6 +6137,7 @@ class GraphFrontierView extends ItemView {
     if (!views.includes(this)) views.push(this);
     for (const view of views) {
       view.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
+      view.restoreLayoutViewState();
       view.sidePanelSectionState = this.plugin.getSidePanelSectionsState();
       view.syncLayoutFileSelectionFromPlugin();
       view.layoutAutosaveDirty = false;
@@ -6078,6 +6145,9 @@ class GraphFrontierView extends ItemView {
       view.layoutPaused = true;
       if (!view.isOpen) continue;
       view.refreshFromVault({ keepCamera: true, forceSavedPositions: true, skipLayoutKick: true });
+      view.commitSearchSelectionFromInput(view.searchInputValue);
+      view.layoutPaused = true;
+      view.layoutAutosaveDirty = false;
       view.buildSidePanel();
     }
     this.plugin.renderAllViews();

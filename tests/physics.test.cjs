@@ -31,16 +31,24 @@ function fixture(t, options = {}) {
     y: 0,
     vx: 0,
     vy: 0,
-    degree: 0,
+    degree: (options.edges || []).filter(
+      (edge) => edge.source === node.id || edge.target === node.id
+    ).length,
     ...node,
   }));
   const pins = options.pins || {};
+  const edges = options.edges || [];
+  const neighborsById = new Map(nodes.map((node) => [node.id, new Set()]));
+  for (const edge of edges) {
+    neighborsById.get(edge.source)?.add(edge.target);
+    neighborsById.get(edge.target)?.add(edge.source);
+  }
   const calls = [];
   const view = {
     nodes,
-    edges: [],
+    edges,
     nodeById: new Map(nodes.map((node) => [node.id, node])),
-    neighborsById: new Map(),
+    neighborsById,
     layoutCenter: { x: 0, y: 0 },
     layoutKickAtMs: now,
     layoutStillFrames: 0,
@@ -53,6 +61,7 @@ function fixture(t, options = {}) {
       getSettings: () => settings,
       getPin: (id) => pins[id] || null,
       getOrbitPin: (id) => options.orbitPins?.[id] || null,
+      getNodeMultiplier: (id) => options.multipliers?.[id] || 1,
       clampNumber: (value, min, max, fallback) =>
         Number.isFinite(Number(value)) ? Math.max(min, Math.min(max, Number(value))) : fallback,
     },
@@ -96,6 +105,153 @@ function fixture(t, options = {}) {
     },
   };
 }
+
+function repulsionFixture(t, kinds, pinnedId = null, mode = 'exact') {
+  const nodes = [
+    { id: 'a', x: 0 },
+    { id: 'b', x: 60 },
+    { id: 'anchor', x: 10000 },
+  ];
+  const edges = [];
+  const pins = { anchor: { x: 10000, y: 0, mode: 'exact' } };
+  for (const [index, kind] of kinds.entries()) {
+    if (kind === 'orphan') continue;
+    const id = `support-${index}`;
+    const x = 20000 + index * 1000;
+    nodes.push({ id, x, meta: { isAttachment: kind === 'attachment-only' } });
+    pins[id] = { x, y: 0, mode: 'exact' };
+    edges.push({ source: nodes[index].id, target: id });
+  }
+  const orbitPins = {};
+  if (pinnedId) {
+    const node = nodes.find((item) => item.id === pinnedId);
+    if (mode === 'orbit')
+      orbitPins[pinnedId] = { anchor_id: 'anchor', radius: 10000 - node.x, angle: Math.PI };
+    else pins[pinnedId] = { x: node.x, y: 0, mode };
+  }
+  return fixture(t, {
+    nodes,
+    edges,
+    pins,
+    orbitPins,
+    settings: { repel_strength: 1500, repel_radius: 200, layout_autosave: false },
+  });
+}
+
+for (const kinds of [
+  ['regular', 'regular'],
+  ['orphan', 'orphan'],
+  ['attachment-only', 'attachment-only'],
+  ['orphan', 'regular'],
+  ['orphan', 'attachment-only'],
+  ['attachment-only', 'regular'],
+]) {
+  for (const mode of ['exact', 'grid', 'orbit']) {
+    for (const pinnedId of ['a', 'b']) {
+      test(`${kinds.join('/')} repulsion is unchanged by ${mode} pinning ${pinnedId}`, (t) => {
+        const baseline = repulsionFixture(t, kinds);
+        const pinned = repulsionFixture(t, kinds, pinnedId, mode);
+        const freeId = pinnedId === 'a' ? 'b' : 'a';
+        const fixed = pinned.view.nodeById.get(pinnedId);
+        const initialPosition = { x: fixed.x, y: fixed.y };
+        baseline.frames();
+        pinned.frames();
+        const expected = baseline.view.nodeById.get(freeId);
+        const actual = pinned.view.nodeById.get(freeId);
+        assert.notEqual(expected.vx, 0, 'the baseline pair must repel');
+        assert.equal(actual.vx, expected.vx, 'pinning must not change force on the free node');
+        assert.equal(actual.vy, expected.vy);
+        assert(Math.abs(fixed.x - initialPosition.x) < 1e-8);
+        assert(Math.abs(fixed.y - initialPosition.y) < 1e-8);
+        assert.equal(fixed.vx, 0);
+        assert.equal(fixed.vy, 0);
+      });
+    }
+  }
+}
+
+for (const mode of ['exact', 'grid', 'orbit']) {
+  for (const pinnedId of ['a', 'b']) {
+    test(`${mode} pinned ${pinnedId} keeps link attraction and strong pull`, (t) => {
+      function simulate(multiplier) {
+        const x = pinnedId === 'a' ? 0 : 120;
+        const f = fixture(t, {
+          nodes: [{ id: 'a' }, { id: 'b', x: 120 }, { id: 'anchor', x: 10000 }],
+          edges: [{ source: 'a', target: 'b' }],
+          pins: {
+            anchor: { x: 10000, y: 0 },
+            ...(mode === 'orbit' ? {} : { [pinnedId]: { x, y: 0, mode } }),
+          },
+          orbitPins:
+            mode === 'orbit'
+              ? { [pinnedId]: { anchor_id: 'anchor', radius: 10000 - x, angle: Math.PI } }
+              : {},
+          multipliers: { [pinnedId]: multiplier },
+          settings: { base_link_strength: 10, link_distance: 20, layout_autosave: false },
+        });
+        f.frames();
+        const fixed = f.view.nodeById.get(pinnedId);
+        assert(Math.abs(fixed.x - x) < 1e-8);
+        assert(Math.abs(fixed.y) < 1e-8);
+        assert.equal(fixed.vx, 0);
+        return f.view.nodeById.get(pinnedId === 'a' ? 'b' : 'a').vx;
+      }
+      const normal = simulate(1);
+      const strong = simulate(3);
+      assert(pinnedId === 'a' ? normal < 0 : normal > 0);
+      assert(Math.abs(strong - normal * 3) < 1e-8);
+    });
+  }
+}
+
+for (const mode of ['exact', 'grid']) {
+  for (const sameParent of [true, false]) {
+    test(`${mode} pinned attachments repel only siblings (${sameParent ? 'same' : 'different'} parent)`, (t) => {
+      const f = fixture(t, {
+        nodes: [
+          { id: 'a', meta: { isAttachment: true } },
+          { id: 'b', x: 60, meta: { isAttachment: true } },
+          { id: 'parent-a', x: 10000 },
+          { id: 'parent-b', x: 20000 },
+        ],
+        edges: [
+          { source: 'a', target: 'parent-a' },
+          { source: 'b', target: sameParent ? 'parent-a' : 'parent-b' },
+        ],
+        pins: {
+          a: { x: 0, y: 0, mode },
+          'parent-a': { x: 10000, y: 0 },
+          'parent-b': { x: 20000, y: 0 },
+        },
+        settings: { repel_strength: 1500, repel_radius: 200, layout_autosave: false },
+      });
+      f.frames();
+      assert.equal(f.view.nodeById.get('a').x, 0);
+      const free = f.view.nodeById.get('b');
+      if (sameParent) assert(free.x > 60);
+      else assert.equal(free.x, 60);
+    });
+  }
+}
+
+test('two grid pins stay fixed while an unrelated free node keeps physics running', (t) => {
+  const f = fixture(t, {
+    nodes: [{ id: 'a' }, { id: 'b', x: 60 }, { id: 'free', x: 90 }],
+    edges: [{ source: 'a', target: 'b' }],
+    pins: { a: { x: 0, y: 0, mode: 'grid' }, b: { x: 60, y: 0, mode: 'grid' } },
+    multipliers: { a: 10 },
+    settings: { repel_strength: 1500, base_link_strength: 100, layout_autosave: false },
+  });
+  f.frames(10);
+  for (const [id, x] of [
+    ['a', 0],
+    ['b', 60],
+  ]) {
+    const node = f.view.nodeById.get(id);
+    assert.deepEqual({ x: node.x, y: node.y, vx: node.vx, vy: node.vy }, { x, y: 0, vx: 0, vy: 0 });
+  }
+  assert(f.view.nodeById.get('free').x > 90);
+});
 
 test('a moved pinned node in an all-fixed graph saves after release and debounce', async (t) => {
   const f = fixture(t, {

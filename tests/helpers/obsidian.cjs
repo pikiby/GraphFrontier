@@ -51,6 +51,7 @@ class Plugin {
   addRibbonIcon() {}
   addCommand() {}
   registerView() {}
+  addSettingTab() {}
 }
 
 class ItemView {
@@ -106,7 +107,14 @@ class Menu {
 }
 
 const obsidian = {
-  Platform: { isMobile: false, isDesktop: true },
+  Platform: { isMobile: false, isDesktop: true, isDesktopApp: true },
+  PluginSettingTab: class {
+    constructor(app, plugin) {
+      this.app = app;
+      this.plugin = plugin;
+      this.containerEl = element();
+    }
+  },
   TFile: class {},
   TFolder: class {},
   normalizePath: (value) => value.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, ''),
