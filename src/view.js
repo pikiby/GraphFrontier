@@ -1,4 +1,3 @@
-const { bindColorPicker, openColorPicker } = require('./color-picker');
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Platform } = require('obsidian');
 const { resolveMobileExportPath, writeMobileExport } = require('./mobile-export');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
@@ -442,7 +441,6 @@ class GraphFrontierView extends ItemView {
     colorInput.setAttribute('aria-label', 'Node color');
     colorInput.value = this.plugin.getSettings().node_color;
     colorInput.addClass('graphfrontier-group-color-input');
-    bindColorPicker(this.app, colorInput, () => this.plugin.data);
     this.sideControls.set('node_color', { type: 'color', input: colorInput });
     this.registerDomEvent(colorInput, 'input', () => {
       this.plugin.data.settings.node_color = colorInput.value;
@@ -2355,7 +2353,6 @@ class GraphFrontierView extends ItemView {
       type: 'color',
     });
     colorInput.value = form.color;
-    bindColorPicker(this.app, colorInput, () => this.plugin.data);
 
     const removeBtn = row.createEl('button', { cls: 'graphfrontier-group-remove', text: 'x' });
 
@@ -4063,7 +4060,6 @@ class GraphFrontierView extends ItemView {
               ? 'graphfrontier-group-color-input'
               : 'graphfrontier-sidepanel-slider',
         });
-        if (spec.type === 'color') bindColorPicker(this.app, input, () => this.plugin.data);
         input.min = String(spec.min);
         input.max = String(spec.max);
         input.step = String(spec.step);
@@ -5576,18 +5572,55 @@ class GraphFrontierView extends ItemView {
     }
   }
 
-  async promptPickPaintedEdgeColor(nodeId) {
-    const initialColor = this.plugin.getPaintedEdgeColor(nodeId) || '#ef6f6c';
+  async promptPickPaintedEdgeColor(nodeId, clientX = null, clientY = null) {
     const sourceData = this.plugin.data;
-    openColorPicker(
-      this.app,
-      initialColor,
-      (color) => {
-        this.plugin.setPaintedEdgeColor(nodeId, color);
-        this.plugin.renderAllViews();
-      },
-      () => this.plugin.data === sourceData
-    );
+    const initialColor = this.plugin.getPaintedEdgeColor(nodeId) || '#ef6f6c';
+    const hostDocument = this.contentEl.ownerDocument || document;
+    const colorInput = hostDocument.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = initialColor;
+    colorInput.className = 'graphfrontier-group-color-input';
+    hostDocument.body.appendChild(colorInput);
+
+    const viewportWidth = this.contentEl.win.innerWidth || 1200;
+    const viewportHeight = this.contentEl.win.innerHeight || 800;
+    const pickerSize = 24;
+    const targetX = Number.isFinite(clientX) ? Number(clientX) : Math.floor(viewportWidth / 2);
+    const targetY = Number.isFinite(clientY) ? Number(clientY) : Math.floor(viewportHeight / 2);
+    const clampedX = Math.max(8, Math.min(viewportWidth - pickerSize - 8, targetX));
+    const clampedY = Math.max(8, Math.min(viewportHeight - pickerSize - 8, targetY));
+
+    colorInput.style.position = 'fixed';
+    colorInput.style.left = `${clampedX}px`;
+    colorInput.style.top = `${clampedY}px`;
+    colorInput.style.opacity = '0';
+    colorInput.style.zIndex = '9999';
+    colorInput.style.pointerEvents = 'none';
+
+    const cleanup = () => {
+      colorInput.remove();
+    };
+    const applySelectedColor = () => {
+      if (this.plugin.data !== sourceData) {
+        cleanup();
+        return;
+      }
+      this.plugin.setPaintedEdgeColor(nodeId, colorInput.value);
+      this.plugin.renderAllViews();
+    };
+
+    this.registerDomEvent(colorInput, 'input', () => {
+      applySelectedColor();
+    });
+    this.registerDomEvent(colorInput, 'change', () => {
+      applySelectedColor();
+    });
+    this.registerDomEvent(colorInput, 'blur', () => {
+      window.setTimeout(cleanup, 40);
+    });
+
+    colorInput.focus();
+    colorInput.click();
   }
 
   // Pin placement primitives for exact/grid modes and bulk pin alignment.

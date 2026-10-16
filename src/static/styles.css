@@ -819,37 +819,6 @@
   border-color: var(--text-muted);
 }
 
-.modal.graphfrontier-color-modal {
-  width: min(300px, calc(100vw - 32px));
-  min-width: 0;
-  height: auto;
-  max-height: calc(100dvh - 32px);
-  padding: 16px;
-  border-radius: 12px;
-}
-.graphfrontier-color-modal .modal-content {
-  overflow-y: auto;
-}
-.graphfrontier-color-preview {
-  height: 28px;
-  border: 1px solid var(--text-muted);
-  border-radius: 6px;
-  margin-bottom: 8px;
-}
-.graphfrontier-color-channel {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 36px;
-}
-.graphfrontier-color-channel span {
-  width: 42px;
-}
-.graphfrontier-color-channel input {
-  flex: 1;
-  min-width: 0;
-}
-
 /* Keep graph controls independent of Obsidian's platform-specific form defaults. */
 .graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle {
   height: 32px;
@@ -896,8 +865,7 @@
   border: 1px solid var(--text-muted);
 }
 
-:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
-  input[type='range'] {
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control) input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
   height: 26px;
@@ -923,7 +891,7 @@
   min-width: 0;
 }
 
-:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control)
   input[type='range']::-webkit-slider-runnable-track {
   height: 4px;
   border: 0;
@@ -931,7 +899,7 @@
   background: var(--text-muted);
 }
 
-:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control)
   input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -958,7 +926,7 @@ input.graphfrontier-group-color-input::-webkit-color-swatch {
   box-shadow: none;
 }
 
-:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control)
   input[type='range']::-moz-range-track {
   height: 4px;
   border: 0;
@@ -966,7 +934,7 @@ input.graphfrontier-group-color-input::-webkit-color-swatch {
   background: var(--text-muted);
 }
 
-:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control)
   input[type='range']::-moz-range-thumb {
   box-sizing: border-box;
   width: 16px;

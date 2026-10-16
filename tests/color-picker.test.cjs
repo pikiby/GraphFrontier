@@ -1,149 +1,77 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const vm = require('node:vm');
 const path = require('node:path');
+const { loadSource } = require('./helpers/obsidian.cjs');
+const { GraphFrontierView } = loadSource('view.js');
 
 function setup() {
-  let modal;
-  const notices = [];
-  function element(tag = '', options = {}) {
-    return {
-      tag,
-      ...options,
-      children: [],
-      events: {},
-      style: {},
-      addClass() {},
-      setText(text) {
-        this.text = text;
-      },
-      createDiv(options) {
-        return this.createEl('div', options);
-      },
-      createSpan(options) {
-        return this.createEl('span', options);
-      },
-      createEl(tag, options) {
-        const child = element(tag, options);
-        this.children.push(child);
-        return child;
-      },
-      addEventListener(name, callback) {
-        this.events[name] = callback;
-      },
-    };
-  }
-  class Modal {
-    constructor() {
-      modal = this;
-      this.modalEl = element();
-      this.titleEl = element();
-      this.contentEl = element();
-    }
-    open() {
-      this.opened = true;
-    }
-    close() {
-      this.closed = true;
-    }
-  }
-  const sandbox = {
-    module: { exports: {} },
-    require: () => ({
-      Modal,
-      Notice: class {
-        constructor(text) {
-          notices.push(text);
-        }
-      },
-    }),
+  const input = {
+    style: {},
+    events: {},
+    focus() {
+      this.focused = true;
+    },
+    click() {
+      this.clicked = true;
+    },
+    remove() {
+      this.removed = true;
+    },
   };
-  vm.runInNewContext(
-    fs.readFileSync(path.join(__dirname, '../src/color-picker.js'), 'utf8'),
-    sandbox
-  );
-  function controls() {
-    const children = modal.contentEl.children;
-    return {
-      modal,
-      hex: children.find((e) => e.type === 'text'),
-      sliders: children.filter((e) => e.tag === 'label').map((e) => e.children[1]),
-      cancel: children.at(-1).children[0],
-      apply: children.at(-1).children[1],
-    };
-  }
-  return { ...sandbox.module.exports, controls, element, notices };
+  const applied = [];
+  const doc = { createElement: () => input, body: { appendChild() {} } };
+  const view = {
+    contentEl: { ownerDocument: doc, win: { innerWidth: 800, innerHeight: 600 } },
+    plugin: {
+      data: {},
+      getPaintedEdgeColor: () => '#446688',
+      setPaintedEdgeColor: (id, color) => applied.push({ id, color }),
+      renderAllViews() {},
+    },
+    registerDomEvent: (el, event, handler) => {
+      el.events[event] = handler;
+    },
+  };
+  return { view, input, applied };
 }
 
-test('invalid HEX cannot apply; RGB edit restores Apply with a valid color', () => {
-  const h = setup(),
-    applied = [];
-  h.openColorPicker({}, '#446688', (value) => applied.push(value));
-  const { hex, sliders, apply, modal } = h.controls();
-  assert.equal(modal.titleEl.text, 'Choose color');
-  hex.value = 'invalid';
-  hex.events.input();
-  assert.equal(apply.disabled, true);
-  apply.events.click();
-  assert.deepEqual(applied, []);
-  sliders[0].value = '100';
-  sliders[0].events.input();
-  assert.equal(hex.value, '#646688');
-  assert.equal(apply.disabled, false);
-  apply.events.click();
-  assert.deepEqual(applied, ['#646688']);
-  assert.equal(modal.closed, true);
-});
-
-test('Cancel leaves color unchanged and valid HEX synchronizes RGB controls', () => {
-  const h = setup();
-  let applied = false;
-  h.openColorPicker({}, '#446688', () => {
-    applied = true;
-  });
-  const { hex, sliders, cancel, modal } = h.controls();
-  hex.value = '#AABBCC';
-  hex.events.input();
-  assert.deepEqual(
-    sliders.map((s) => s.value),
-    ['170', '187', '204']
-  );
-  cancel.events.click();
-  assert.equal(applied, false);
-  assert.equal(modal.closed, true);
-});
-
-test('color opened in another layout does not dispatch input/change', () => {
-  const h = setup(),
-    input = h.element('input');
-  input.value = '#446688';
-  input.dispatchEvent = () => {
-    throw Error('stale input');
-  };
-  let layout = {};
-  h.bindColorPicker({}, input, () => layout);
-  input.events.click({ preventDefault() {}, stopPropagation() {} });
-  layout = {};
-  h.controls().apply.events.click();
-  assert.equal(h.notices.length, 1);
-  assert.equal(h.controls().modal.closed, true);
-});
-
-test('current layout receives input and change only on Apply', () => {
-  const h = setup(),
-    input = h.element('input'),
-    events = [];
-  input.value = '#446688';
-  input.ownerDocument = { defaultView: { Event } };
-  input.dispatchEvent = (e) => events.push(e.type);
-  h.bindColorPicker({}, input);
-  input.events.click({ preventDefault() {}, stopPropagation() {} });
-  const { hex, apply } = h.controls();
-  hex.value = '#123456';
-  hex.events.input();
+test('edge color opens the native color input at the pointer', async () => {
+  const { view, input } = setup();
+  await GraphFrontierView.prototype.promptPickPaintedEdgeColor.call(view, 'a', 120, 160);
+  assert.equal(input.type, 'color');
   assert.equal(input.value, '#446688');
-  apply.events.click();
-  assert.equal(input.value, '#123456');
-  assert.deepEqual(events, ['input', 'change']);
+  assert.equal(input.style.left, '120px');
+  assert.equal(input.style.top, '160px');
+  assert.equal(input.clicked, true);
+});
+
+test('native color input and change apply the selected edge color', async () => {
+  const { view, input, applied } = setup();
+  await GraphFrontierView.prototype.promptPickPaintedEdgeColor.call(view, 'a');
+  assert.equal(input.style.left, '400px');
+  input.value = '#123456';
+  input.events.input();
+  input.events.change();
+  assert.deepEqual(applied, [
+    { id: 'a', color: '#123456' },
+    { id: 'a', color: '#123456' },
+  ]);
+});
+
+test('native edge picker rejects edits after a layout switch', async () => {
+  const { view, input, applied } = setup();
+  await GraphFrontierView.prototype.promptPickPaintedEdgeColor.call(view, 'a');
+  view.plugin.data = {};
+  input.events.input();
+  assert.deepEqual(applied, []);
+  assert.equal(input.removed, true);
+});
+
+test('swatches retain compact styling without a replacement color modal', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/view.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../src/static/styles.css'), 'utf8');
+  assert.doesNotMatch(source, /bindColorPicker|openColorPicker/);
+  assert.doesNotMatch(css, /graphfrontier-color-modal/);
+  assert.match(css, /input\.graphfrontier-group-color-input\s*\{\s*width: 26px/);
 });

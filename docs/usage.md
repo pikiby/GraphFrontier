@@ -28,10 +28,9 @@ The view opens as a regular tab and can be moved between panes/sidebars.
 - Touch box selection is not implemented; desktop modifier-key selection does
   not automatically translate into a touch gesture.
 
-Color swatches open a compact RGB/HEX dialog. **Apply** commits the color;
-**Cancel** leaves it unchanged. Invalid HEX values disable Apply; either valid
-HEX input or a slider change restores it. If the layout changes while the dialog
-is open, reopen the picker rather than applying a stale edit to the new layout.
+Color swatches use the native color palette again in 0.8.2. The compact circular
+swatch controls are preserved; the palette itself follows the platform.
+Version 0.8.1 used a replacement RGB/HEX dialog.
 
 ## Gravity Nodes
 

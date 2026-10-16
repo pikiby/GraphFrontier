@@ -43,9 +43,9 @@ No separate Node.js installation is needed. For updates, use **Check for updates
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.8.1/graphfrontier-0.8.1.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.8.2/graphfrontier-0.8.2.zip
 
-1. Download `graphfrontier-0.8.1.zip` from Releases.
+1. Download `graphfrontier-0.8.2.zip` from Releases.
 2. Extract it into `<vault>/.obsidian/plugins/graphfrontier/`.
 3. Enable it in `Settings -> Community plugins -> GraphFrontier`.
 
@@ -61,14 +61,24 @@ See the [installation guide](docs/installation.md) for source builds and trouble
 - GraphFrontier reads vault notes and metadata to build the graph. Copy actions write to the clipboard. HTML exports can contain note text and paths: inspect them before sharing.
 - MCP is disabled by default. Enabling it permits authenticated local clients to control the graph and retrieve data; an AI client may send that data to its model provider. See [MCP safety and limits](#safety-and-current-limits).
 
-## Latest Release (0.8.1)
+## Latest Release (0.8.2)
+
+- Restore the native color palette for node colors, Groups, individual settings
+  and painted links. Keep compact circular color swatches.
+- Remove the replacement RGB/HEX dialog introduced in 0.8.1.
+
+Requires Obsidian 1.12.7 or newer. The native palette follows the platform; Android and desktop dialogs can look different.
+
+See [release notes](docs/releases/0.8.2.md).
+
+## Previous Release (0.8.1)
 
 Requires Obsidian 1.12.7 or newer.
 
 - Reachable sidebar controls above mobile navigation and the keyboard viewport.
 - Consistent search fields, color swatches, sliders and collapsible section arrows across platforms.
 - Higher-contrast labels, sliders and ordinary graph links using the current theme.
-- Compact RGB/HEX color dialog with Apply/Cancel, validation recovery and protection against applying edits to a different layout.
+- Compact RGB/HEX color dialog (reverted to the native palette in 0.8.2).
 - Long-press empty space to create a gravity node, using the same context menu as desktop.
 
 See [release notes](docs/releases/0.8.1.md) and [Android test evidence](docs/releases/0.8.0-android-test.md).
