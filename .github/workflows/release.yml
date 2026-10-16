@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-and-release:
@@ -50,6 +52,13 @@ jobs:
           zip "../${ZIP_NAME}" main.js manifest.json styles.css versions.json LICENSE
           cd ..
           ls -la "${ZIP_NAME}" dist
+
+      - name: Attest final plugin assets
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/main.js
+            dist/styles.css
 
       - name: Publish GitHub Release assets
         uses: softprops/action-gh-release@v2

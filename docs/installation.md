@@ -21,8 +21,8 @@ checks passed on 1.12.7 in an isolated vault. Android checks covered Obsidian
 Automated tests complement these checks; they do not certify every platform or
 touch workflow. Compatibility entries for earlier plugin releases are unchanged.
 
-The graph is available on desktop and mobile. Mobile HTML export stays inside
-the vault. Arbitrary desktop export paths and external-file navigation are
+The graph is available on desktop and mobile. HTML export stays inside
+the vault on both platforms. External-file and folder navigation remain
 desktop features. MCP additionally requires desktop Obsidian's embedded Node
 18+ runtime and Web Fetch APIs; an unavailable MCP runtime does not disable
 the graph. See [MCP setup](mcp.md) and [mobile export](usage.md#static-html-export-on-mobile).

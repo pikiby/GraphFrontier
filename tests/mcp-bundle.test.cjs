@@ -20,6 +20,10 @@ const code = buildSync({
   external: ['obsidian', ...Module.builtinModules, 'node:*'],
 }).outputFiles[0].text;
 
+test('runtime bundle has no direct filesystem imports', () => {
+  assert.doesNotMatch(code, /(?:require|nodeRequire)\(["'](?:node:)?fs(?:\/promises)?["']\)/);
+});
+
 function loadBundle(desktop) {
   const imports = [];
   const compiled = new Module('graphfrontier-bundle-test');
@@ -28,6 +32,13 @@ function loadBundle(desktop) {
     imports.push(id);
     assert.equal(desktop, true, `Mobile tried loading ${id}`);
     assert.equal(Module.isBuiltin(id), true, `Unbundled dependency ${id}`);
+    if (['http', 'https', 'node:http', 'node:https'].includes(id)) {
+      return {
+        ...require(id),
+        request: () => assert.fail('Plugin must not originate HTTP requests in this scenario'),
+        get: () => assert.fail('Plugin must not originate HTTP requests in this scenario'),
+      };
+    }
     return require(id);
   };
   compiled._compile(code, path.join(__dirname, 'virtual-main.js'));

@@ -130,7 +130,7 @@ are shared plugin state, not independent layouts per tab.
 | `backup_layout`        | `backupLayout(args)`       | Copy a saved layout; ensure=true reuses an identical backup                               |
 | `list_backups`         | `listBackups(args)`        | Paginated backup IDs, original names and dates                                            |
 | `restore_layout`       | `restoreLayout(args)`      | Restore a backup to its original or a new layout; optionally activate                     |
-| `get_export_locations` | `getExportLocations(args)` | Discover vault/home/desktop paths; unresolved desktop is null                             |
+| `get_export_locations` | `getExportLocations(args)` | Return vault name and vaultRelative=true; home and desktop are null                       |
 | `export_html`          | `exportHtml(args)`         | Static interactive HTML, optional exact node subset and note previews                     |
 | `graph_action`         | `graphAction(args)`        | Open/refresh, pause/resume, align pins, select linked, arm box selection, clear selection |
 | `update_ui`            | `updateUi(args)`           | Panel visibility, collapsed sections and command hotkeys                                  |
@@ -329,8 +329,8 @@ preference persistence to `data.json` is still separate from saved layout files.
 
 ### Export a Requested Subgraph
 
-For a request such as "show only these notes and their links, then export to my
-desktop", a client can perform this sequence, rereading the token after graph
+For a request such as "show only these notes and their links, then export to Exports/schema.html inside my
+vault", a client can perform this sequence, rereading the token after graph
 changes:
 
 1. `list_views`, then `get_configuration` to inspect the current state.
@@ -340,8 +340,8 @@ changes:
    `get_graph` to inspect relationships. Resolve the intended IDs, not just names.
 4. `set_visible_nodes` for the exact set; change styles/physics, position or pin
    nodes as requested; `set_camera` with `fit: true` frames the result.
-5. `get_export_locations` discovers the desktop path. If it returns null, ask for
-   the location rather than assuming an English Desktop folder exists.
+5. `get_export_locations` identifies the vault and confirms vault-relative export.
+   Ask for a folder/filename inside that vault if the requested location is external.
 6. `export_html` with an explicit path, the chosen `nodeIds` and
    `includeContents: false` unless embedding Markdown previews is wanted.
 7. `save_layout` only when the user requested persistence. Restore prior camera,
@@ -351,10 +351,10 @@ Export reuses the existing HTML generator (pan/zoom, hover and Markdown preview)
 With `nodeIds`, it contains only those nodes and edges whose two endpoints are
 both included, even if other nodes are currently visible. Without `nodeIds`, it
 exports current visibility. Node lists are limited to 500 per call; omit them to
-export a larger visible graph. Desktop paths must be absolute; mobile internal
-API calls use vault-relative paths. A directory gets the default HTML filename.
-Existing export files require `overwrite: true`; by default an exclusive file
-create prevents accidental overwrites. MCP exports do not change the remembered
+export a larger visible graph. All platforms use vault-relative paths; absolute paths are rejected. A directory gets the default HTML filename.
+Existing export files require `overwrite: true`; the plugin serializes its own exports and refuses to modify an existing file
+without permission. Other applications and symlink targets are governed by the
+Obsidian adapter; no cross-process atomic or physical-path sandbox guarantee is made. MCP exports do not change the remembered
 UI export path. The result reports the actual filename and node/edge counts.
 `includeContents` defaults to true, matching the existing export; use false to
 omit note previews. Metadata such as paths/properties is still included.

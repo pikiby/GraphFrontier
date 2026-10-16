@@ -240,14 +240,14 @@ const tools = [
   ],
   [
     'get_export_locations',
-    'Discover vault, home and desktop export locations on this computer. Desktop may be null if it cannot be resolved; ask for a path rather than guessing.',
+    'Discover the current vault name and export path mode. Exports are vault-relative on every platform; home and desktop are null.',
     readRef,
     'getExportLocations',
     true,
   ],
   [
     'export_html',
-    'Export an interactive static HTML graph to an explicit absolute desktop filename (vault-relative on mobile). nodeIds exports precisely their induced subgraph. Existing files need overwrite=true. Contents optional.',
+    'Export an interactive static HTML graph to an explicit vault-relative filename on every platform. nodeIds exports precisely their induced subgraph. Existing files need overwrite=true. Contents optional.',
     {
       ...ref,
       path: z.string().min(1).max(4096),

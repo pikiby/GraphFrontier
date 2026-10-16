@@ -103,12 +103,8 @@ test('local files and folders use native paths on Linux, macOS and Windows', asy
       require: (name) =>
         ({
           path: paths,
-          fs: {
-            promises: {
-              stat: async (target) => {
-                assert.equal(target, expected);
-              },
-            },
+          get fs() {
+            return assert.fail('Must not require fs');
           },
           electron: {
             shell: {
@@ -123,6 +119,30 @@ test('local files and folders use native paths on Linux, macOS and Windows', asy
     await openNoteTarget(app, 'path', 'Project', host);
     assert.deepEqual(opened, [expected]);
   }
+});
+
+test('external absolute and home paths still open without fs', async () => {
+  const opened = [];
+  const app = { vault: { getAbstractFileByPath: () => null, adapter: {} } };
+  const host = {
+    require(name) {
+      if (name === 'path') return path.posix;
+      if (name === 'os') return { homedir: () => '/home/example' };
+      assert.equal(name, 'electron');
+      return {
+        shell: {
+          openPath: async (target) => {
+            opened.push(target);
+            return '';
+          },
+        },
+      };
+    },
+  };
+  await openNoteTarget(app, 'path', '~/Project', host);
+  await openNoteTarget(app, 'path', '/external/Project', host);
+  assert.deepEqual(opened, ['/home/example/Project', '/external/Project']);
+  await assert.rejects(openNoteTarget(app, 'path', 'C:\\Project', host), /Windows path/);
 });
 
 test('Open path dispatches an Obsidian open URI without treating it as a local file', async (t) => {
@@ -172,7 +192,7 @@ test('Obsidian path URI preserves encoded values through the non-Electron fallba
   assert.deepEqual(opened, [[target, '_blank', 'noopener,noreferrer']]);
 });
 
-test('malformed URL and missing path report errors without launching an application', async (t) => {
+test('malformed URL is rejected and native path errors are reported without fs', async (t) => {
   const { app } = fixture(t);
   app.metadataCache.getFileCache = () => ({
     frontmatter: { url: 'javascript:alert(1)', path: '/missing' },
@@ -183,17 +203,14 @@ test('malformed URL and missing path report errors without launching an applicat
     require: (name) =>
       ({
         path,
-        fs: {
-          promises: {
-            stat: async () => {
-              throw new Error('ENOENT');
-            },
-          },
+        get fs() {
+          return assert.fail('Must not require fs');
         },
         electron: {
           shell: {
             openPath: async () => {
               opened = true;
+              return 'File not found';
             },
             openExternal: async () => {
               opened = true;
@@ -207,6 +224,6 @@ test('malformed URL and missing path report errors without launching an applicat
   await actions.items[0].click();
   assert.match(notices.at(-1), /URL must use/);
   await actions.items[1].click();
-  assert.match(notices.at(-1), /Path not found/);
-  assert.equal(opened, false);
+  assert.match(notices.at(-1), /File not found/);
+  assert.equal(opened, true);
 });

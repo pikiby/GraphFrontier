@@ -1,8 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const vm = require('node:vm');
-const path = require('node:path');
-const { fixture, loadSource } = require('./helpers/obsidian.cjs');
+const { fixture, loadSource, obsidian, notices } = require('./helpers/obsidian.cjs');
 const { mobileVault } = require('./helpers/mobile-vault.cjs');
 const { readGraphTheme } = require('../src/theme');
 const render = require('../src/render');
@@ -289,25 +288,36 @@ async function exportGraph(t, scheme, variables, aura = false) {
     f.plugin.setNodeVisualSetting('alpha.md', 'node_color', '#123456');
     f.plugin.setNodeVisualSetting('alpha.md', 'aura_radius', 5000);
   }
-  let html;
-  f.view.contentEl.win.require = (name) => {
-    if (name === 'path') return path;
-    assert.equal(name, 'fs');
-    return {
-      promises: {
-        stat: async () => {
-          throw new Error('missing');
-        },
-        mkdir: async () => {},
-        writeFile: async (file, text) => {
-          html = text;
-        },
-      },
-    };
-  };
-  await f.view.commandExportStaticHtml({ exportPath: '/tmp/graphfrontier-test.html' });
+  const { vault, contents } = mobileVault(t, false);
+  Object.assign(f.app.vault, vault);
+  f.view.contentEl.win.require = () => assert.fail('Export must not use Node');
+  await f.view.commandExportStaticHtml({ exportPath: 'graphfrontier-test.html' });
+  const html = contents.get('graphfrontier-test.html');
   assert.equal(typeof html, 'string');
   return { ...f, html };
+}
+
+for (const mobile of [false, true]) {
+  test(`one-click export saves in vault root without a modal (mobile=${mobile})`, async (t) => {
+    const { view, plugin, app } = graph(t, 'light');
+    const { vault, contents } = mobileVault(t, mobile);
+    Object.assign(app.vault, vault);
+    const oldOpen = obsidian.Modal.prototype.open;
+    obsidian.Modal.prototype.open = () => assert.fail('No export dialog');
+    t.after(() => {
+      obsidian.Modal.prototype.open = oldOpen;
+    });
+    plugin.data.settings.export_static_html_path = '/old/Desktop/graph.html';
+    plugin.data.settings.export_static_html_mobile_path = 'Old/graph.html';
+    const before = JSON.stringify(plugin.data.settings);
+    const result = await view.commandExportStaticHtml();
+    assert.equal(result.path, 'graphfrontier-static.html');
+    assert.ok(contents.get(result.path).startsWith('<!doctype html>'));
+    assert.match(notices.at(-1), /saved in vault root: graphfrontier-static.html/);
+    assert.equal(JSON.stringify(plugin.data.settings), before);
+    await view.commandExportStaticHtml();
+    assert.equal(contents.size, 1);
+  });
 }
 
 function runExport(html) {
@@ -371,14 +381,14 @@ test('mobile export produces executable graph HTML through Vault without any Nod
   windowEvents.mouseup(point);
   assert.equal(elements.get('panel-title').textContent, 'Alpha');
   assert.match(elements.get('panel-content-html').innerHTML, /Mobile preview/);
-  assert.equal(plugin.data.settings.export_static_html_mobile_path, 'Exports/graph.html');
+  assert.equal(plugin.data.settings.export_static_html_mobile_path, '');
   assert.equal(plugin.data.settings.export_static_html_path, '/desktop/graph.html');
   vault.create = async () => {
     throw new Error('read-only');
   };
   app.vault.create = vault.create;
   await view.commandExportStaticHtml({ exportPath: 'failed.html' });
-  assert.equal(plugin.data.settings.export_static_html_mobile_path, 'Exports/graph.html');
+  assert.equal(plugin.data.settings.export_static_html_mobile_path, '');
   await view.commandExportStaticHtml({ exportPath: '/desktop/invalid.html' });
   assert.equal(contents.has('/desktop/invalid.html'), false);
 });

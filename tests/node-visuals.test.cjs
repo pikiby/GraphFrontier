@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const path = require('node:path');
+const { mobileVault } = require('./helpers/mobile-vault.cjs');
 const { fixture, loadSource } = require('./helpers/obsidian.cjs');
 const {
   NODE_VISUAL_SETTINGS,
@@ -196,22 +196,11 @@ test('HTML export carries individual radii, label thresholds, dimming and edge w
   plugin.setNodeVisualSetting('alpha.md', 'edge_width_scale', 0.25);
   plugin.setNodeVisualSetting('alpha.md', 'node_color', '#123456');
   plugin.setNodeVisualSetting('alpha.md', 'aura_radius', 4000);
-  let html;
-  view.contentEl.win.require = (name) =>
-    name === 'path'
-      ? path
-      : {
-          promises: {
-            stat: async () => {
-              throw new Error('missing');
-            },
-            mkdir: async () => {},
-            writeFile: async (_, text) => {
-              html = text;
-            },
-          },
-        };
-  await view.commandExportStaticHtml({ exportPath: '/tmp/node-visual-export.html' });
+  const { vault, contents } = mobileVault(t, false);
+  Object.assign(app.vault, vault);
+  view.contentEl.win.require = () => assert.fail('Export must not use Node');
+  await view.commandExportStaticHtml({ exportPath: 'node-visual-export.html' });
+  const html = contents.get('node-visual-export.html');
   assert.equal(typeof html, 'string');
   assert(html.includes('"auraRadius":400'));
   assert(html.includes('"color":"#123456"'));

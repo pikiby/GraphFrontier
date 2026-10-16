@@ -27,7 +27,7 @@ function validateVaultExportPath(rawPath) {
   return normalizePath(value);
 }
 
-function resolveMobileExportPath(vault, rawPath) {
+function resolveVaultExportPath(vault, rawPath) {
   let target = validateVaultExportPath(rawPath);
   if (
     /[\\/]$/u.test(String(rawPath).trim()) ||
@@ -40,9 +40,24 @@ function resolveMobileExportPath(vault, rawPath) {
   return target;
 }
 
-async function writeMobileExport(vault, target, html) {
-  // Use the public Vault API so Obsidian's mobile adapter handles storage.
+const exportQueues = new WeakMap();
+
+function writeVaultExport(vault, target, html, options = {}) {
+  // Serialize our exports so overwrite checks also cover concurrent MCP requests.
+  const previous = exportQueues.get(vault) || Promise.resolve();
+  const pending = previous.catch(() => {}).then(() => writeExport(vault, target, html, options));
+  exportQueues.set(vault, pending);
+  const cleanup = () => {
+    if (exportQueues.get(vault) === pending) exportQueues.delete(vault);
+  };
+  pending.then(cleanup, cleanup);
+  return pending;
+}
+
+async function writeExport(vault, target, html, options) {
+  // Storage stays with Obsidian's public Vault API on every platform.
   validateVaultExportPath(target);
+  options.assertCurrent?.();
   const folders = target.split('/').slice(0, -1);
   let parent = '';
   for (const part of folders) {
@@ -50,6 +65,7 @@ async function writeMobileExport(vault, target, html) {
     let entry = vault.getAbstractFileByPath(parent);
     if (!entry) {
       try {
+        options.assertCurrent?.();
         await vault.createFolder(parent);
       } catch (error) {
         if (!(vault.getAbstractFileByPath(parent) instanceof TFolder)) throw error;
@@ -58,10 +74,12 @@ async function writeMobileExport(vault, target, html) {
     }
     if (!(entry instanceof TFolder)) throw new Error(`Not a folder: ${parent}`);
   }
+  options.assertCurrent?.();
   const existing = vault.getAbstractFileByPath(target);
+  if (existing && options.overwrite === false) throw new Error('Export already exists');
   if (existing instanceof TFile) await vault.modify(existing, html);
   else if (!existing) await vault.create(target, html);
   else throw new Error('The export filename points to a folder');
 }
 
-module.exports = { resolveMobileExportPath, writeMobileExport };
+module.exports = { resolveVaultExportPath, writeVaultExport };

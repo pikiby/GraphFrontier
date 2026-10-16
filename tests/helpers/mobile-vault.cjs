@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict');
 const { obsidian } = require('./obsidian.cjs');
 
-function mobileVault(t) {
+function mobileVault(t, mobile = true) {
   const previous = obsidian.Platform.isMobile;
-  obsidian.Platform.isMobile = true;
+  obsidian.Platform.isMobile = mobile;
   t.after(() => {
     obsidian.Platform.isMobile = previous;
   });

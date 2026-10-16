@@ -1,8 +1,6 @@
 const test = require('node:test');
+const { mobileVault } = require('./helpers/mobile-vault.cjs');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 const { fixture, loadSource, deferred } = require('./helpers/obsidian.cjs');
 const { GraphFrontierApi } = loadSource('api.js');
 const { EXTENDED_TOOLS } = require('../src/api-tools');
@@ -63,6 +61,21 @@ function setup(t) {
   };
   return f;
 }
+
+test('export locations describe the vault without accessing the desktop filesystem', async (t) => {
+  const f = setup(t);
+  Object.defineProperty(f.view.contentEl.win, 'require', {
+    get() {
+      return assert.fail('Location discovery must not use Node');
+    },
+  });
+  assert.deepEqual(await f.api.getExportLocations(f.ref()), {
+    vault: 'Test',
+    home: null,
+    desktop: null,
+    vaultRelative: true,
+  });
+});
 
 test('every current global setting has a typed MCP field; invalid patches are atomic', (t) => {
   const f = setup(t),
@@ -370,14 +383,15 @@ test('UI state/hotkeys, pause/resume and copying linked names reuse plugin funct
 });
 
 test('export writes a working HTML induced subgraph, excludes unrequested contents and refuses overwrite', async (t) => {
-  const f = setup(t),
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'graphfrontier-api-export-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  f.view.contentEl.win.require = require;
+  const f = setup(t);
+  const { vault, contents, file } = mobileVault(t, false);
+  Object.assign(f.app.vault, vault);
+  for (const node of f.view.nodes) file(node.id, '# PRIVATE NOTE');
+  f.view.contentEl.win.require = () => assert.fail('Export must not use Node');
   f.view.canvasEl = { clientWidth: 800, clientHeight: 600 };
   f.view.ctx = {};
   f.view.updateCanvasBackgroundColor = GraphFrontierView.prototype.updateCanvasBackgroundColor;
-  const target = path.join(dir, 'schema.html');
+  const target = 'Exports/schema.html';
   const result = await f.api.exportHtml({
     ...f.ref(),
     path: target,
@@ -386,14 +400,14 @@ test('export writes a working HTML induced subgraph, excludes unrequested conten
   });
   assert.equal(result.nodeCount, 2);
   assert.equal(result.edgeCount, 1);
-  const html = fs.readFileSync(target, 'utf8');
+  const html = contents.get(target);
   assert.ok(html.startsWith('<!doctype html>'));
   assert.equal(html.includes('PRIVATE NOTE'), false);
   assert.equal(html.includes('gamma.md'), false);
   await assert.rejects(f.api.exportHtml({ ...f.ref(), path: target }), { code: 'EXPORT_FAILED' });
-  assert.equal(fs.readFileSync(target, 'utf8'), html);
+  assert.equal(contents.get(target), html);
   await f.api.exportHtml({ ...f.ref(), path: target, overwrite: true, includeContents: true });
-  assert.ok(fs.readFileSync(target, 'utf8').includes('PRIVATE NOTE'));
+  assert.ok(contents.get(target).includes('PRIVATE NOTE'));
   assert.equal(f.plugin.getSettings().export_static_html_path, '');
 });
 
@@ -466,10 +480,11 @@ test('an exact subset and camera persist when the graph tab is reopened', async 
 });
 
 test('export checks context again before writing after an asynchronous content read', async (t) => {
-  const f = setup(t),
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'graphfrontier-cancelled-export-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  f.view.contentEl.win.require = require;
+  const f = setup(t);
+  const { vault, contents, file } = mobileVault(t, false);
+  Object.assign(f.app.vault, vault);
+  for (const node of f.view.nodes) file(node.id, '# PRIVATE NOTE');
+  f.view.contentEl.win.require = () => assert.fail('Export must not use Node');
   f.view.canvasEl = { clientWidth: 800, clientHeight: 600 };
   f.view.ctx = {};
   f.view.updateCanvasBackgroundColor = GraphFrontierView.prototype.updateCanvasBackgroundColor;
@@ -477,9 +492,9 @@ test('export checks context again before writing after an asynchronous content r
     f.plugin.data = f.plugin.normalizeData(f.plugin.data);
     return 'changed';
   };
-  const target = path.join(dir, 'stale.html');
+  const target = 'stale.html';
   await assert.rejects(f.api.exportHtml({ ...f.ref(), path: target }), { code: 'STATE_CHANGED' });
-  assert.equal(fs.existsSync(target), false);
+  assert.equal(contents.has(target), false);
 });
 
 test('a valid backup can recover a corrupt destination, preserving its damaged bytes separately', async (t) => {

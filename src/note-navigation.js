@@ -49,11 +49,6 @@ async function openNoteTarget(app, type, target, hostWindow) {
   const base = app.vault.adapter.getBasePath?.();
   if (!path.isAbsolute(target) && !base) throw new Error('Cannot resolve the vault folder');
   const resolved = path.isAbsolute(target) ? target : path.resolve(base, target);
-  try {
-    await nodeRequire('fs').promises.stat(resolved);
-  } catch {
-    throw new Error(`Path not found: ${target}`);
-  }
   const error = await nodeRequire('electron').shell.openPath(resolved);
   if (error) throw new Error(error);
 }

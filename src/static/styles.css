@@ -161,18 +161,18 @@
   margin-top: 0;
 }
 
-.graphfrontier-sidepanel-section-toggle {
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
   min-height: 30px;
-  border: 0 !important;
+  border: 0;
   border-radius: 0;
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-  box-shadow: none !important;
-  color: var(--text-normal) !important;
+  background: transparent;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: var(--text-normal);
   font-size: 12px;
   line-height: 1.2;
   text-align: left;
@@ -183,7 +183,7 @@
   gap: 4px;
 }
 
-.graphfrontier-sidepanel-section-toggle::before {
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle::before {
   content: '';
   width: 0;
   height: 0;
@@ -195,11 +195,11 @@
   transition: transform 120ms ease;
 }
 
-.graphfrontier-sidepanel-section-toggle.is-open::before {
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle.is-open::before {
   transform: rotate(90deg);
 }
 
-.graphfrontier-sidepanel-section-toggle::after {
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle::after {
   content: '';
   flex: 1;
   height: 1px;
@@ -207,17 +207,17 @@
   background: var(--text-muted);
 }
 
-.graphfrontier-sidepanel-section-toggle:hover,
-.graphfrontier-sidepanel-section-toggle:active,
-.graphfrontier-sidepanel-section-toggle:focus,
-.graphfrontier-sidepanel-section-toggle:focus-visible {
-  border: 0 !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-  box-shadow: none !important;
-  color: var(--text-normal) !important;
-  outline: none !important;
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle:hover,
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle:active,
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle:focus,
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle:focus-visible {
+  border: 0;
+  background: transparent;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: var(--text-normal);
+  outline: none;
 }
 
 .graphfrontier-sidepanel-section-content {
@@ -267,13 +267,13 @@
   padding: 1px 4px;
 }
 
-.graphfrontier-sidepanel-select.is-compact {
+.graphfrontier-sidepanel select.graphfrontier-sidepanel-select.is-compact {
   width: 66px;
   font-size: 10px;
   padding: 0 2px;
-  min-height: 18px !important;
-  height: 18px !important;
-  line-height: 1 !important;
+  min-height: 18px;
+  height: 18px;
+  line-height: 1;
 }
 
 .graphfrontier-sidepanel-row.is-compact {

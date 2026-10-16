@@ -431,44 +431,14 @@ class GraphFrontierActions extends LayoutApi {
   }
 
   async getExportLocations(raw) {
-    const args = this.input('getExportLocations', raw),
-      view = this.resolve(args);
-    const vault = this.plugin.app.vault.adapter.getBasePath?.() || null;
-    const host = view.contentEl?.win;
-    if (typeof host?.require !== 'function')
-      return { vault, home: null, desktop: null, vaultRelative: true };
-    const os = host.require('os'),
-      path = host.require('path'),
-      fs = host.require('fs');
-    const home = os.homedir();
-    let desktop = null;
-    try {
-      const app = host.require('electron').app;
-      desktop = app?.getPath('desktop') || null;
-    } catch {
-      /* Renderer may not expose app. */
-    }
-    if (!desktop && os.platform() === 'linux') {
-      try {
-        const source = await fs.promises.readFile(
-          path.join(home, '.config', 'user-dirs.dirs'),
-          'utf8'
-        );
-        const match = /^XDG_DESKTOP_DIR="([^"]+)"/m.exec(source);
-        const candidate = match?.[1].replace(/\$HOME/g, home);
-        if (candidate && !candidate.includes('$') && path.isAbsolute(candidate))
-          desktop = candidate;
-      } catch {
-        /* XDG user directories are optional. */
-      }
-    }
-    if (!desktop) desktop = path.join(home, 'Desktop');
-    try {
-      if (!(await fs.promises.stat(desktop)).isDirectory()) desktop = null;
-    } catch {
-      desktop = null;
-    }
-    return { vault, home, desktop, vaultRelative: false };
+    const args = this.input('getExportLocations', raw);
+    this.resolve(args);
+    return {
+      vault: this.plugin.app.vault.getName(),
+      home: null,
+      desktop: null,
+      vaultRelative: true,
+    };
   }
 
   async exportHtml(raw) {

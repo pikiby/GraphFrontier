@@ -1,5 +1,5 @@
-const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Platform } = require('obsidian');
-const { resolveMobileExportPath, writeMobileExport } = require('./mobile-export');
+const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
+const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
 const { buildNodeContextMenu } = require('./node-context-menu');
 const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
@@ -4412,79 +4412,18 @@ class GraphFrontierView extends ItemView {
   }
 
   async commandExportStaticHtml(options = {}) {
-    const mobile = Platform.isMobile;
-    const pathSetting = mobile ? 'export_static_html_mobile_path' : 'export_static_html_path';
-    const preselectedPath = String(options?.exportPath || '').trim();
-    const savedPath = String(this.plugin.data?.settings?.[pathSetting] || '').trim();
-    let exportPath = preselectedPath;
-    if (!exportPath) {
-      exportPath = await ExportStaticHtmlPathModal.openFor(this.app, savedPath);
-      if (!exportPath) return;
-    }
+    const exportPath = String(options.exportPath || '').trim() || 'graphfrontier-static.html';
     if (!this.canvasEl || !this.ctx) {
       new Notice('Graph canvas is not ready');
       return;
     }
 
     let normalizedExportPath;
-    let fs = null;
-    let path = null;
-    if (mobile) {
-      try {
-        normalizedExportPath = resolveMobileExportPath(this.app.vault, exportPath);
-      } catch (error) {
-        new Notice(error.message);
-        return;
-      }
-    } else {
-      let nodeRequire = null;
-      if (this.contentEl?.win && typeof this.contentEl.win.require === 'function') {
-        nodeRequire = this.contentEl.win.require.bind(this.contentEl.win);
-      } else if (typeof window !== 'undefined' && typeof window.require === 'function') {
-        nodeRequire = window.require.bind(window);
-      }
-      if (!nodeRequire) {
-        new Notice('Static HTML export is available only in desktop app');
-        return;
-      }
-
-      try {
-        fs = nodeRequire('fs');
-        path = nodeRequire('path');
-      } catch {
-        new Notice('Cannot access filesystem APIs for export');
-        return;
-      }
-      const rawExportPath = String(exportPath || '').trim();
-      if (!rawExportPath) {
-        new Notice('Export path is empty');
-        return;
-      }
-      if (!path.isAbsolute(rawExportPath)) {
-        new Notice('Use absolute path for export');
-        return;
-      }
-
-      const defaultExportFileName = 'graphfrontier-static.html';
-      normalizedExportPath = rawExportPath;
-      try {
-        const exportPathStat = await fs.promises.stat(normalizedExportPath);
-        if (exportPathStat.isDirectory()) {
-          normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
-        }
-      } catch {
-        // Missing paths are normal here: the parent folder is created below.
-      }
-      if (/[\\/]$/u.test(normalizedExportPath)) {
-        normalizedExportPath = path.join(normalizedExportPath, defaultExportFileName);
-      } else {
-        const extension = path.extname(normalizedExportPath).toLowerCase();
-        if (extension !== '.html' && extension !== '.htm') {
-          const parsedPath = path.parse(normalizedExportPath);
-          const fileName = parsedPath.name ? `${parsedPath.name}.html` : defaultExportFileName;
-          normalizedExportPath = path.join(parsedPath.dir, fileName);
-        }
-      }
+    try {
+      normalizedExportPath = resolveVaultExportPath(this.app.vault, exportPath);
+    } catch (error) {
+      new Notice(error.message);
+      return;
     }
 
     const visibleNodeIds = this.getFilterVisibleNodeIds();
@@ -5359,39 +5298,17 @@ class GraphFrontierView extends ItemView {
 
     options.assertCurrent?.();
     try {
-      if (mobile) {
-        if (
-          options.overwrite === false &&
-          this.app.vault.getAbstractFileByPath(normalizedExportPath)
-        )
-          throw new Error('Export already exists');
-        await writeMobileExport(this.app.vault, normalizedExportPath, html);
-      } else {
-        await fs.promises.mkdir(path.dirname(normalizedExportPath), { recursive: true });
-        options.assertCurrent?.();
-        await fs.promises.writeFile(
-          normalizedExportPath,
-          html,
-          options.overwrite === false ? { encoding: 'utf8', flag: 'wx' } : 'utf8'
-        );
-      }
-      if (
-        options.rememberPath !== false &&
-        this.plugin.data.settings[pathSetting] !== normalizedExportPath
-      ) {
-        this.plugin.data.settings[pathSetting] = normalizedExportPath;
-        this.plugin.schedulePersist();
-      }
+      await writeVaultExport(this.app.vault, normalizedExportPath, html, options);
       new Notice(
-        `Static HTML exported: ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} edges)`
+        `Static HTML saved in vault ${normalizedExportPath.includes('/') ? 'at' : 'root:'} ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} edges)`
       );
       return {
         path: normalizedExportPath,
         nodeCount: exportedNodes.length,
         edgeCount: exportedEdges.length,
       };
-    } catch {
-      new Notice('Failed to write static HTML export');
+    } catch (error) {
+      new Notice(`Failed to write static HTML export: ${error.message || 'Unknown error'}`);
     }
   }
 
@@ -6402,76 +6319,6 @@ class GraphFrontierView extends ItemView {
       x: (worldX - this.camera.x) * this.camera.zoom + this.viewWidth / 2,
       y: (worldY - this.camera.y) * this.camera.zoom + this.viewHeight / 2,
     };
-  }
-}
-
-// Modal block for choosing export target path for static HTML graph.
-class ExportStaticHtmlPathModal extends Modal {
-  constructor(app, initialPath, resolve) {
-    super(app);
-    this.initialPath = String(initialPath || '');
-    this.resolve = resolve;
-  }
-
-  static openFor(app, initialPath = '') {
-    return new Promise((resolve) => {
-      const modal = new ExportStaticHtmlPathModal(app, initialPath, resolve);
-      modal.open();
-    });
-  }
-
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl('h3', {
-      text: Platform.isMobile
-        ? 'Write the folder path and the file name inside the vault.'
-        : 'Write the folder path and the file name for saving.',
-    });
-
-    const form = contentEl.createDiv({ cls: 'graphfrontier-coord-form' });
-    const pathInput = form.createEl('input', {
-      type: 'text',
-      cls: 'graphfrontier-coord-input',
-    });
-    pathInput.value = this.initialPath;
-
-    const submit = () => {
-      const targetPath = String(pathInput.value || '').trim();
-      if (!targetPath) {
-        new Notice('Export path is required');
-        return;
-      }
-      const done = this.resolve;
-      this.resolve = null;
-      done(targetPath);
-      this.close();
-    };
-
-    const actions = contentEl.createDiv({ cls: 'graphfrontier-coord-actions' });
-    const exportBtn = actions.createEl('button', { text: 'Export' });
-    const cancelBtn = actions.createEl('button', { text: 'Cancel' });
-
-    exportBtn.addEventListener('click', submit);
-    cancelBtn.addEventListener('click', () => {
-      const done = this.resolve;
-      this.resolve = null;
-      done(null);
-      this.close();
-    });
-    pathInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') submit();
-    });
-    pathInput.focus();
-    pathInput.select();
-  }
-
-  onClose() {
-    if (this.resolve) {
-      this.resolve(null);
-      this.resolve = null;
-    }
-    this.contentEl.empty();
   }
 }
 

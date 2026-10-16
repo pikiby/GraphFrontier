@@ -124,17 +124,17 @@ Actions appear only when applicable: YAML actions require the corresponding prop
 
 If search row is active, save is blocked to avoid saving filtered/focus state as final layout.
 
-## Static HTML Export on Mobile
+## Static HTML Export
 
-On desktop, **Export to** still accepts an absolute filesystem path. On mobile, enter
-a path relative to the current vault, such as `Exports/graph.html`. Missing folders
-are created; an existing HTML file at that path is replaced. An existing folder or
-a path ending in `/` uses `graphfrontier-static.html` inside that folder.
+On desktop and mobile, **Export to** immediately saves `graphfrontier-static.html`
+in the current vault root and displays its location. No path dialog is shown;
+previously remembered paths are ignored. A subsequent export replaces this file.
+The HTML contains note previews and metadata; review it before sharing.
+API/MCP exports may still specify a vault-relative path and require explicit
+permission to overwrite an existing file.
 
-The initial path is empty. Desktop and mobile export paths are remembered separately
-after a successful export. Absolute paths, URLs, parent traversal and hidden folders
-are not accepted by mobile export. The HTML contains note previews and metadata;
-review its contents before sharing it.
+Storage uses Obsidian's Vault API. Linked folders follow the vault adapter's behavior; this is not a filesystem sandbox that resolves and blocks symlink
+targets outside the vault. Choose a regular vault folder for exports.
 
 On mobile, **Open URL** and Obsidian `path` links are passed to the host without
 Electron. Vault files open in Obsidian. Opening arbitrary external files or folders
