@@ -1,8 +1,8 @@
 {
   "id": "graphfrontier",
   "name": "GraphFrontier",
-  "version": "0.8.0",
-  "minAppVersion": "1.4.0",
+  "version": "0.8.1",
+  "minAppVersion": "1.12.7",
   "author": "Boris Kazakov (pikiby)",
   "authorUrl": "https://github.com/pikiby",
   "fundingUrl": "https://buymeacoffee.com/pikiby",

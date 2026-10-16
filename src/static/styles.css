@@ -1,8 +1,9 @@
 .graphfrontier-host {
   position: relative;
   width: 100%;
-  height: 100%;
-  min-height: 100%;
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -164,16 +165,16 @@
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  min-height: 14px;
+  min-height: 30px;
   border: 0 !important;
   border-radius: 0;
   background: transparent !important;
   background-color: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
-  color: var(--text-muted) !important;
-  font-size: 11px;
-  line-height: 1;
+  color: var(--text-normal) !important;
+  font-size: 12px;
+  line-height: 1.2;
   text-align: left;
   padding: 0;
   cursor: pointer;
@@ -183,9 +184,14 @@
 }
 
 .graphfrontier-sidepanel-section-toggle::before {
-  content: '▸';
-  font-size: 10px;
-  color: var(--text-faint);
+  content: '';
+  width: 0;
+  height: 0;
+  flex: 0 0 auto;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid currentColor;
+  margin: 0 3px;
   transition: transform 120ms ease;
 }
 
@@ -198,7 +204,7 @@
   flex: 1;
   height: 1px;
   margin-left: 6px;
-  background: var(--background-modifier-border);
+  background: var(--text-muted);
 }
 
 .graphfrontier-sidepanel-section-toggle:hover,
@@ -210,7 +216,7 @@
   background-color: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
-  color: var(--text-muted) !important;
+  color: var(--text-normal) !important;
   outline: none !important;
 }
 
@@ -247,7 +253,7 @@
 .graphfrontier-sidepanel-separator {
   height: 1px;
   margin: 6px 0 8px;
-  background: var(--background-modifier-border);
+  background: var(--text-muted);
 }
 
 .graphfrontier-sidepanel-label {
@@ -807,4 +813,166 @@
   width: 100%;
   font-family: var(--font-monospace);
   resize: vertical;
+}
+
+.graphfrontier-sidepanel button:not(.graphfrontier-sidepanel-section-toggle) {
+  border-color: var(--text-muted);
+}
+
+.modal.graphfrontier-color-modal {
+  width: min(300px, calc(100vw - 32px));
+  min-width: 0;
+  height: auto;
+  max-height: calc(100dvh - 32px);
+  padding: 16px;
+  border-radius: 12px;
+}
+.graphfrontier-color-modal .modal-content {
+  overflow-y: auto;
+}
+.graphfrontier-color-preview {
+  height: 28px;
+  border: 1px solid var(--text-muted);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+.graphfrontier-color-channel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+}
+.graphfrontier-color-channel span {
+  width: 42px;
+}
+.graphfrontier-color-channel input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Keep graph controls independent of Obsidian's platform-specific form defaults. */
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle {
+  height: 32px;
+  min-height: 32px;
+  font-weight: 500;
+}
+
+.graphfrontier-sidepanel .graphfrontier-sidepanel-label,
+.graphfrontier-sidepanel .graphfrontier-groups-title,
+.graphfrontier-sidepanel .graphfrontier-find-mode-label {
+  color: var(--text-normal);
+  opacity: 1;
+}
+
+.graphfrontier-sidepanel input.graphfrontier-find-input,
+.graphfrontier-sidepanel input.graphfrontier-group-query {
+  appearance: none;
+  height: 28px;
+  min-height: 28px;
+  border: 1px solid var(--text-muted);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 12px;
+  box-shadow: none;
+  padding: 0 24px 0 6px;
+}
+
+.graphfrontier-sidepanel input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.graphfrontier-sidepanel input.graphfrontier-group-color-input,
+.graphfrontier-node-visual-control input.graphfrontier-group-color-input {
+  width: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  flex: 0 0 26px;
+  padding: 0;
+  border: 1px solid var(--text-muted);
+}
+
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+  input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  --slider-thumb-width: 16px;
+  --slider-thumb-height: 16px;
+  --slider-thumb-width-active: 16px;
+  --slider-thumb-height-active: 16px;
+  --slider-thumb-y: 0px;
+  --slider-thumb-y-active: 0px;
+  --slider-thumb-border-color: var(--text-normal);
+  --slider-thumb-background-hover: var(--background-primary);
+  --slider-thumb-shadow-hover: none;
+}
+
+.graphfrontier-sidepanel input.graphfrontier-sidepanel-slider {
+  width: 90px;
+  min-width: 0;
+}
+
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+  input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--text-muted);
+}
+
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+  input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  top: 0;
+  box-sizing: border-box;
+  border: 1.5px solid var(--text-normal);
+  border-radius: 50%;
+  background: var(--background-primary);
+  box-shadow: none;
+  transform: none;
+}
+
+input.graphfrontier-group-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input.graphfrontier-group-color-input::-webkit-color-swatch {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  box-shadow: none;
+}
+
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+  input[type='range']::-moz-range-track {
+  height: 4px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--text-muted);
+}
+
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control, .graphfrontier-color-modal)
+  input[type='range']::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--text-normal);
+  border-radius: 50%;
+  background: var(--background-primary);
+  box-shadow: none;
 }

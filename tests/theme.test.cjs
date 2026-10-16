@@ -8,6 +8,31 @@ const { readGraphTheme } = require('../src/theme');
 const render = require('../src/render');
 const { GraphFrontierView } = loadSource('view.js');
 
+test('graph height excludes floating navigation and the keyboard viewport', () => {
+  const style = {};
+  const viewport = { offsetTop: 0, height: 851 };
+  const navbar = { left: 30, right: 360, top: 770, height: 52 };
+  const view = {
+    wrapEl: { style },
+    contentEl: {
+      getBoundingClientRect: () => ({ left: 0, right: 393, top: 101, bottom: 851 }),
+      ownerDocument: {
+        defaultView: { visualViewport: viewport },
+        querySelector: () => ({ getBoundingClientRect: () => navbar }),
+      },
+    },
+  };
+  GraphFrontierView.prototype.updateWrapHeightForKeyboard.call(view);
+  assert.equal(style.maxHeight, '661px');
+  viewport.height = 500;
+  GraphFrontierView.prototype.updateWrapHeightForKeyboard.call(view);
+  assert.equal(style.maxHeight, '399px');
+  navbar.height = 0;
+  viewport.height = 851;
+  GraphFrontierView.prototype.updateWrapHeightForKeyboard.call(view);
+  assert.equal(style.maxHeight, '750px');
+});
+
 function themeElement(scheme, variables = {}) {
   const el = {};
   const doc = {

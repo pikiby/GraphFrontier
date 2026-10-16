@@ -1,3 +1,4 @@
+const { bindColorPicker, openColorPicker } = require('./color-picker');
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Platform } = require('obsidian');
 const { resolveMobileExportPath, writeMobileExport } = require('./mobile-export');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
@@ -440,6 +441,8 @@ class GraphFrontierView extends ItemView {
     const colorInput = colorRow.createEl('input', { type: 'color' });
     colorInput.setAttribute('aria-label', 'Node color');
     colorInput.value = this.plugin.getSettings().node_color;
+    colorInput.addClass('graphfrontier-group-color-input');
+    bindColorPicker(this.app, colorInput, () => this.plugin.data);
     this.sideControls.set('node_color', { type: 'color', input: colorInput });
     this.registerDomEvent(colorInput, 'input', () => {
       this.plugin.data.settings.node_color = colorInput.value;
@@ -2352,6 +2355,7 @@ class GraphFrontierView extends ItemView {
       type: 'color',
     });
     colorInput.value = form.color;
+    bindColorPicker(this.app, colorInput, () => this.plugin.data);
 
     const removeBtn = row.createEl('button', { cls: 'graphfrontier-group-remove', text: 'x' });
 
@@ -2831,6 +2835,25 @@ class GraphFrontierView extends ItemView {
     if (!this.wrapEl) return;
     if (this.wrapEl.style.height) this.wrapEl.style.height = '';
     if (this.wrapEl.style.maxHeight) this.wrapEl.style.maxHeight = '';
+    const doc = this.contentEl.ownerDocument;
+    const viewport = doc?.defaultView?.visualViewport;
+    const host = this.contentEl.getBoundingClientRect?.();
+    if (!host) return;
+    let bottom = Math.min(
+      host.bottom,
+      viewport ? viewport.offsetTop + viewport.height : host.bottom
+    );
+    // Obsidian's floating navigation overlaps the view rather than reducing its height.
+    const navbar = doc.querySelector('.mobile-navbar')?.getBoundingClientRect();
+    if (
+      navbar?.height &&
+      navbar.right > host.left &&
+      navbar.left < host.right &&
+      navbar.top > host.top
+    ) {
+      bottom = Math.min(bottom, navbar.top - 8);
+    }
+    this.wrapEl.style.maxHeight = `${Math.max(0, bottom - host.top)}px`;
   }
 
   updateCanvasBackgroundColor() {
@@ -3666,8 +3689,11 @@ class GraphFrontierView extends ItemView {
     const point = this.getTouchScreenPoint(event.touches[0]);
     if (!point) return;
     const node = this.startSingleTouchGesture(point);
-    if (node)
-      this.scheduleTouchLongPress(node.id, event.touches[0].clientX, event.touches[0].clientY);
+    this.scheduleTouchLongPress(
+      node?.id ?? null,
+      event.touches[0].clientX,
+      event.touches[0].clientY
+    );
   }
 
   onTouchMove(event) {
@@ -3780,6 +3806,7 @@ class GraphFrontierView extends ItemView {
   startSingleTouchGesture(point) {
     this.touchGesture = {
       mode: 'single',
+      nodeId: null,
       startX: point.x,
       startY: point.y,
       moved: false,
@@ -3927,23 +3954,20 @@ class GraphFrontierView extends ItemView {
   }
 
   openTouchContextMenuAt(clientX, clientY) {
-    if (!this.canvasEl) return;
-    const rect = this.canvasEl.getBoundingClientRect();
-    const screenX = clientX - rect.left;
-    const screenY = clientY - rect.top;
-    this.lastCursorScreen = { x: screenX, y: screenY };
-    const node = this.getNodeAtScreen(screenX, screenY);
-    if (!node) return;
-    this.showNodeContextMenu(node, clientX, clientY, null);
+    this.openContextMenuAt(clientX, clientY);
   }
 
   // Node context menu: standard Obsidian actions plus GraphFrontier actions.
   onContextMenu(event) {
     event.preventDefault();
+    this.openContextMenuAt(event.clientX, event.clientY, event);
+  }
 
+  openContextMenuAt(clientX, clientY, event = null) {
+    if (!this.canvasEl) return;
     const rect = this.canvasEl.getBoundingClientRect();
-    const screenX = event.clientX - rect.left;
-    const screenY = event.clientY - rect.top;
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
     this.lastCursorScreen = { x: screenX, y: screenY };
 
     const node = this.getNodeAtScreen(screenX, screenY);
@@ -3956,10 +3980,10 @@ class GraphFrontierView extends ItemView {
           .setIcon('orbit')
           .onClick(() => this.editDarkEnergy(null, position))
       );
-      this.showMenuAtPointer(menu, event.clientX, event.clientY, event);
+      this.showMenuAtPointer(menu, clientX, clientY, event);
       return;
     }
-    this.showNodeContextMenu(node, event.clientX, event.clientY, event);
+    this.showNodeContextMenu(node, clientX, clientY, event);
   }
 
   editDarkEnergy(node = null, position = { x: 0, y: 0 }) {
@@ -4039,6 +4063,7 @@ class GraphFrontierView extends ItemView {
               ? 'graphfrontier-group-color-input'
               : 'graphfrontier-sidepanel-slider',
         });
+        if (spec.type === 'color') bindColorPicker(this.app, input, () => this.plugin.data);
         input.min = String(spec.min);
         input.max = String(spec.max);
         input.step = String(spec.step);
@@ -5551,50 +5576,18 @@ class GraphFrontierView extends ItemView {
     }
   }
 
-  async promptPickPaintedEdgeColor(nodeId, clientX = null, clientY = null) {
+  async promptPickPaintedEdgeColor(nodeId) {
     const initialColor = this.plugin.getPaintedEdgeColor(nodeId) || '#ef6f6c';
-    const hostDocument = this.contentEl.ownerDocument || document;
-    const colorInput = hostDocument.createElement('input');
-    colorInput.type = 'color';
-    colorInput.value = initialColor;
-    colorInput.className = 'graphfrontier-group-color-input';
-    hostDocument.body.appendChild(colorInput);
-
-    const viewportWidth = this.contentEl.win.innerWidth || 1200;
-    const viewportHeight = this.contentEl.win.innerHeight || 800;
-    const pickerSize = 24;
-    const targetX = Number.isFinite(clientX) ? Number(clientX) : Math.floor(viewportWidth / 2);
-    const targetY = Number.isFinite(clientY) ? Number(clientY) : Math.floor(viewportHeight / 2);
-    const clampedX = Math.max(8, Math.min(viewportWidth - pickerSize - 8, targetX));
-    const clampedY = Math.max(8, Math.min(viewportHeight - pickerSize - 8, targetY));
-
-    colorInput.style.position = 'fixed';
-    colorInput.style.left = `${clampedX}px`;
-    colorInput.style.top = `${clampedY}px`;
-    colorInput.style.opacity = '0';
-    colorInput.style.zIndex = '9999';
-    colorInput.style.pointerEvents = 'none';
-
-    const cleanup = () => {
-      colorInput.remove();
-    };
-    const applySelectedColor = () => {
-      this.plugin.setPaintedEdgeColor(nodeId, colorInput.value);
-      this.plugin.renderAllViews();
-    };
-
-    this.registerDomEvent(colorInput, 'input', () => {
-      applySelectedColor();
-    });
-    this.registerDomEvent(colorInput, 'change', () => {
-      applySelectedColor();
-    });
-    this.registerDomEvent(colorInput, 'blur', () => {
-      window.setTimeout(cleanup, 40);
-    });
-
-    colorInput.focus();
-    colorInput.click();
+    const sourceData = this.plugin.data;
+    openColorPicker(
+      this.app,
+      initialColor,
+      (color) => {
+        this.plugin.setPaintedEdgeColor(nodeId, color);
+        this.plugin.renderAllViews();
+      },
+      () => this.plugin.data === sourceData
+    );
   }
 
   // Pin placement primitives for exact/grid modes and bulk pin alignment.

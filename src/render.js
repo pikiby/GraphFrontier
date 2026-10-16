@@ -386,7 +386,7 @@ function drawEdges(view, ctx) {
     if (hasNormalEdgeBatch) return;
     normalEdgeBatchWidth = edgeScale;
     ctx.globalAlpha = normalEdgeAlpha;
-    ctx.strokeStyle = 'rgba(145, 160, 187, 0.35)';
+    ctx.strokeStyle = (view.canvasTheme || DARK_THEME).mutedText;
     ctx.lineWidth = edgeScale;
     ctx.beginPath();
     hasNormalEdgeBatch = true;
@@ -477,11 +477,10 @@ function drawEdges(view, ctx) {
       ctx.strokeStyle = hexToRgba(paintedColor, alpha);
       ctx.lineWidth = paintedEdgeScale + (2 - paintedEdgeScale) * focusEdgeProgress;
     } else {
-      const red = Math.round(145 + (166 - 145) * focusEdgeProgress);
-      const green = Math.round(160 + (204 - 160) * focusEdgeProgress);
-      const blue = Math.round(187 + (255 - 187) * focusEdgeProgress);
-      const alpha = 0.35 + (0.95 - 0.35) * focusEdgeProgress;
-      ctx.strokeStyle = `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+      ctx.strokeStyle =
+        focusEdgeProgress > 0.5
+          ? (view.canvasTheme || DARK_THEME).selection
+          : (view.canvasTheme || DARK_THEME).mutedText;
       ctx.lineWidth = edgeScale + (2 - edgeScale) * focusEdgeProgress;
     }
 

@@ -5,7 +5,7 @@ It is a fully independent plugin with its own physics engine, designed to implem
 
 The main goal is to build an ideal, universal data-visualization tool that keeps the strengths of Graph View while removing its limitations.
 
-It helps create a clean, well-organized structure for large collections of notes and stays very smooth even with a very large number of objects.
+Arrange notes into reusable layouts, pin important nodes, and organize related notes around gravity centers. Performance depends on graph size, enabled effects and your device.
 
 Especially useful for:
 
@@ -30,18 +30,51 @@ https://github.com/pikiby/GraphFrontier/issues
 
 ## Installation
 
+### Community Plugins (Recommended)
+
+1. Open Obsidian's **Settings -> Community plugins** and enable community plugins if needed.
+2. Select **Browse**, search for **GraphFrontier**, then select **Install** and **Enable**.
+3. Run **Open GraphFrontier** from the command palette or use its ribbon icon.
+
+[Open the Community directory listing](https://community.obsidian.md/plugins/graphfrontier).
+No separate Node.js installation is needed. For updates, use **Check for updates** in Community plugins.
+
+### Manual Installation
+
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.8.0/graphfrontier-0.8.0.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.8.1/graphfrontier-0.8.1.zip
 
-1. Download `graphfrontier-0.8.0.zip` from Releases.
+1. Download `graphfrontier-0.8.1.zip` from Releases.
 2. Extract it into `<vault>/.obsidian/plugins/graphfrontier/`.
 3. Enable it in `Settings -> Community plugins -> GraphFrontier`.
 
 When updating, replace the plugin files, not the entire folder: keep your
 `data.json`, `layouts/` and optional `mcp.json`. Reload the plugin afterward.
 
-## Recent Updates (0.8.0)
+See the [installation guide](docs/installation.md) for source builds and troubleshooting.
+
+### Platforms And Data Access
+
+- The graph supports desktop and mobile; MCP and arbitrary external-file navigation are desktop-only. Tested on Android 11 hardware and an Android 15 emulator with Obsidian 1.14.4; iOS has not been verified. Touch box selection is not implemented.
+- Desktop HTML export writes to the path you choose; mobile export writes inside the vault. Desktop path discovery can read the operating system's configured desktop location.
+- GraphFrontier reads vault notes and metadata to build the graph. Copy actions write to the clipboard. HTML exports can contain note text and paths: inspect them before sharing.
+- MCP is disabled by default. Enabling it permits authenticated local clients to control the graph and retrieve data; an AI client may send that data to its model provider. See [MCP safety and limits](#safety-and-current-limits).
+
+## Latest Release (0.8.1)
+
+Requires Obsidian 1.12.7 or newer.
+
+- Reachable sidebar controls above mobile navigation and the keyboard viewport.
+- Consistent search fields, color swatches, sliders and collapsible section arrows across platforms.
+- Higher-contrast labels, sliders and ordinary graph links using the current theme.
+- Compact RGB/HEX color dialog with Apply/Cancel, validation recovery and protection against applying edits to a different layout.
+- Long-press empty space to create a gravity node, using the same context menu as desktop.
+
+See [release notes](docs/releases/0.8.1.md) and [Android test evidence](docs/releases/0.8.0-android-test.md).
+Large graphs can slow down while physics is active; smooth navigation after settling is not a guarantee of smooth simulation on every device.
+
+## Previous Release (0.8.0)
 
 Changes since **0.7.7**:
 
@@ -252,12 +285,12 @@ workflow, see [Local Graph API and MCP](docs/mcp.md).
 
 ## Documentation
 
-- Installation: `docs/installation.md`
-- Usage: `docs/usage.md`
-- Settings: `docs/settings.md`
-- Hotkeys and commands: `docs/hotkeys.md`
-- Physics model: `docs/physics.md`
-- Troubleshooting: `docs/troubleshooting.md`
+- [Installation](docs/installation.md)
+- [Usage](docs/usage.md)
+- [Settings](docs/settings.md)
+- [Hotkeys and commands](docs/hotkeys.md)
+- [Physics model](docs/physics.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - Local API and embedded MCP: [setup, tool reference and automation examples](docs/mcp.md)
 
 ## Project Structure

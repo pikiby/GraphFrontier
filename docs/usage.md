@@ -18,6 +18,21 @@ The view opens as a regular tab and can be moved between panes/sidebars.
 - Drag node: move node
 - Left click node: open markdown file (if node is a markdown file)
 
+## Touch Navigation
+
+- Drag empty space with one finger to pan; drag a node to move it.
+- Use two fingers to pan and pinch to zoom.
+- Hold a node for about 450 ms to open its context menu.
+- Hold empty space to open **Create gravity node**. Moving more than 10 screen
+  pixels, releasing early or adding a second finger cancels the pending menu.
+- Touch box selection is not implemented; desktop modifier-key selection does
+  not automatically translate into a touch gesture.
+
+Color swatches open a compact RGB/HEX dialog. **Apply** commits the color;
+**Cancel** leaves it unchanged. Invalid HEX values disable Apply; either valid
+HEX input or a slider change restores it. If the layout changes while the dialog
+is open, reopen the picker rather than applying a stale edit to the new layout.
+
 ## Gravity Nodes
 
 Right-click empty graph space and choose **Create gravity node**. Set a name, attraction
