@@ -1,5 +1,6 @@
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
 const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
+const { ExportModal } = require('./export-modal');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
 const { buildNodeContextMenu } = require('./node-context-menu');
 const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
@@ -818,7 +819,7 @@ class GraphFrontierView extends ItemView {
       cls: 'graphfrontier-sidepanel-save',
       text: 'Export to',
     });
-    exportButton.setAttr('title', 'Export static graph HTML to selected path');
+    exportButton.setAttr('title', 'Export static graph HTML inside the current vault');
     this.registerDomEvent(exportButton, 'click', async () => {
       await this.commandExportStaticHtml();
     });
@@ -4411,18 +4412,42 @@ class GraphFrontierView extends ItemView {
     new Notice('Selection cleared');
   }
 
-  async commandExportStaticHtml(options = {}) {
+  async commandExportStaticHtml(options = {}, { throwOnError = false, exactPath = false } = {}) {
+    if (!String(options.exportPath || '').trim()) {
+      new ExportModal(this.app, (destination) =>
+        this.commandExportStaticHtml(
+          {
+            ...options,
+            ...destination,
+            assertCurrent: () => {
+              options.assertCurrent?.();
+              destination.assertCurrent();
+            },
+          },
+          { throwOnError: true, exactPath: true }
+        )
+      ).open();
+      return;
+    }
+    // UI errors stay in the modal; explicit-path API callers retain Notice/undefined failures.
+    const reportFailure = (message) => {
+      if (throwOnError) throw new Error(message);
+      new Notice(message);
+    };
     const exportPath = String(options.exportPath || '').trim() || 'graphfrontier-static.html';
     if (!this.canvasEl || !this.ctx) {
-      new Notice('Graph canvas is not ready');
+      reportFailure('Graph canvas is not ready');
       return;
     }
 
     let normalizedExportPath;
     try {
       normalizedExportPath = resolveVaultExportPath(this.app.vault, exportPath);
+      if (exactPath && normalizedExportPath !== exportPath) {
+        throw new Error('The export destination changed. Choose another filename.');
+      }
     } catch (error) {
-      new Notice(error.message);
+      reportFailure(error.message);
       return;
     }
 
@@ -5299,16 +5324,18 @@ class GraphFrontierView extends ItemView {
     options.assertCurrent?.();
     try {
       await writeVaultExport(this.app.vault, normalizedExportPath, html, options);
-      new Notice(
-        `Static HTML saved in vault ${normalizedExportPath.includes('/') ? 'at' : 'root:'} ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} edges)`
-      );
+      if (!exactPath) {
+        new Notice(
+          `Static HTML saved in vault ${normalizedExportPath.includes('/') ? 'at' : 'root:'} ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} edges)`
+        );
+      }
       return {
         path: normalizedExportPath,
         nodeCount: exportedNodes.length,
         edgeCount: exportedEdges.length,
       };
     } catch (error) {
-      new Notice(`Failed to write static HTML export: ${error.message || 'Unknown error'}`);
+      reportFailure(`Failed to write static HTML export: ${error.message || 'Unknown error'}`);
     }
   }
 

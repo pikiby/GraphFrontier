@@ -126,10 +126,25 @@ If search row is active, save is blocked to avoid saving filtered/focus state as
 
 ## Static HTML Export
 
-On desktop and mobile, **Export to** immediately saves `graphfrontier-static.html`
-in the current vault root and displays its location. No path dialog is shown;
-previously remembered paths are ignored. A subsequent export replaces this file.
-The HTML contains note previews and metadata; review it before sharing.
+**Export to** and the static HTML export command open **Export graph**. Choose a
+filename (default: `graphfrontier-static.html`) and a folder **inside the current
+vault**. The folder field suggests existing vault folders; select one or type a
+new nested path. Leave it empty for the vault root. Enter in the folder field
+selects a suggestion rather than exporting.
+The `.html` extension is added when omitted.
+Absolute paths, URLs, parent traversal, hidden folders and reserved names are rejected.
+Missing folders are created when exporting. For an existing destination, the main
+button becomes **Replace file**; only activating that button permits replacement.
+If a file appears concurrently, export stops instead of silently replacing it.
+**Cancel** closes the dialog without exporting.
+
+After saving, the dialog stays open with **Saved** and the full vault-relative
+path. **Open file** opens that result through Obsidian's default-app action;
+if unavailable or opening fails, the path remains visible with an inline error.
+Use **Close** to dismiss the dialog. HTML files may be hidden in Obsidian's file
+explorer; no global visibility settings are changed.
+Filenames and folders are not remembered. The HTML contains note previews and
+metadata; review it before sharing.
 API/MCP exports may still specify a vault-relative path and require explicit
 permission to overwrite an existing file.
 

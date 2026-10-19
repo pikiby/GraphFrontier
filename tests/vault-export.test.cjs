@@ -2,7 +2,26 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { loadSource } = require('./helpers/obsidian.cjs');
 const { mobileVault } = require('./helpers/mobile-vault.cjs');
-const { resolveVaultExportPath, writeVaultExport } = loadSource('vault-export.js');
+const { buildVaultExportPath, resolveVaultExportPath, writeVaultExport } =
+  loadSource('vault-export.js');
+
+test('modal filenames normalize extensions and vault-relative folders without interpreting folders as files', () => {
+  for (const [filename, folder, expected] of [
+    ['graphfrontier-static', '', 'graphfrontier-static.html'],
+    ['graph.html', '', 'graph.html'],
+    ['graph.HTML', '', 'graph.HTML'],
+    ['graph.htm', '', 'graph.htm'],
+    ['graph.md', 'Exports', 'Exports/graph.html'],
+    ['my.graph.txt', '  Exports\\Nested// ', 'Exports/Nested/my.graph.html'],
+    [' graph ', ' ', 'graph.html'],
+    [
+      '\u0413\u0440\u0430\u0444',
+      '\u042d\u043a\u0441\u043f\u043e\u0440\u0442',
+      '\u042d\u043a\u0441\u043f\u043e\u0440\u0442/\u0413\u0440\u0430\u0444.html',
+    ],
+  ])
+    assert.equal(buildVaultExportPath(filename, folder), expected);
+});
 
 test('concurrent exports cannot overwrite each other without permission', async (t) => {
   const { vault, contents } = mobileVault(t, false);

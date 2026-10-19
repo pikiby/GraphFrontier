@@ -14,16 +14,30 @@ function element() {
   return {
     children: [],
     events: {},
+    attributes: {},
     win: { cancelAnimationFrame() {} },
-    empty() {},
+    empty() {
+      this.children.length = 0;
+    },
     addClass() {},
     removeClass() {},
     setAttr() {},
-    setAttribute() {},
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    },
     addEventListener(name, callback) {
       this.events[name] = callback;
     },
-    setText() {},
+    setText(value) {
+      this.text = value;
+    },
+    focus() {
+      this.focused = true;
+    },
+    setSelectionRange(start, end) {
+      this.selectionStart = start;
+      this.selectionEnd = end;
+    },
     toggleClass() {},
     createDiv(options) {
       return this.createEl('div', options);
@@ -117,11 +131,43 @@ const obsidian = {
   },
   TFile: class {},
   TFolder: class {},
+  AbstractInputSuggest: class {
+    constructor(app, inputEl) {
+      this.app = app;
+      this.inputEl = inputEl;
+    }
+    setValue(value) {
+      this.inputEl.value = value;
+    }
+    open() {
+      this.opened = true;
+    }
+    close() {
+      this.opened = false;
+    }
+  },
   normalizePath: (value) => value.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, ''),
   Notice,
   Plugin,
   ItemView,
-  Modal: class {},
+  Modal: class {
+    constructor(app) {
+      this.app = app;
+      this.contentEl = element();
+      this.modalEl = element();
+    }
+    setTitle(value) {
+      this.title = value;
+    }
+    open() {
+      this.opened = true;
+      this.onOpen?.();
+    }
+    close() {
+      this.opened = false;
+      this.onClose?.();
+    }
+  },
   Menu,
   MarkdownRenderer: {},
 };

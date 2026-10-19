@@ -27,6 +27,20 @@ function validateVaultExportPath(rawPath) {
   return normalizePath(value);
 }
 
+function withHtmlExtension(path) {
+  return /\.html?$/iu.test(path) ? path : path.replace(/\.[^/.]+$/u, '') + '.html';
+}
+
+function buildVaultExportPath(rawFilename, rawFolder = '') {
+  const filename = String(rawFilename || '').trim();
+  if (!filename) throw new Error('Enter a filename');
+  validateVaultExportPath(filename);
+  if (/[\\/]/u.test(filename)) throw new Error('Put folders in the folder field, not the filename');
+  const folder = String(rawFolder || '').trim();
+  const parent = folder ? `${validateVaultExportPath(folder)}/` : '';
+  return validateVaultExportPath(`${parent}${withHtmlExtension(filename)}`);
+}
+
 function resolveVaultExportPath(vault, rawPath) {
   let target = validateVaultExportPath(rawPath);
   if (
@@ -34,9 +48,7 @@ function resolveVaultExportPath(vault, rawPath) {
     vault.getAbstractFileByPath(target) instanceof TFolder
   ) {
     target = `${target}/graphfrontier-static.html`;
-  } else if (!/\.html?$/iu.test(target)) {
-    target = target.replace(/\.[^/.]+$/u, '') + '.html';
-  }
+  } else target = withHtmlExtension(target);
   return target;
 }
 
@@ -82,4 +94,4 @@ async function writeExport(vault, target, html, options) {
   else throw new Error('The export filename points to a folder');
 }
 
-module.exports = { resolveVaultExportPath, writeVaultExport };
+module.exports = { buildVaultExportPath, resolveVaultExportPath, writeVaultExport };

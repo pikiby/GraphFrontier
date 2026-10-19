@@ -298,25 +298,40 @@ async function exportGraph(t, scheme, variables, aura = false) {
 }
 
 for (const mobile of [false, true]) {
-  test(`one-click export saves in vault root without a modal (mobile=${mobile})`, async (t) => {
+  test(`interactive export opens a vault modal and keeps completion visible (mobile=${mobile})`, async (t) => {
     const { view, plugin, app } = graph(t, 'light');
     const { vault, contents } = mobileVault(t, mobile);
     Object.assign(app.vault, vault);
-    const oldOpen = obsidian.Modal.prototype.open;
-    obsidian.Modal.prototype.open = () => assert.fail('No export dialog');
-    t.after(() => {
-      obsidian.Modal.prototype.open = oldOpen;
+    const open = obsidian.Modal.prototype.open;
+    let modal;
+    t.mock.method(obsidian.Modal.prototype, 'open', function () {
+      modal = this;
+      open.call(this);
     });
     plugin.data.settings.export_static_html_path = '/old/Desktop/graph.html';
     plugin.data.settings.export_static_html_mobile_path = 'Old/graph.html';
     const before = JSON.stringify(plugin.data.settings);
     const result = await view.commandExportStaticHtml();
-    assert.equal(result.path, 'graphfrontier-static.html');
-    assert.ok(contents.get(result.path).startsWith('<!doctype html>'));
-    assert.match(notices.at(-1), /saved in vault root: graphfrontier-static.html/);
+    assert.equal(result, undefined);
+    assert.equal(contents.size, 0);
+    assert.equal(modal.destinationPath, 'graphfrontier-static.html');
+    await modal.submit();
+    assert.ok(contents.get('graphfrontier-static.html').startsWith('<!doctype html>'));
+    assert.equal(modal.completed, true);
+    assert.equal(modal.opened, true);
+    assert.equal(modal.cancelButton.text, 'Close');
+    assert.equal(notices.length, 0);
+    assert.equal(modal.resultPath, 'graphfrontier-static.html');
+    assert.equal(modal.openButton.hidden, false);
     assert.equal(JSON.stringify(plugin.data.settings), before);
     await view.commandExportStaticHtml();
+    await modal.submit();
+    assert.equal(modal.completed, false);
+    assert.match(modal.errorEl.text, /Confirm replacement/);
     assert.equal(contents.size, 1);
+    assert.equal(modal.submitButton.text, 'Replace file');
+    await modal.submitButton.events.click();
+    assert.equal(modal.completed, true);
   });
 }
 

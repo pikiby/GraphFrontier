@@ -4,3 +4,4 @@ node_modules
 /dist/
 /.pcw/
 /skills/
+/.playwright-mcp/

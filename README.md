@@ -4,26 +4,28 @@
 
 # GraphFrontier
 
-GraphFrontier is **not** a plugin for Obsidian Graph View.
-It is a fully independent plugin with its own physics engine, designed to implement ideas that are not possible in the standard graph plugin.
+GraphFrontier is an interactive graph workspace for Obsidian, with its own rendering and physics engine, independent of the built-in Graph View.
 
-The main goal is to build an ideal, universal data-visualization tool that keeps the strengths of Graph View while removing its limitations.
+Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
-Arrange notes into reusable layouts, pin important nodes, and organize related notes around gravity centers. Performance depends on graph size, enabled effects and your device.
+Use it to:
 
-Especially useful for:
+- Explore connections and discover patterns in your notes
+- Map systems, documentation, and database relationships
+- Build reusable visual layouts for research and presentations
+- Let AI agents search, arrange, and style your graph through the built-in API/MCP
 
-- Finding patterns
-- Documentation
-- Visualizing relationships in database structures
-- Prompt engineering
+[Install](#installation) · [Features](#features) · [Agent access](#api-and-ai-agent-control) · [Documentation](#documentation) · [Support](#support)
+
+**Get started:** install GraphFrontier from Obsidian's Community plugins, then run
+**Open GraphFrontier**. [Installation and updates](docs/installation.md).
 
 ## Features
 
 <table style="border-collapse: collapse; width: 100%;">
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/pin_node.gif" alt="Pin node demo" width="100%">
+      <img src="docs/media/pin_node.gif" alt="Pin nodes exactly where you want them" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Pin nodes exactly where you want them</strong></p>
     </td>
@@ -35,26 +37,62 @@ Especially useful for:
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/save.gif" alt="Save layout demo" width="100%">
+      <img src="docs/media/moving.gif" alt="Move selected nodes together" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Save node positions and keep your layout exactly where you want it every time you open the graph</strong></p>
-    </td>
-    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/strong_pull.gif" alt="Strong pull demo" width="100%">
-      <br>
-      <p style="font-size: 1.05em;"><strong>Boost attraction to a specific node</strong></p>
-    </td>
-  </tr>
-  <tr style="background-color: transparent;">
-    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/moving.gif" alt="Pin linked nodes to orbit demo" width="100%">
-      <br>
-      <p style="font-size: 1.05em;"><strong>Place linked nodes on another node orbit with one click</strong></p>
+      <p style="font-size: 1.05em;"><strong>Move selected nodes together</strong></p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/unpin_linked_grid.gif" alt="Move linked nodes and keep position demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Move linked nodes and keep them exactly where you need them</strong></p>
+    </td>
+  </tr>
+  <tr style="background-color: transparent;">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/gravity_nodes.gif" alt="Organize matching notes around gravity nodes" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Organize matching notes around gravity nodes</strong></p>
+    </td>
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/gravity_repulsion.gif" alt="Attract matching nodes and repel the rest" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Attract matching nodes and repel the rest</strong></p>
+    </td>
+  </tr>
+  <tr style="background-color: transparent;">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/strong_pull.gif" alt="Boost attraction to a specific node" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Boost attraction to a specific node</strong></p>
+    </td>
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/layouts.gif" alt="Save and switch between layouts" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Save and switch between layouts</strong></p>
+    </td>
+  </tr>
+  <tr style="background-color: transparent;">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/find.gif" alt="Find mode demo" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Find notes without hiding the rest</strong></p>
+    </td>
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/filter.gif" alt="Filter mode demo" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Focus on matching notes and their connections</strong></p>
+    </td>
+  </tr>
+  <tr style="background-color: transparent;">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/blacklist.gif" alt="Control visible notes with blacklists and whitelists" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Control visible notes with blacklists and whitelists</strong></p>
+    </td>
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/node_visuals.gif" alt="Customize individual node appearance" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Customize individual node appearance</strong></p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
@@ -71,160 +109,61 @@ Especially useful for:
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/find.gif" alt="Find mode demo" width="100%">
-      <br>
-      <p style="font-size: 1.05em;"><strong>Find mode explore links in the full context</strong></p>
-    </td>
-    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/filter.gif" alt="Filter mode demo" width="100%">
-      <br>
-      <p style="font-size: 1.05em;"><strong>Filter mode local graph behavior directly in the global view</strong></p>
-    </td>
-  </tr>
-  <tr style="background-color: transparent;">
-    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/orphan.gif" alt="Orphan files separation demo" width="100%">
-      <br>
-      <p style="font-size: 1.05em;"><strong>Orphan files stay separate from primary nodes</strong></p>
-    </td>
-    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/attachments.gif" alt="Attachments on orbit demo" width="100%">
-      <br>
-      <p style="font-size: 1.05em;"><strong>Show only linked attachments and place them directly on node orbits</strong></p>
-    </td>
-  </tr>
-  
-  <tr style="background-color: transparent;">
-    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/hotkeys.gif" alt="Hotkey support demo" width="100%">
-      <br>
-      <p style="font-size: 1.05em;"><strong>Hotkey support</strong></p>
-    </td>
-    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/copy_linked_names.gif" alt="Copy linked names and paths demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Copy linked names and paths in one click</strong></p>
     </td>
-  </tr>
-  <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/blacklist.gif" alt="Blacklist demo" width="100%">
+      <img src="docs/media/export_html.gif" alt="Export interactive HTML graphs with note previews" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Hide unnecessary objects</strong></p>
-    </td>
-    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/whitelist.gif" alt="Whitelist demo" width="100%">
-      <br>
-      <p style="font-size: 1.05em;"><strong>Keep only necessary objects</strong></p>
+      <p style="font-size: 1.05em;"><strong>Export interactive HTML graphs with note previews</strong></p>
     </td>
   </tr>
 </table>
 
 ## API And AI-Agent Control
 
-GraphFrontier now exposes the graph as an actionable workspace, not just a
-picture. A connected agent can inspect existing relationships, construct a
-focused layout, style and arrange its nodes, save it and export an interactive
-HTML diagram. It uses the plugin's existing operations rather than editing
-layout JSON behind Obsidian's back.
+GraphFrontier's built-in MCP lets an external AI agent search and work with the
+open graph, arrange notes, change visual settings, and save or export layouts.
+It uses the plugin's existing graph operations; it is not a separate chat or
+model service.
 
-There are two layers: a JavaScript API on the loaded plugin instance and an
-optional **Model Context Protocol (MCP)** server exposing that same API to
-external clients. The HTTP endpoint speaks MCP, not a separate REST API.
+### From A Request To A Saved Layout
 
-### What An Agent Can Do
+In this example, an agent worked in `GraphFrontier-Demo`: it showed two tag
+groups around matching gravity centers, placed green on the left and blue on
+the right, added soft color auras, and saved the result as **Twin Stars**.
 
-| Area                  | Available controls                                                                                                                                                                                                     |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Inspect the graph     | Identify the vault and open graph tabs; read paginated nodes, edges, selection, active layout, camera, global settings and effective individual settings.                                                              |
-| Search and filter     | Search by name, vault path, filename, tag, line, section or property; change Find/Filter mode; highlight explicit nodes and optionally neighbors; show an exact node subset with only its internal links.              |
-| Groups and lists      | Add, edit, enable/disable, remove, reorder or clear Groups, Blacklist and Whitelist rules; set group colors.                                                                                                           |
-| Appearance            | Change global and individual node colors/sizes, labels, edge widths, painted edges, hover dimming and color auras; reset individual overrides to inheritance.                                                          |
-| Physics and placement | Set physics parameters, pause/resume simulation, move nodes, pin exactly or to the grid, arrange linked nodes or attachments on orbits, unpin, align pins and move/fit the camera.                                     |
-| Gravity centers       | Create, edit or remove gravity nodes, their typed query rules, names, positions, attraction and repulsion.                                                                                                             |
-| Layouts and recovery  | List, create, copy, switch, save and delete layouts; control autosave; create/list backups and restore them into the original or a different layout.                                                                   |
-| Export                | Discover export locations and write a standalone HTML graph from current visibility or explicit node IDs, with optional Markdown previews and explicit overwrite control.                                              |
-| UI and node actions   | Select/clear nodes, select linked nodes, arm box selection, show/hide the panel, collapse sections, configure command hotkeys, copy names/paths/links, open notes and supported destinations, and show/close previews. |
+<p align="center">
+  <img src="docs/media/mcp-request.png" alt="Request to arrange green and blue tag groups around matching gravity nodes and save Twin Stars" width="900">
+</p>
+<p align="center"><em>The request: arrange two groups around gravity centers and save a new layout.</em></p>
 
-The [API reference](docs/mcp.md#tools-and-internal-api) lists all **32 tools**,
-their methods, validation rules, pagination and state handling.
+<p align="center">
+  <img src="docs/media/mcp-result.png" alt="Twin Stars layout with green and blue groups arranged around gravity centers with soft color auras" width="900">
+</p>
+<p align="center"><em>The saved Twin Stars layout, with green on the left, blue on the right, and other groups hidden.</em></p>
+
+An MCP-capable agent can:
+
+- Search and filter notes, and work with groups, blacklists and whitelists.
+- Arrange and pin nodes, tune physics, and create or position gravity centers.
+- Change global or individual visual settings, including colors, sizes and auras.
+- Create and switch layouts, make backups, and export interactive HTML graphs.
 
 ### Connect A Client
 
-MCP is **off by default** and **desktop-only**. GraphFrontier's existing mobile
-graph remains available without a listener or Node.js imports.
-
-1. Open `Settings -> GraphFrontier -> Local MCP` and enable MCP.
-2. Copy the generated access token. Use a different port for each vault if several are open; the default is `27125`.
-3. Set `GRAPHFRONTIER_MCP_TOKEN` in the environment that launches your client, then merge the matching configuration from the settings page or [connection guide](docs/mcp.md#client-configurations).
-4. Connect the client to `http://127.0.0.1:27125/mcp`. Open GraphFrontier, or explicitly ask the agent to open it, and have it identify the vault with `list_views` before changing anything.
-
-Configuration examples are provided for **Codex**, **Claude Code** and
-**OpenCode 1.x**. They use Streamable HTTP with Bearer authentication; check the
-guide for version-specific compatibility and clients that cannot reach localhost.
-No additional GraphFrontier service, npm setup or separately installed Node.js
-is needed by users. MCP uses desktop Obsidian's embedded runtime, which must
-provide Node 18+ and Web Fetch APIs.
-
-The server follows the enabled plugin's lifecycle, not a graph tab: closing the
-tab does not stop it; disabling MCP/the plugin or closing Obsidian does.
-
-### Example Requests
-
-After connecting an agent, you can ask for workflows such as:
-
-- "Create a layout called Architecture from the current graph. Show only notes tagged architecture and their direct neighbors, pin them to the grid, and save it."
-- "Make these selected nodes yellow, increase their labels, and give them a soft color aura. Leave other nodes unchanged."
-- "Create a gravity node for `tag:backend`, set its attraction to 15 and repulsion to 5, and move it to the left of the diagram."
-- "Ensure the saved Architecture layout has a backup. Turn autosave off, adjust the physics, then restore the backup if I ask."
-- "Export these notes and only their internal links to Exports/architecture.html inside my vault, without embedding note text."
-
-These are examples for an MCP-capable agent, not a new built-in chat or prompt
-box. GraphFrontier does not supply an AI model or an agent subscription.
+1. In desktop Obsidian, enable **Settings -> GraphFrontier -> Local MCP**.
+2. Add the settings-provided endpoint and token configuration to an MCP-capable client, such as Codex, Claude Code or OpenCode. See [client configurations](docs/mcp.md#client-configurations).
+3. Open a graph and ask the agent to identify the vault before making changes.
 
 ### Safety And Current Limits
 
-The listener binds only to `127.0.0.1`, requires a token, validates Host/Origin
-and limits request sizes/rates. It is not exposed to the LAN or internet.
-Only connect trusted clients: the token grants access to the graph-control
-tools, including layout changes and explicit vault HTML exports. It is not a
-read-only credential. Data returned to an AI client may subsequently be sent
-to that client's model provider under the client's own settings.
-
-MCP credentials are stored separately in `mcp.json`, never in a saved layout.
-Do not publish that file. Blacklist/Whitelist are visual filters, not permission
-boundaries; an authorized client can request hidden node metadata.
-
-Mutations use a graph/view context token and reject stale state after a layout
-switch or graph rebuild. MCP writes are queued, and saved-layout backups are
-verified before replacement or deletion. Autosave still follows the selected
-layout's setting. These backups are local recovery copies, not protection from
-disk failure.
-
-Important boundaries:
-
-- Node IDs are vault-relative paths. Real filesystem paths, especially linked external folders, are **not automatically resolved** to node IDs yet; verify a candidate with `node_action` / `copy_system_path`.
-- MCP `save_layout` can capture a nonempty search. The manual Save button and normal autosave still retain their existing nonempty-search restriction.
-- HTML export includes note previews by default; use `includeContents: false` to omit them. Paths and other metadata can still be present, so inspect exports before sharing.
-- No arbitrary JavaScript execution, generic note editing, vault-file deletion or third-party/native menu callbacks such as merging and bookmarking are exposed. MCP credentials and server controls remain in local settings.
-- Schemas normally limit explicit node batches to 500; larger graph reads are paginated. The [full reference](docs/mcp.md) documents each limit and error behavior.
-
-For implementation details, setup examples and a complete subgraph-export
-workflow, see [Local Graph API and MCP](docs/mcp.md).
-
-## Support
-
-This project is actively growing, and I would be very grateful for your support.
-
-<a href="https://www.buymeacoffee.com/pikiby" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
-
-I would be happy to hear your ideas:
-
-https://github.com/pikiby/GraphFrontier/discussions
-
-And I would really appreciate your help with bug reports:
-
-https://github.com/pikiby/GraphFrontier/issues
+MCP is off by default and desktop-only. It runs as a local authenticated server.
+Only connect trusted clients: they can change layouts and export note content,
+and data returned to the client may be sent to its AI provider. GraphFrontier
+includes no built-in model or AI subscription. See the [full tool and API
+reference](docs/mcp.md#tools-and-internal-api) for details.
 
 ## Installation
 
@@ -241,9 +180,9 @@ No separate Node.js installation is needed. For updates, use **Check for updates
 
 Download:
 
-https://github.com/pikiby/GraphFrontier/releases/download/0.8.3/graphfrontier-0.8.3.zip
+https://github.com/pikiby/GraphFrontier/releases/download/0.8.4/graphfrontier-0.8.4.zip
 
-1. Download `graphfrontier-0.8.3.zip` from Releases.
+1. Download `graphfrontier-0.8.4.zip` from Releases.
 2. Extract it into `<vault>/.obsidian/plugins/graphfrontier/`.
 3. Enable it in `Settings -> Community plugins -> GraphFrontier`.
 
@@ -252,59 +191,27 @@ When updating, replace the plugin files, not the entire folder: keep your
 
 See the [installation guide](docs/installation.md) for source builds and troubleshooting.
 
-### Platforms And Data Access
+## Compatibility And Privacy
 
-- The graph supports desktop and mobile; MCP and arbitrary external-file navigation are desktop-only. Tested on Android 11 hardware and an Android 15 emulator with Obsidian 1.14.4; iOS has not been verified. Touch box selection is not implemented.
-- HTML export writes inside the current vault on every platform, using Obsidian's Vault API. External files and folders can still be opened through the operating system; GraphFrontier no longer uses Node filesystem APIs for export or path checks.
-- GraphFrontier reads vault notes and metadata to build the graph. Copy actions write to the clipboard. HTML exports can contain note text and paths: inspect them before sharing.
-- MCP is disabled by default. Enabling it permits authenticated local clients to control the graph and retrieve data; an AI client may send that data to its model provider. See [MCP safety and limits](#safety-and-current-limits).
-
-## Latest Release (0.8.3)
-
-- **One-click HTML export:** Export to saves `graphfrontier-static.html` in the vault root without a path dialog, then reports its location. A repeated export replaces that file.
-- **Vault-native storage:** desktop and mobile use the same Obsidian Vault API. External folders still open normally; direct Node filesystem access is removed from the plugin runtime.
-- **Safer API exports:** vault-relative paths, queued writes and overwrite protection; existing MCP graph controls remain available.
-- **Cleaner styles:** remove 16 `!important` declarations while preserving transparent controls and their appearance.
-- **Release provenance:** add GitHub artifact attestations for `main.js` and `styles.css`.
-
-Requires Obsidian 1.12.7 or newer. No layout-format or physics changes.
-See [release notes](docs/releases/0.8.3.md).
-
-## Previous Release (0.8.1)
-
-Requires Obsidian 1.12.7 or newer.
-
-- Reachable sidebar controls above mobile navigation and the keyboard viewport.
-- Consistent search fields, color swatches, sliders and collapsible section arrows across platforms.
-- Higher-contrast labels, sliders and ordinary graph links using the current theme.
-- Compact RGB/HEX color dialog (reverted to the native palette in 0.8.2).
-- Long-press empty space to create a gravity node, using the same context menu as desktop.
-
-See [release notes](docs/releases/0.8.1.md) and [Android test evidence](docs/releases/0.8.0-android-test.md).
-Large graphs can slow down while physics is active; smooth navigation after settling is not a guarantee of smooth simulation on every device.
+- Obsidian 1.12.7 or newer; graph works on desktop and mobile. Tested on Android 11 hardware and an Android 15 emulator with Obsidian 1.14.4; iOS is unverified, and touch box selection is unavailable.
+- External-file navigation is desktop-only.
+- GraphFrontier reads vault notes and metadata to build the graph; copy actions write to the clipboard.
+- HTML export stays inside the vault and can include note contents and paths; inspect exports before sharing.
+- Large-graph performance depends on graph size, enabled effects and device.
 
 ## Documentation
 
-- [Installation](docs/installation.md)
-- [Usage](docs/usage.md)
-- [Settings](docs/settings.md)
-- [Hotkeys and commands](docs/hotkeys.md)
-- [Physics model](docs/physics.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- Local API and embedded MCP: [setup, tool reference and automation examples](docs/mcp.md)
+- **Getting started:** [Installation](docs/installation.md), [Usage](docs/usage.md), [Settings](docs/settings.md).
+- **Advanced:** [Hotkeys and commands](docs/hotkeys.md), [Physics model](docs/physics.md), [Local API and embedded MCP](docs/mcp.md), [Development and project structure](docs/development.md).
+- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.4](docs/releases/0.8.4.md), [release history](docs/releases/).
 
-## Project Structure
+## Support
 
-- `src/main.js`: plugin core, persistence, graph data collection, commands registration
-- `src/view.js`: view lifecycle, UI, interactions, context actions, runtime orchestration
-- `src/physics.js`: simulation and orbit-related calculations
-- `src/render.js`: render pass, visual helpers, focus/label/color behavior
-- `src/constants.js`: defaults, limits, command metadata, shared constants
-- `src/api.js`, `src/api-actions.js`, `src/api-layouts.js`, `src/api-tools.js`: graph API, actions, layout recovery and validated schemas
-- `src/mcp-server.js`, `src/mcp-settings.js`: optional authenticated MCP transport and connection settings
-- `src/static/`: plugin release assets source (`manifest.json`, `styles.css`, `versions.json`)
-- `dist/`: built plugin files ready to install into a vault plugin folder
-- `dist/release/`: packaged release zip files
+I would be grateful for your support, ideas and bug reports.
+
+<a href="https://www.buymeacoffee.com/pikiby" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+
+[Share an idea](https://github.com/pikiby/GraphFrontier/discussions) · [Report a bug](https://github.com/pikiby/GraphFrontier/issues)
 
 ## License
 

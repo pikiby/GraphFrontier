@@ -1,3 +1,55 @@
+.modal.graphfrontier-export-modal {
+  width: min(400px, calc(100vw - 32px));
+}
+
+.graphfrontier-export-form,
+.graphfrontier-export-form > label {
+  display: grid;
+  gap: 6px;
+}
+
+.graphfrontier-export-form {
+  gap: 12px;
+}
+
+.graphfrontier-export-form input[type='text'] {
+  width: 100%;
+  min-width: 0;
+}
+
+.graphfrontier-export-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.graphfrontier-export-success {
+  display: grid;
+  gap: 6px;
+}
+
+.graphfrontier-export-modal code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.graphfrontier-export-error {
+  margin-top: 12px;
+  color: var(--text-error);
+  overflow-wrap: anywhere;
+}
+
+.graphfrontier-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.graphfrontier-export-modal [hidden] {
+  display: none;
+}
+
 .graphfrontier-host {
   position: relative;
   width: 100%;

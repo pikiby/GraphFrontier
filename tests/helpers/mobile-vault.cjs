@@ -22,6 +22,8 @@ function mobileVault(t, mobile = true) {
     return entry;
   };
   const vault = {
+    getName: () => 'Test vault',
+    getAllLoadedFiles: () => [...entries.values()],
     getAbstractFileByPath: (path) => entries.get(path) || null,
     async createFolder(path) {
       assert.ok(!entries.has(path));
