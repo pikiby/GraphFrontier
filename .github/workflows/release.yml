@@ -42,17 +42,6 @@ jobs:
       - name: Check release tag, metadata and assets
         run: npm run check:release -- "$GITHUB_REF_NAME"
 
-      - name: Create release zip from dist
-        run: |
-          VERSION="$(node -p "require('./manifest.json').version")"
-          RELEASE_DIR="dist/release"
-          ZIP_NAME="${RELEASE_DIR}/graphfrontier-${VERSION}.zip"
-          mkdir -p "${RELEASE_DIR}"
-          cd dist
-          zip "../${ZIP_NAME}" main.js manifest.json styles.css versions.json LICENSE
-          cd ..
-          ls -la "${ZIP_NAME}" dist
-
       - name: Attest final plugin assets
         uses: actions/attest@v4
         with:
@@ -64,10 +53,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/release/graphfrontier-*.zip
             dist/main.js
             dist/manifest.json
             dist/styles.css
-            dist/versions.json
           generate_release_notes: true
           fail_on_unmatched_files: true

@@ -15,7 +15,7 @@ MCP client to use the graph. MCP is optional and disabled by default.
 
 ## Compatibility
 
-GraphFrontier 0.8.4 requires Obsidian **1.12.7 or newer**. Desktop candidate
+GraphFrontier 0.8.5 requires Obsidian **1.12.7 or newer**. Desktop candidate
 checks passed on 1.12.7 in an isolated vault. Android checks covered Obsidian
 1.14.4 on Android 11 hardware and an Android 15 emulator. iOS remains unverified.
 Automated tests complement these checks; they do not certify every platform or
@@ -29,10 +29,11 @@ the graph. See [MCP setup](mcp.md) and [mobile export](usage.md#static-html-expo
 
 ## Manual Installation
 
-Download the ZIP from the [0.8.4 release](https://github.com/pikiby/GraphFrontier/releases/tag/0.8.4).
-Extract it into `<vault>/.obsidian/plugins/graphfrontier/` without an extra nested
-folder. The runtime files are `main.js`, `manifest.json` and `styles.css`.
-Then enable GraphFrontier under **Settings -> Community plugins**.
+Download `main.js`, `manifest.json` and `styles.css` from the
+[latest release](https://github.com/pikiby/GraphFrontier/releases/latest). Place
+the files directly in `<vault>/.obsidian/plugins/graphfrontier/` without an
+extra nested folder, then enable GraphFrontier under **Settings -> Community
+plugins**.
 
 ## Updates
 

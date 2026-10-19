@@ -1,4 +1,4 @@
-const { z } = require('zod');
+const { z } = require('./schema-runtime');
 const { DEFAULT_DATA, MIN_ZOOM, MAX_ZOOM, HOTKEY_COMMANDS } = require('./constants');
 const { NODE_VISUAL_SETTINGS } = require('./node-visuals');
 

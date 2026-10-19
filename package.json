@@ -1,6 +1,6 @@
 {
   "name": "graphfrontier",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "private": true,
   "description": "GraphFrontier Obsidian plugin",
   "license": "MIT",
@@ -16,12 +16,15 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
+    "acorn": "8.16.0",
     "esbuild": "^0.24.2",
     "eslint": "^9.21.0",
+    "eslint-scope": "8.4.0",
     "globals": "^15.14.0",
     "prettier": "^3.5.2"
   },
   "dependencies": {
+    "@cfworker/json-schema": "4.1.1",
     "@modelcontextprotocol/sdk": "1.32.1",
     "zod": "4.6.7"
   }

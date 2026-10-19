@@ -1,11 +1,12 @@
 // Loaded only after the desktop/enabled check, never during mobile plugin import.
+const { z } = require('./schema-runtime');
 const http = require('node:http');
 const { timingSafeEqual } = require('node:crypto');
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const {
   StreamableHTTPServerTransport,
 } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
-const { z } = require('zod');
+const { CfWorkerJsonSchemaValidator } = require('@modelcontextprotocol/sdk/validation/cfworker');
 const { GraphApiError, MAX_PAGE } = require('./api');
 const { EXTENDED_TOOLS } = require('./api-tools');
 
@@ -19,6 +20,7 @@ function createProtocolServer(api, version) {
   const server = new McpServer(
     { name: 'graphfrontier', version },
     {
+      jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
       instructions:
         'Control GraphFrontier in this vault. Start with list_views, then get_configuration. Use current viewId/contextToken; refresh them after graph/layout changes. All global and node settings, lists, gravity, layouts, backups and HTML export are available. Saved layouts are automatically backed up before replacement/deletion. No arbitrary code execution. An export may contain note text; use includeContents=false when not requested. Only perform writes/deletions/exports requested by the user. Native third-party Obsidian menu callbacks are not exposed.',
     }

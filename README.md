@@ -178,13 +178,7 @@ No separate Node.js installation is needed. For updates, use **Check for updates
 
 ### Manual Installation
 
-Download:
-
-https://github.com/pikiby/GraphFrontier/releases/download/0.8.4/graphfrontier-0.8.4.zip
-
-1. Download `graphfrontier-0.8.4.zip` from Releases.
-2. Extract it into `<vault>/.obsidian/plugins/graphfrontier/`.
-3. Enable it in `Settings -> Community plugins -> GraphFrontier`.
+Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/pikiby/GraphFrontier/releases/latest) into `<vault>/.obsidian/plugins/graphfrontier/`, then enable GraphFrontier in `Settings -> Community plugins`.
 
 When updating, replace the plugin files, not the entire folder: keep your
 `data.json`, `layouts/` and optional `mcp.json`. Reload the plugin afterward.
@@ -203,7 +197,7 @@ See the [installation guide](docs/installation.md) for source builds and trouble
 
 - **Getting started:** [Installation](docs/installation.md), [Usage](docs/usage.md), [Settings](docs/settings.md).
 - **Advanced:** [Hotkeys and commands](docs/hotkeys.md), [Physics model](docs/physics.md), [Local API and embedded MCP](docs/mcp.md), [Development and project structure](docs/development.md).
-- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.4](docs/releases/0.8.4.md), [release history](docs/releases/).
+- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.5](docs/releases/0.8.5.md), [release history](docs/releases/).
 
 ## Support
 

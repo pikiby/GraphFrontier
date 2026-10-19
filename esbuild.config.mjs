@@ -3,7 +3,7 @@ import { copyFile, mkdir, rm } from 'fs/promises';
 import path from 'path';
 import process from 'process';
 import { fileURLToPath } from 'url';
-import { builtinModules } from 'node:module';
+import { createPluginBuildOptions } from './scripts/plugin-build-options.cjs';
 
 const isProd = process.argv[2] === 'production';
 const ROOT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -28,18 +28,7 @@ async function copyReleaseFiles() {
   }
 }
 
-const context = await esbuild.context({
-  entryPoints: ['src/main.js'],
-  bundle: true,
-  external: ['obsidian', ...builtinModules, 'node:*'],
-  format: 'cjs',
-  platform: 'browser',
-  target: 'es2018',
-  sourcemap: isProd ? false : 'inline',
-  minify: false,
-  logLevel: 'info',
-  outdir: 'dist',
-});
+const context = await esbuild.context(createPluginBuildOptions({ production: isProd }));
 
 if (isProd) {
   await cleanDist();
