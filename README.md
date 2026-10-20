@@ -27,12 +27,14 @@ Use it to:
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/pin_node.gif" alt="Pin nodes exactly where you want them" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Pin nodes exactly where you want them</strong></p>
+      <p style="font-size: 1.05em;"><strong>Pin nodes precisely</strong></p>
+      <p>Set coordinates or drag pinned nodes without letting physics move them.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/pin_node_grid.gif" alt="Pin node to grid demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Pin nodes to the grid</strong></p>
+      <p>Snap nodes to grid points to keep your arrangement aligned.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
@@ -40,98 +42,111 @@ Use it to:
       <img src="docs/media/moving.gif" alt="Move selected nodes together" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Move selected nodes together</strong></p>
-      <p>Hold Shift while box-selecting separate areas to add to your selection. Click empty space normally to clear it.</p>
+      <p>Drag selected nodes together, add areas with Shift box selection, and clear selection with a plain background click.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/unpin_linked_grid.gif" alt="Move linked nodes and keep position demo" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Move linked nodes and keep them exactly where you need them</strong></p>
+      <p style="font-size: 1.05em;"><strong>Arrange and pin linked nodes</strong></p>
+      <p>Unpin linked nodes for physics to rearrange them, then pin the result to the grid.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/gravity_nodes.gif" alt="Organize matching notes around gravity nodes" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Organize matching notes around gravity nodes</strong></p>
+      <p style="font-size: 1.05em;"><strong>Organize notes with gravity</strong></p>
+      <p>Attract free matching nodes to a movable center using name, tag, path or other queries.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/gravity_repulsion.gif" alt="Attract matching nodes and repel the rest" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Attract matching nodes and repel the rest</strong></p>
+      <p style="font-size: 1.05em;"><strong>Attract matches, repel others</strong></p>
+      <p>Tune attraction and repulsion separately to pull free matches closer and push nonmatches away.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/strong_pull.gif" alt="Boost attraction to a specific node" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Boost attraction to a specific node</strong></p>
+      <p style="font-size: 1.05em;"><strong>Boost a node's pull</strong></p>
+      <p>Strengthen forces along existing graph links without changing note links.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/layouts.gif" alt="Save and switch between layouts" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Save and switch between layouts</strong></p>
+      <p style="font-size: 1.05em;"><strong>Save and switch layouts</strong></p>
+      <p>Switch layouts to restore saved positions, pins, settings and camera state.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/subgraphs.gif" alt="Combine selected nodes into a named subgraph and open its contents in a separate pane" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Organize selected nodes into subgraphs</strong></p>
-      <p>Keep a simple container in the main graph and explore its contents in an independent pane.</p>
+      <p style="font-size: 1.05em;"><strong>Group nodes into subgraphs</strong></p>
+      <p>Name a selection and explore its contents in a separate pane with independent positions and camera.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/open_url.gif" alt="Open a note's URL property from its node context menu" width="100%">
+      <img src="docs/media/open_url.gif" alt="Open websites, folders, and other vaults from a node's context menu" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Open URLs from note properties</strong></p>
-      <p>Use Open URL in a node's context menu to follow its note's URL in your default browser.</p>
+      <p style="font-size: 1.05em;"><strong>Open websites, folders, and other vaults</strong></p>
+      <p>Use Open URL or Open path to visit websites, open local folders on desktop, or switch Obsidian vaults.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/find.gif" alt="Find mode demo" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Find notes without hiding the rest</strong></p>
+      <p style="font-size: 1.05em;"><strong>Find without hiding notes</strong></p>
+      <p>Highlight search matches without hiding the rest of the graph.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/filter.gif" alt="Filter mode demo" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Focus on matching notes and their connections</strong></p>
+      <p style="font-size: 1.05em;"><strong>Focus with query filters</strong></p>
+      <p>Name filters show a node and neighbors; tag and other queries show matches.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/blacklist.gif" alt="Control visible notes with blacklists and whitelists" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Control visible notes with blacklists and whitelists</strong></p>
+      <p style="font-size: 1.05em;"><strong>Control which notes appear</strong></p>
+      <p>Hide blacklist matches or show whitelist matches without changing your notes.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/node_visuals.gif" alt="Customize individual node appearance" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Customize individual node appearance</strong></p>
+      <p>Adjust one node's color, size, aura and labels independently.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/paint_links.gif" alt="Paint links demo" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Paint links for better visual clarity</strong></p>
+      <p style="font-size: 1.05em;"><strong>Color a node's links</strong></p>
+      <p>Color a node's links and adjust their painted width separately.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/hide_edges.gif" alt="Hide edges demo" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Hide links you do not need</strong></p>
+      <p style="font-size: 1.05em;"><strong>Reduce unwanted link clutter</strong></p>
+      <p>Reduce regular or painted edge widths without deleting notes or changing links.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/copy_linked_names.gif" alt="Copy linked names and paths demo" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Copy linked names and paths in one click</strong></p>
+      <p style="font-size: 1.05em;"><strong>Copy linked names and paths</strong></p>
+      <p>Copy sorted names or paths, one per line with commas between items.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/export_html.gif" alt="Export interactive HTML graphs with note previews" width="100%">
       <br>
-      <p style="font-size: 1.05em;"><strong>Export interactive HTML graphs with note previews</strong></p>
+      <p style="font-size: 1.05em;"><strong>Export interactive HTML graphs</strong></p>
+      <p>Export a vault-local HTML graph with note previews; review content and paths before sharing.</p>
     </td>
   </tr>
 </table>
