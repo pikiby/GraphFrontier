@@ -122,6 +122,7 @@ are shared plugin state, not independent layouts per tab.
 | `move_nodes`           | `moveNodes(args)`          | Explicit coordinates with keep/exact/grid/none pin behavior                               |
 | `pin_nodes`            | `pinNodes(args)`           | Pin/grid/unpin explicit/all nodes, or pin/grid/orbit/unpin linked nodes and attachments   |
 | `gravity_nodes`        | `gravityNodes(args)`       | Create, update or delete gravity nodes; typed queries, attraction and repulsion           |
+| `subgraph_nodes`       | `subgraphNodes(args)`      | Layout-only containers: create, rename, open an independent pane, Ungroup                 |
 | `list_layouts`         | `listLayouts(args)`        | Saved layout names and current layout                                                     |
 | `create_layout`        | `createLayout(args)`       | Create from current graph or saved source; optionally activate                            |
 | `save_layout`          | `saveLayout(args)`         | Save current state; back up an existing destination first                                 |
@@ -144,13 +145,33 @@ Internal integrations can use `api.runTool(methodName, args, readOnly, signal)`
 to share the MCP operation queue and cancellation handling; use `readOnly: false`
 for any method that mutates state. Direct method calls do not enter that queue.
 
-The 32 tools have strict discoverable input schemas. `update_settings.settings`
+The tools have strict discoverable input schemas. `update_settings.settings`
 contains every current global setting and validates the same ranges as the UI.
 Node visual ranges come from the shared `NODE_VISUAL_SETTINGS` catalog. Unknown
 keys and invalid values fail before mutation rather than silently clamping.
 Use `null` to remove an individual visual override, or `reset: true` with
 `settings: {}` to reset the node's visual overrides. Gravity nodes reject edge
 and strong-pull settings, just like their context menu.
+
+`subgraph_nodes` (`subgraphNodes`) manages layout-only containers. Use `action: "create"`
+with `name` and optional `memberIds` (otherwise the current selection). IDs are generated.
+Only creation accepts membership. `rename` requires `id` and a nonempty `name`.
+`open` opens/reuses a separate Obsidian pane and returns it as `openedView`;
+`ungroup` removes the container and releases members at its current position plus their
+latest local offsets. Neither action deletes notes. Open/Ungroup target a container in
+its parent graph. The old `expand`, `collapse`, `update` and `dissolve` actions are rejected.
+There is no in-place expansion or OS popout.
+
+`get_graph` reports containers as `type: "subgraph"`; view state includes `subgraphId`
+(null for the main graph), and `get_configuration` includes `subgraphs` definitions.
+Movement/physics/pin operations use coordinates local to that view's graph. Moving a
+container never translates its members. Normal node tools act in the targeted scope;
+creating or moving a node in an inner pane does not wake unrelated parent physics.
+Save from any pane merges local positions from all open graphs while retaining closed
+spaces, the main camera/search and independent scoped cameras/filters. Mutations respect
+autosave off. Reread state/context tokens after grouping or Ungroup. Old layouts migrate
+to `subgraph_coordinates: "local-v1"` through normal layout loading; cross-space orbit
+pins convert to exact local pins. Explicit layout restoration remains paused.
 
 `select_nodes` and `frame_nodes` require `contextToken` from the latest state
 and at most 500 `nodeIds`. Unknown or filtered IDs reject the whole operation.

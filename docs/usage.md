@@ -56,6 +56,54 @@ when search or blacklist/whitelist hide notes, but hidden notes do not participa
 Objects, rules, strength and positions belong to the active layout and follow its existing
 Save, Load and autosave behavior. They remain stationary unless moved manually.
 
+## Subgraphs
+
+Select existing nodes with the normal selection modifier, selection commands, or box
+selection. Right-click a node or empty space and choose **Combine selected into subgraph**.
+The compact creation dialog has only a **Name** input; the captured selection supplies
+membership. No notes, files, folders or links are modified.
+
+The parent graph always shows a hollow standard ball with a thicker outer outline.
+There is no in-place expand/collapse. Outside links are aggregated onto the container,
+deduplicated and used by the ordinary node physics. The container supports the normal
+drag, selection, exact/grid/orbit pin, Strong pull, color, aura, size and edge actions.
+
+Single-click selects the container. Double-click or **Open subgraph in pane** opens its
+contents in a separate Obsidian pane, like a local graph, never an OS popout. The outer
+container is not an actor in this inner graph. Its viewport is fitted after a nonzero
+size is available; saved inner cameras are restored instead. Inner coordinates, camera,
+filters and physics are independent. Moving the parent container never moves its members.
+Closing the pane never expands, rearranges or wakes the parent graph.
+
+Subgraphs can contain nested containers. Each node belongs to exactly one immediate
+parent coordinate space. **Rename subgraph** changes only the name. Membership is fixed:
+to change it, use **Ungroup subgraph** and create another group from the new selection.
+**Ungroup subgraph** removes the container only, releasing its immediate members around
+the container's current position using their latest local offsets. A nested container's
+interior is not translated. Notes and their links/settings remain intact.
+
+Save from any pane merges all open local spaces and retains closed/filtered members,
+without replacing the main camera or search with an inner pane's state. Autosave off
+stays off; mutations remain dirty until an explicit save. Creation and Ungroup wake
+physics immediately. Explicit layout restoration stays paused. A stale pane after a
+layout switch or Ungroup remains empty instead of exposing the whole vault.
+
+Whitelist, blacklist and exact node filters still apply to canonical members and links.
+A matching hidden member keeps its container visible, but opening the pane does not
+bypass blacklist/whitelist. Inner filters are saved separately. A blacklist matching a
+container name hides that container and its descendants. Gravity only affects nodes
+when its gravity center belongs to the same projected graph.
+
+Existing global-coordinate subgraph layouts are migrated in memory to local coordinates
+when loaded, ignoring obsolete expansion state; the normal Save/autosave policy controls
+writing. Exact and grid pin coordinates are converted while retaining the pin mode.
+Orbit pins within one space remain orbit pins. When grouping separates a pin from its
+orbit anchor, it becomes an exact pin at its converted position rather than becoming
+free or pulling across graph spaces. Initial migrated inner cameras are refitted.
+
+Static HTML export includes only the current projected graph and hollow container balls;
+it is not a subgraph editor and cannot open nested panes.
+
 ## Search Row (Find / Filter)
 
 The top search row supports two modes:

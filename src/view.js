@@ -6,6 +6,17 @@ const { buildNodeContextMenu } = require('./node-context-menu');
 const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
 const { DarkEnergyModal } = require('./dark-energy-modal');
 const {
+  SUBGRAPH_PREFIX,
+  normalizeSubgraphs,
+  subgraphNodes,
+  hierarchy,
+  projectSubgraphs,
+  projectNodeId,
+  translateMembers,
+  reconcileOrbitSpaces,
+} = require('./subgraphs');
+const { SubgraphModal } = require('./subgraph-modal');
+const {
   NODE_VISUAL_SETTINGS,
   getNodeColor,
   getNodeVisualOverride,
@@ -55,6 +66,8 @@ class GraphFrontierView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
+    this.subgraphScope =
+      plugin.pendingSubgraphScopes?.get(leaf) || leaf.getViewState?.()?.state?.subgraph || null;
 
     this.canvasEl = null;
     this.ctx = null;
@@ -102,7 +115,7 @@ class GraphFrontierView extends ItemView {
     this.dragStartScreen = null;
     this.dragMovedDistance = 0;
     this.panDragMovedDistance = 0;
-    this.sidePanelOpen = true;
+    this.sidePanelOpen = !this.subgraphScope;
     this.sideControls = new Map();
     const savedSidePanelSections =
       plugin.data?.view_state?.side_panel_sections &&
@@ -188,7 +201,41 @@ class GraphFrontierView extends ItemView {
   }
 
   getDisplayText() {
+    if (this.subgraphScope)
+      return (
+        this.plugin.data.subgraphs?.find((group) => group.id === this.subgraphScope.id)?.name ||
+        'Subgraph (unavailable)'
+      );
     return 'GraphFrontier';
+  }
+
+  getState() {
+    return this.subgraphScope ? { subgraph: { ...this.subgraphScope } } : {};
+  }
+
+  async setState(state) {
+    const nextScope = state?.subgraph?.id
+      ? { id: state.subgraph.id, layout: state.subgraph.layout }
+      : null;
+    const scopeChanged = JSON.stringify(nextScope) !== JSON.stringify(this.subgraphScope);
+    if (this.graphDataRef && !scopeChanged) return;
+    if (this.graphDataRef === this.plugin.data) {
+      this.captureGraphPositions(this.plugin.data);
+      this.persistCameraState();
+    }
+    this.subgraphScope = nextScope;
+    this.restoreLayoutViewState();
+    if (nextScope && scopeChanged) {
+      this.sidePanelOpen = false;
+      if (this.isOpen) this.buildSidePanel();
+    }
+    if (this.isOpen)
+      this.refreshFromVault({
+        keepCamera: true,
+        forceSavedPositions: true,
+        skipLayoutKick:
+          !this.subgraphScope || !!this.plugin.data.subgraph_cameras?.[this.subgraphScope.id],
+      });
   }
 
   getIcon() {
@@ -197,7 +244,13 @@ class GraphFrontierView extends ItemView {
 
   // View lifecycle: create canvas/UI on open and release resources on close.
   async onOpen() {
-    const loaded = await this.plugin.setActiveLayoutFile(this.plugin.getActiveLayoutFileName());
+    const alreadyOpen = this.app.workspace
+      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
+      .some((leaf) => leaf.view !== this && leaf.view?.isOpen);
+    const loaded =
+      !!this.subgraphScope ||
+      alreadyOpen ||
+      (await this.plugin.setActiveLayoutFile(this.plugin.getActiveLayoutFileName()));
     if (!loaded) new Notice('Cannot read active layout. File left unchanged.');
     this.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
     this.sidePanelSectionState = this.plugin.getSidePanelSectionsState();
@@ -219,11 +272,15 @@ class GraphFrontierView extends ItemView {
 
     const hasSavedLayoutPositions = Object.keys(this.plugin.data.saved_positions || {}).length > 0;
     this.refreshFromVault({
-      keepCamera: !!(loaded && this.plugin.data.view_state.camera_saved),
+      keepCamera: this.subgraphScope
+        ? !!this.plugin.data.subgraph_cameras?.[this.subgraphScope.id]
+        : !!(loaded && this.plugin.data.view_state.camera_saved),
       forceSavedPositions: loaded,
-      skipLayoutKick: !loaded || hasSavedLayoutPositions,
+      skipLayoutKick: this.subgraphScope
+        ? !!this.plugin.data.subgraph_cameras?.[this.subgraphScope.id]
+        : alreadyOpen || !loaded || hasSavedLayoutPositions,
     });
-    if (this.plugin.data.view_state.search_query && this.isSearchFilled()) {
+    if (!this.subgraphScope && this.plugin.data.view_state.search_query && this.isSearchFilled()) {
       this.commitSearchSelectionFromInput(this.searchInputValue);
       if (hasSavedLayoutPositions) {
         this.layoutPaused = true;
@@ -236,6 +293,8 @@ class GraphFrontierView extends ItemView {
   }
 
   async onClose() {
+    if (this.subgraphScope || this.plugin.data.subgraphs?.length)
+      this.captureGraphPositions(this.plugin.data);
     this.isOpen = false;
     if (this.frameHandle) {
       this.contentEl.win.cancelAnimationFrame(this.frameHandle);
@@ -246,16 +305,20 @@ class GraphFrontierView extends ItemView {
       this.resizeObserver = null;
     }
 
-    this.plugin.data.view_state.pan_x = this.cameraTarget.x;
-    this.plugin.data.view_state.pan_y = this.cameraTarget.y;
-    this.plugin.data.view_state.zoom = this.cameraTarget.zoom;
+    this.persistCameraState();
 
     const autosaveEnabled = !!this.plugin.data.settings.layout_autosave;
     if (autosaveEnabled && this.layoutAutosaveDirty && !this.isSearchFilled()) {
       if (!(await this.saveCurrentLayout({ silent: true }))) {
         new Notice('Failed to save layout on close. Changes are still unsaved.');
       }
-    } else if (!autosaveEnabled) {
+    } else if (
+      !autosaveEnabled &&
+      !this.subgraphScope &&
+      !this.app.workspace
+        .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
+        .some((leaf) => leaf.view !== this && leaf.view?.isOpen)
+    ) {
       // Groups, rules, and display settings can change without a physics kick.
       await this.loadSavedLayout({ silent: true });
     }
@@ -1127,7 +1190,7 @@ class GraphFrontierView extends ItemView {
 
     this.registerDomEvent(modeToggle, 'click', () => {
       this.searchMode = this.searchMode === 'filter' ? 'find' : 'filter';
-      this.plugin.data.settings.search_mode = this.searchMode;
+      if (!this.subgraphScope) this.plugin.data.settings.search_mode = this.searchMode;
       this.syncSearchMatchesLive();
       this.markSearchVisibilityDirty();
       this.syncSearchModeToggleUi();
@@ -1765,6 +1828,8 @@ class GraphFrontierView extends ItemView {
   }
 
   getFilterVisibleNodeIds() {
+    if (this.plugin.data.subgraphs?.length || this.subgraphScope)
+      return this.getSubgraphFilterVisibleNodeIds();
     const queryRuleVisibleNodeIds = this.getQueryRuleVisibleNodeIds();
     const searchVisibleNodeIds = this.getSearchModeVisibleNodeIds();
     const activeRuleSignature = this.filterVisibilityCache.queryRuleVisibleRulesSignature || '';
@@ -1809,6 +1874,117 @@ class GraphFrontierView extends ItemView {
     this.filterVisibilityCache.finalVisibleKey = finalKey;
     this.filterVisibilityCache.finalVisibleNodeIds = finalVisibleNodeIds;
     return finalVisibleNodeIds;
+  }
+
+  getSubgraphFilterVisibleNodeIds() {
+    const key = `${this.visibilityGraphVersion}|${this.visibilitySearchVersion}|${this.getActiveQueryRuleSignature()}`;
+    if (this.subgraphFilterKey === key && this.subgraphFilterApiIds === this.apiVisibleNodeIds)
+      return this.subgraphFilterIds;
+    const groups = this.plugin.data.subgraphs;
+    const parents = hierarchy(groups);
+    const raw = this.canonicalGraphData || { nodes: [], edges: [] };
+    const nodes = new Map([...raw.nodes, ...subgraphNodes(groups)].map((node) => [node.id, node]));
+    const blacklist = this.getCompleteQueryRulesByKey('blacklist');
+    const whitelist = this.getCompleteQueryRulesByKey('whitelist');
+    const matches = (node, rules) =>
+      rules.some((rule) => this.nodeMatchesParsedGroup(node.meta || {}, rule, node));
+    const blockedGroups = new Set(
+      groups.filter((group) => matches(nodes.get(group.id), blacklist)).map((group) => group.id)
+    );
+    const blocked = (node) => {
+      if (!node.meta?.darkEnergy && matches(node, blacklist)) return true;
+      for (let parent = parents.get(node.id); parent; parent = parents.get(parent))
+        if (blockedGroups.has(parent)) return true;
+      return false;
+    };
+    const representative = (id) => projectNodeId(id, parents, this.subgraphScope?.id || null);
+    const parsed = this.parseSearchQuery(this.searchInputEl?.value || this.searchInputValue);
+    const api = this.apiVisibleNodeIds;
+    const eligible = new Set();
+    for (const node of nodes.values()) {
+      if (
+        node.meta?.subgraph ||
+        blocked(node) ||
+        (!node.meta?.darkEnergy && whitelist.length && !matches(node, whitelist))
+      )
+        continue;
+      const projectedId = representative(node.id);
+      if (api && !api.has(node.id) && !api.has(projectedId)) continue;
+      eligible.add(node.id);
+    }
+    const baseProjection = projectSubgraphs(
+      {
+        ...raw,
+        edges: raw.edges.filter((edge) => eligible.has(edge.source) && eligible.has(edge.target)),
+      },
+      groups,
+      this.subgraphScope?.id
+    );
+    let search = null;
+    if (this.searchMode === 'filter' && parsed.query) {
+      if (parsed.source === 'name') {
+        const id = this.getFilterNodeId();
+        search = new Set(id ? [id] : []);
+        for (const edge of baseProjection.edges) {
+          if (edge.source === id) search.add(edge.target);
+          if (edge.target === id) search.add(edge.source);
+        }
+      } else search = this.searchMatchedNodeIds || new Set();
+    }
+    this.filterVisibilityCache.searchVisibleVersion = this.visibilitySearchVersion;
+    this.filterVisibilityCache.searchVisibleNodeIds = search;
+    const allowed = new Set();
+    const visible = new Set();
+    for (const id of eligible) {
+      const node = nodes.get(id);
+      const projectedId = representative(id);
+      if (search && !search.has(node.id) && !search.has(projectedId)) {
+        if (
+          !node.meta?.darkEnergy &&
+          (parsed.source === 'name' || !this.nodeMatchesSearchParsed(node.meta || {}, parsed))
+        )
+          continue;
+      }
+      allowed.add(node.id);
+      if (this.nodeById.has(node.id)) visible.add(node.id);
+      for (let parent = parents.get(node.id); parent; parent = parents.get(parent))
+        if (this.nodeById.has(parent)) visible.add(parent);
+    }
+    for (const node of nodes.values()) {
+      if (!node.meta?.subgraph || !this.nodeById.has(node.id) || blocked(node)) continue;
+      const empty = !node.meta.subgraph.members.length;
+      if (
+        ((!blacklist.length && !whitelist.length && !api && !search) ||
+          (whitelist.length
+            ? matches(node, whitelist)
+            : empty || api?.has(node.id) || search?.has(node.id))) &&
+        (!api || api.has(node.id)) &&
+        (!search || search.has(node.id))
+      )
+        visible.add(node.id);
+    }
+    // Project only eligible original links: a hidden note cannot leak a relationship
+    // through the otherwise-visible container of another matching member.
+    const projected = projectSubgraphs(
+      {
+        ...raw,
+        edges: raw.edges.filter((edge) => allowed.has(edge.source) && allowed.has(edge.target)),
+      },
+      groups,
+      this.subgraphScope?.id
+    );
+    for (const node of this.nodes) node.degree = 0;
+    const { nextEdges, nextNeighborsById } = this.buildNextEdgesAndNeighbors(
+      projected.edges,
+      this.nodeById,
+      this.nodes
+    );
+    this.edges = nextEdges;
+    this.neighborsById = nextNeighborsById;
+    this.subgraphFilterKey = key;
+    this.subgraphFilterApiIds = api;
+    this.subgraphFilterIds = visible;
+    return visible;
   }
 
   getSearchModeVisibleNodeIds() {
@@ -2875,7 +3051,28 @@ class GraphFrontierView extends ItemView {
     this.canvasEl.height = Math.floor(this.viewHeight * this.devicePixelRatio);
 
     this.ctx.setTransform(this.devicePixelRatio, 0, 0, this.devicePixelRatio, 0, 0);
+    this.finishSubgraphFraming();
     this.render();
+  }
+
+  finishSubgraphFraming() {
+    if (
+      !this.pendingSubgraphFit ||
+      !this.hasValidSubgraphScope() ||
+      this.graphDataRef !== this.plugin.data ||
+      this.viewWidth <= 1 ||
+      this.viewHeight <= 1
+    )
+      return false;
+    const visible = this.getFilterVisibleNodeIds();
+    this.fitCameraToNodes(
+      this.nodes.filter((node) => !visible || visible.has(node.id)),
+      {
+        initialSubgraphFit: true,
+      }
+    );
+    this.pendingSubgraphFit = false;
+    return true;
   }
 
   // In-memory graph rebuild: load nodes/edges, restore positions, and recompute neighbors.
@@ -2890,7 +3087,14 @@ class GraphFrontierView extends ItemView {
     } else if (this.plugin.metadataResolvedOnce) {
       this.hasSeenMetadataResolvedRefresh = true;
     }
-    const graphData = this.plugin.collectGraphData();
+    const fullGraph = this.plugin.collectGraphData();
+    this.canonicalGraphData = fullGraph;
+    this.graphDataRef = this.plugin.data;
+    const scope = this.subgraphScope;
+    const graphData =
+      scope && scope.layout !== this.plugin.getActiveLayoutFileName()
+        ? { nodes: [], edges: [] }
+        : projectSubgraphs(fullGraph, this.plugin.data.subgraphs, scope?.id);
     const { topologyChanged } = this.syncGraphRuntimeState(graphData, { forceSavedPositions });
     this.markGraphVisibilityDirty();
 
@@ -2910,9 +3114,13 @@ class GraphFrontierView extends ItemView {
     });
 
     if (!keepCamera) {
-      this.fitCameraToNodes();
-      this.centerCameraOnActiveFileNode();
+      if (this.subgraphScope) this.pendingSubgraphFit = true;
+      else {
+        this.fitCameraToNodes();
+        this.centerCameraOnActiveFileNode();
+      }
     }
+    this.finishSubgraphFraming();
 
     if (skipLayoutKick) {
       this.layoutPaused = true;
@@ -2979,7 +3187,8 @@ class GraphFrontierView extends ItemView {
    */
   syncGraphRuntimeState(graphData, options = {}) {
     const oldNodes = this.nodeById;
-    const oldNeighborsById = this.neighborsById;
+    const oldNeighborsById = this.topologyNeighborsById || this.neighborsById;
+    const oldEdgeCount = this.topologyEdgeCount ?? this.edges.length;
     const { nextNodes, nextNodeById } = this.buildNextNodesFromGraphData(
       graphData.nodes,
       oldNodes,
@@ -2993,7 +3202,7 @@ class GraphFrontierView extends ItemView {
     const topologyChanged =
       oldNodes.size !== nextNodeById.size ||
       nextNodes.some((node) => !oldNodes.has(node.id)) ||
-      this.edges.length !== nextEdges.length ||
+      oldEdgeCount !== nextEdges.length ||
       nextEdges.some((edge) => !oldNeighborsById.get(edge.source)?.has(edge.target));
 
     this.applyOrbitPinnedPositions(nextNodes, nextNodeById);
@@ -3003,6 +3212,8 @@ class GraphFrontierView extends ItemView {
     this.nodeMetaById = new Map(nextNodes.map((node) => [node.id, node.meta || null]));
     this.neighborsById = nextNeighborsById;
     this.edges = nextEdges;
+    this.topologyNeighborsById = nextNeighborsById;
+    this.topologyEdgeCount = nextEdges.length;
     this.selectedNodeIds = new Set(
       Array.from(this.selectedNodeIds).filter((nodeId) => this.nodeById.has(nodeId))
     );
@@ -3080,6 +3291,9 @@ class GraphFrontierView extends ItemView {
     } else if (rawNode.meta?.darkEnergy) {
       x = rawNode.meta.darkEnergy.x;
       y = rawNode.meta.darkEnergy.y;
+    } else if (rawNode.meta?.subgraph) {
+      x = rawNode.meta.subgraph.x;
+      y = rawNode.meta.subgraph.y;
     } else {
       const angle = (index % 360) * (Math.PI / 180);
       const radius = 80 + 10 * Math.sqrt(index + 1);
@@ -3089,7 +3303,7 @@ class GraphFrontierView extends ItemView {
       y = this.camera.y + Math.sin(angle) * radius + jitterY;
     }
 
-    return {
+    const node = {
       id: rawNode.id,
       label: rawNode.label,
       meta: rawNode.meta || null,
@@ -3099,6 +3313,7 @@ class GraphFrontierView extends ItemView {
       vy,
       degree: 0,
     };
+    return node;
   }
 
   buildNextEdgesAndNeighbors(rawEdges, nextNodeById, nextNodes) {
@@ -3159,7 +3374,7 @@ class GraphFrontierView extends ItemView {
     // is still resolving. Never prune persisted layout state from this filtered snapshot.
   }
 
-  fitCameraToNodes(nodes = this.nodes) {
+  fitCameraToNodes(nodes = this.nodes, { initialSubgraphFit = false } = {}) {
     if (nodes.length === 0) {
       this.camera.x = 0;
       this.camera.y = 0;
@@ -3176,10 +3391,11 @@ class GraphFrontierView extends ItemView {
     let maxY = -Infinity;
 
     for (const node of nodes) {
-      minX = Math.min(minX, node.x);
-      maxX = Math.max(maxX, node.x);
-      minY = Math.min(minY, node.y);
-      maxY = Math.max(maxY, node.y);
+      const radius = initialSubgraphFit ? this.getNodeRadius(node) : 0;
+      minX = Math.min(minX, node.x - radius);
+      maxX = Math.max(maxX, node.x + radius);
+      minY = Math.min(minY, node.y - radius);
+      maxY = Math.max(maxY, node.y + radius);
     }
 
     const width = Math.max(1, maxX - minX);
@@ -3188,9 +3404,10 @@ class GraphFrontierView extends ItemView {
     this.camera.x = (minX + maxX) / 2;
     this.camera.y = (minY + maxY) / 2;
 
-    const zoomX = (this.viewWidth * 0.9) / width;
-    const zoomY = (this.viewHeight * 0.9) / height;
-    const targetZoom = Math.min(zoomX, zoomY, 1);
+    const padding = initialSubgraphFit ? 24 : 0;
+    const zoomX = (this.viewWidth * 0.9 - padding * 2) / width;
+    const zoomY = (this.viewHeight * 0.9 - padding * 2) / height;
+    const targetZoom = Math.min(zoomX, zoomY, initialSubgraphFit ? 2 : 1);
     this.camera.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, targetZoom));
     this.cameraTarget.x = this.camera.x;
     this.cameraTarget.y = this.camera.y;
@@ -3225,6 +3442,9 @@ class GraphFrontierView extends ItemView {
    */
   runFrame() {
     if (!this.isOpen) return;
+    if (this.subgraphScope && !this.hasValidSubgraphScope() && this.nodes.length)
+      this.refreshFromVault({ keepCamera: true, skipLayoutKick: true });
+    this.finishSubgraphFraming();
     this.stepCameraSmoothing();
     this.stepSimulation();
     this.warmNodeSpatialIndexIfIdle();
@@ -3327,7 +3547,7 @@ class GraphFrontierView extends ItemView {
     if (!seedNodeId || !this.nodeById.has(seedNodeId)) return [];
     if (!this.selectedNodeIds.has(seedNodeId) || this.selectedNodeIds.size <= 1)
       return [seedNodeId];
-    return Array.from(this.selectedNodeIds).filter((nodeId) => this.nodeById.has(nodeId));
+    return [...this.selectedNodeIds].filter((id) => this.nodeById.has(id));
   }
 
   getNodeIdsInScreenRect(screenRect) {
@@ -3444,7 +3664,8 @@ class GraphFrontierView extends ItemView {
       }
       const world = this.screenToWorld(screenX, screenY);
       const dragNodeIds = this.getDraggedNodeIds(node.id);
-      this.dragNodeId = node.id;
+      const seed = dragNodeIds.length === 1 ? this.nodeById.get(dragNodeIds[0]) : node;
+      this.dragNodeId = seed.id;
       if (dragNodeIds.length > 1) {
         this.dragSelectionOffsets = new Map();
         for (const dragNodeId of dragNodeIds) {
@@ -3459,8 +3680,8 @@ class GraphFrontierView extends ItemView {
       } else {
         this.dragSelectionOffsets = null;
         this.dragNodeOffset = {
-          x: node.x - world.x,
-          y: node.y - world.y,
+          x: seed.x - world.x,
+          y: seed.y - world.y,
         };
       }
       this.dragStartScreen = { x: screenX, y: screenY };
@@ -3475,6 +3696,7 @@ class GraphFrontierView extends ItemView {
         startY: screenY,
         currentX: screenX,
         currentY: screenY,
+        baselineSelection: event.shiftKey ? new Set(this.selectedNodeIds) : null,
       };
       this.boxSelectArmed = false;
       this.panDrag = null;
@@ -3500,7 +3722,7 @@ class GraphFrontierView extends ItemView {
 
     if (this.boxSelectDrag) {
       const selectedNodeIds = this.getNodeIdsInScreenRect(this.boxSelectDrag);
-      this.setNodeSelection(selectedNodeIds);
+      this.setNodeSelection([...(this.boxSelectDrag.baselineSelection || []), ...selectedNodeIds]);
       this.boxSelectDrag = null;
       this.dragNodeId = null;
       this.dragSelectionOffsets = null;
@@ -3571,7 +3793,10 @@ class GraphFrontierView extends ItemView {
     ) {
       this.clickFlashNodeId = clickedNodeId;
       this.clickFlashUntilMs = Date.now() + 180;
-      this.openNodeFile(clickedNodeId);
+      if (this.nodeById.get(clickedNodeId)?.meta?.subgraph) {
+        if (event.detail >= 2) this.openSubgraphSeparately(clickedNodeId);
+        else this.toggleNodeSelection(clickedNodeId);
+      } else this.openNodeFile(clickedNodeId);
     }
   }
 
@@ -3972,6 +4197,13 @@ class GraphFrontierView extends ItemView {
     if (!node) {
       const menu = new Menu(this.app);
       const position = this.screenToWorld(screenX, screenY);
+      if (this.selectedNodeIds?.size)
+        menu.addItem((item) =>
+          item
+            .setTitle('Combine selected into subgraph')
+            .setIcon('circle')
+            .onClick(() => this.editSubgraph())
+        );
       menu.addItem((item) =>
         item
           .setTitle('Create gravity node')
@@ -3982,6 +4214,191 @@ class GraphFrontierView extends ItemView {
       return;
     }
     this.showNodeContextMenu(node, clientX, clientY, event);
+  }
+
+  editSubgraph(node = null) {
+    const source = this.plugin.data;
+    const selected = [...this.selectedNodeIds].filter((id) => this.nodeById.has(id));
+    if (!node && !selected.length) {
+      new Notice('Select nodes to combine');
+      return;
+    }
+    const points = selected.map((id) => this.nodeById.get(id));
+    const initial = node?.meta?.subgraph || {
+      id: `${SUBGRAPH_PREFIX}${this.plugin.createGroupId()}`,
+      name: 'Subgraph',
+      members: selected,
+      x: points.reduce((sum, item) => sum + item.x, 0) / points.length,
+      y: points.reduce((sum, item) => sum + item.y, 0) / points.length,
+    };
+    const modal = new SubgraphModal(this, initial, (item) => {
+      if (source !== this.plugin.data)
+        throw new Error('Layout changed. Reopen the subgraph editor.');
+      this.setSubgraph(item);
+    });
+    modal.open();
+    return modal;
+  }
+
+  captureGraphPositions(target) {
+    const views = this.app.workspace
+      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
+      .map((leaf) => leaf.view);
+    if (!views.includes(this)) views.push(this);
+    // IDs have exactly one parent space. Merge open spaces; retain all closed/filtered ones.
+    for (const view of [...views.filter((view) => view !== this), this]) {
+      if (view !== this && !view.isOpen) continue;
+      if (
+        (view.graphDataRef && view.graphDataRef !== this.plugin.data) ||
+        (view.subgraphScope && !view.hasValidSubgraphScope())
+      )
+        continue;
+      for (const node of view.nodes) target.saved_positions[node.id] = { x: node.x, y: node.y };
+    }
+  }
+
+  setSubgraph(item) {
+    const data = this.plugin.data;
+    const previous = data.subgraphs.find((group) => group.id === item.id);
+    if (!item.id?.startsWith(SUBGRAPH_PREFIX) || !String(item.name || '').trim())
+      throw new Error('Enter a valid subgraph name and ID');
+    const members = [...new Set(item.members || [])];
+    const parents = hierarchy(data.subgraphs);
+    const parent = previous ? parents.get(item.id) : this.subgraphScope?.id;
+    if (this.subgraphScope && !this.hasValidSubgraphScope())
+      throw new Error('This subgraph is no longer available');
+    if (previous) {
+      if (JSON.stringify(members) !== JSON.stringify(previous.members))
+        throw new Error('Membership is fixed; use Ungroup and create a new subgraph');
+      if (!this.nodeById.has(item.id) && this.subgraphScope?.id !== item.id)
+        throw new Error('Open the parent graph to edit this subgraph');
+      this.captureGraphPositions(data);
+      data.subgraphs = data.subgraphs.map((group) =>
+        group.id === item.id ? { ...group, name: item.name.trim() } : group
+      );
+      this.subgraphsChanged(new Set([parent || null]));
+      return data.subgraphs.find((group) => group.id === item.id);
+    }
+    if (!members.length) throw new Error('Select nodes to combine');
+    for (const id of members) {
+      if (
+        id === item.id ||
+        !this.nodeById.has(id) ||
+        (parents.get(id) || null) !== (parent || null)
+      )
+        throw new Error('Select existing nodes from this graph');
+    }
+    this.captureGraphPositions(data);
+    const points = members.map((id) => data.saved_positions[id]);
+    const center = {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    };
+    const group = { id: item.id, name: item.name.trim(), members, ...center };
+    translateMembers(data, members, -center.x, -center.y);
+    data.saved_positions[item.id] = { ...center };
+    data.subgraphs = normalizeSubgraphs([
+      ...data.subgraphs.map((entry) =>
+        entry.id === parent
+          ? { ...entry, members: [...entry.members.filter((id) => !members.includes(id)), item.id] }
+          : entry
+      ),
+      group,
+    ]);
+    reconcileOrbitSpaces(data);
+    this.subgraphsChanged(new Set([parent || null, item.id]));
+    return data.subgraphs.find((entry) => entry.id === item.id);
+  }
+
+  subgraphsChanged(affectedScopes) {
+    const views = this.app.workspace
+      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
+      .map((leaf) => leaf.view);
+    if (!views.includes(this)) views.push(this);
+    for (const view of views) {
+      const affected = affectedScopes.has(view.subgraphScope?.id || null);
+      view.refreshFromVault({
+        keepCamera: true,
+        forceSavedPositions: affected,
+        passive: !affected,
+      });
+      if (view.subgraphScope && !view.hasValidSubgraphScope()) {
+        view.layoutPaused = true;
+        view.layoutAutosaveDirty = false;
+      } else if (affected) {
+        // Mutation refreshes must wake immediately; only explicit restoration may pause.
+        view.kickLayoutSearch();
+      }
+    }
+  }
+
+  ungroupSubgraph(id) {
+    const data = this.plugin.data;
+    const group = data.subgraphs.find((item) => item.id === id);
+    if (!group) throw new Error('Subgraph not found');
+    const parent = hierarchy(data.subgraphs).get(id);
+    this.captureGraphPositions(data);
+    const center = this.nodeById.get(id) || data.saved_positions[id] || data.pins[id] || group;
+    for (const member of group.members) {
+      if (!data.saved_positions[member]) {
+        const nested = data.subgraphs.find((item) => item.id === member);
+        data.saved_positions[member] = nested ? { x: nested.x, y: nested.y } : { x: 0, y: 0 };
+      }
+    }
+    translateMembers(data, group.members, center.x, center.y);
+    data.subgraphs = data.subgraphs
+      .filter((item) => item.id !== id)
+      .map((item) => ({
+        ...item,
+        members: item.members.flatMap((member) => (member === id ? group.members : [member])),
+      }));
+    reconcileOrbitSpaces(data, id);
+    for (const key of [
+      'pins',
+      'orbit_pins',
+      'saved_positions',
+      'saved_layout_pins',
+      'saved_layout_orbit_pins',
+      'node_force_multipliers',
+      'strong_pull_nodes',
+      'painted_edge_colors',
+      'node_label_sizes',
+      'node_visual_settings',
+      'subgraph_cameras',
+      'subgraph_filters',
+    ])
+      delete data[key]?.[id];
+    this.subgraphsChanged(new Set([parent || null, id]));
+  }
+
+  async openSubgraphSeparately(id) {
+    if (!this.plugin.data.subgraphs.some((item) => item.id === id))
+      throw new Error('Subgraph not found');
+    const workspace = this.app.workspace;
+    const layout = this.plugin.getActiveLayoutFileName();
+    const existing = workspace
+      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
+      .find(
+        (leaf) => leaf.view?.subgraphScope?.id === id && leaf.view.subgraphScope.layout === layout
+      );
+    if (existing) {
+      await workspace.revealLeaf(existing);
+      return existing.view;
+    }
+    const leaf = workspace.getLeaf('split');
+    this.plugin.pendingSubgraphScopes ||= new WeakMap();
+    this.plugin.pendingSubgraphScopes.set(leaf, { id, layout });
+    try {
+      await leaf.setViewState({
+        type: GRAPHFRONTIER_VIEW_TYPE,
+        state: { subgraph: { id, layout } },
+        active: true,
+      });
+    } finally {
+      this.plugin.pendingSubgraphScopes.delete(leaf);
+    }
+    await workspace.revealLeaf(leaf);
+    return leaf.view;
   }
 
   editDarkEnergy(node = null, position = { x: 0, y: 0 }) {
@@ -4003,17 +4420,30 @@ class GraphFrontierView extends ItemView {
   }
 
   setDarkEnergy(item) {
+    const existing = this.plugin.data.dark_energy.some((entry) => entry.id === item.id);
+    if (!existing && this.hasValidSubgraphScope()) {
+      this.plugin.data.subgraphs = this.plugin.data.subgraphs.map((group) =>
+        group.id === this.subgraphScope.id
+          ? { ...group, members: [...group.members, item.id] }
+          : group
+      );
+      this.plugin.data.saved_positions[item.id] = { x: item.x, y: item.y };
+    }
     const items = (this.plugin.data.dark_energy || []).filter((entry) => entry.id !== item.id);
     this.plugin.data.dark_energy = normalizeDarkEnergy([...items, item], (query) =>
       this.plugin.parseGroupQuery(query)
     );
     this.plugin.schedulePersist();
-    this.plugin.refreshAllViews();
+    this.plugin.refreshAllViews({ passive: true });
     this.kickLayoutSearch();
   }
 
   removeDarkEnergy(node) {
     const data = this.plugin.data;
+    data.subgraphs = data.subgraphs.map((group) => ({
+      ...group,
+      members: group.members.filter((id) => id !== node.id),
+    }));
     data.dark_energy = (data.dark_energy || []).filter((item) => item.id !== node.id);
     for (const key of [
       'pins',
@@ -4035,7 +4465,7 @@ class GraphFrontierView extends ItemView {
       }
     }
     this.plugin.schedulePersist();
-    this.plugin.refreshAllViews();
+    this.plugin.refreshAllViews({ passive: true });
     this.kickLayoutSearch();
   }
 
@@ -4534,6 +4964,7 @@ class GraphFrontierView extends ItemView {
           auraRadius: getNodeVisualSetting(this.plugin, node.id, 'aura_radius') / 10,
           auraBrightness: getNodeVisualSetting(this.plugin, node.id, 'aura_brightness'),
           isAttachment,
+          isSubgraph: !!meta?.subgraph,
           fileType,
           path: nodePath,
           fileName,
@@ -4845,7 +5276,7 @@ class GraphFrontierView extends ItemView {
           }
         }
         if (!bestNode) return null;
-        const maxDist = Math.max(1, Number(bestNode.radius || 1) + 2 / Math.max(camera.zoom, 0.0001));
+        const maxDist = Math.max(1, Number(bestNode.radius || 1) + (bestNode.isSubgraph ? 4.2 : 2) / Math.max(camera.zoom, 0.0001));
         if (bestDist2 > maxDist * maxDist) return null;
         return bestNode;
       }
@@ -4940,8 +5371,12 @@ class GraphFrontierView extends ItemView {
           ctx.globalAlpha = alpha;
           ctx.fillStyle = node.color || '#7aa2f7';
           ctx.beginPath();
-          ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.arc(point.x, point.y, radius + (node.isSubgraph ? 2 : 0), 0, Math.PI * 2);
+          if (node.isSubgraph) {
+            ctx.strokeStyle = node.color || '#7aa2f7';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+          } else ctx.fill();
           ctx.restore();
 
           if (isHovered || isSelected) {
@@ -4950,7 +5385,7 @@ class GraphFrontierView extends ItemView {
             ctx.strokeStyle = EXPORT_DATA.theme.selection;
             ctx.lineWidth = isSelected ? 1.8 : 1.3;
             ctx.beginPath();
-            ctx.arc(point.x, point.y, radius + 2, 0, Math.PI * 2);
+            ctx.arc(point.x, point.y, radius + (node.isSubgraph ? 4 : 2), 0, Math.PI * 2);
             ctx.stroke();
             ctx.restore();
           }
@@ -5452,18 +5887,23 @@ class GraphFrontierView extends ItemView {
   }
 
   async commandUnpinAllNodes() {
-    const pinCount = Object.keys(this.plugin.data.pins || {}).length;
-    const orbitPinCount = Object.keys(this.plugin.data.orbit_pins || {}).length;
-    if (pinCount <= 0 && orbitPinCount <= 0) {
+    const parents = hierarchy(this.plugin.data.subgraphs);
+    const scope = this.subgraphScope?.id || null;
+    let count = 0;
+    for (const key of ['pins', 'orbit_pins'])
+      for (const id of Object.keys(this.plugin.data[key])) {
+        if ((parents.get(id) || null) !== scope) continue;
+        delete this.plugin.data[key][id];
+        count++;
+      }
+    if (!count) {
       new Notice('No pinned nodes');
       return;
     }
-    this.plugin.data.pins = {};
-    this.plugin.data.orbit_pins = {};
     this.plugin.schedulePersist();
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
-    new Notice(`Unpinned all nodes: ${pinCount + orbitPinCount}`);
+    new Notice(`Unpinned all nodes: ${count}`);
   }
 
   // Prompt-based node tools used by context menu and hotkeys.
@@ -5600,9 +6040,10 @@ class GraphFrontierView extends ItemView {
 
   async alignPinsToGrid() {
     const step = this.plugin.clampGridStep(this.plugin.getSettings().grid_step);
-    const sortedPins = Object.entries(this.plugin.data.pins).sort((entryA, entryB) =>
-      entryA[0].localeCompare(entryB[0])
-    );
+    const parents = hierarchy(this.plugin.data.subgraphs);
+    const sortedPins = Object.entries(this.plugin.data.pins)
+      .filter(([id]) => (parents.get(id) || null) === (this.subgraphScope?.id || null))
+      .sort((entryA, entryB) => entryA[0].localeCompare(entryB[0]));
 
     const occupied = new Set();
     let moved = 0;
@@ -5992,6 +6433,7 @@ class GraphFrontierView extends ItemView {
   // Layout persistence: save/load full graph layout including settings and pin modes.
   async saveCurrentLayout(options = {}) {
     const silent = !!options.silent;
+    if (this.subgraphScope && !this.hasValidSubgraphScope()) return false;
     if (!options.allowSearch && this.isSearchFilled()) {
       if (!silent) new Notice('Clear search field to save');
       return false;
@@ -6034,6 +6476,12 @@ class GraphFrontierView extends ItemView {
           'saved_layout_pins',
           'saved_layout_orbit_pins',
         ]) {
+          if (
+            key === 'saved_positions' &&
+            !unchanged &&
+            (snapshot.subgraphs.length || sourceData.subgraphs.length || this.subgraphScope)
+          )
+            continue;
           sourceData[key] = snapshot[key];
         }
         sourceData.active_layout_name = layoutName;
@@ -6043,6 +6491,12 @@ class GraphFrontierView extends ItemView {
           for (const node of this.nodes) {
             node.vx = 0;
             node.vy = 0;
+          }
+          if (sourceData.subgraphs?.length) {
+            for (const leaf of this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)) {
+              leaf.view.layoutAutosaveDirty = false;
+              leaf.view.layoutStillFrames = 0;
+            }
           }
         }
         this.plugin.schedulePersist();
@@ -6056,25 +6510,56 @@ class GraphFrontierView extends ItemView {
   captureLayoutSnapshot(layoutName) {
     const snapshot = JSON.parse(JSON.stringify(this.plugin.normalizeData(this.plugin.data)));
     snapshot.active_layout_name = layoutName;
-    // Merge, rather than prune, positions omitted by filters or incomplete metadata.
-    for (const node of this.nodes) {
-      snapshot.saved_positions[node.id] = { x: node.x, y: node.y };
-    }
+    this.captureGraphPositions(snapshot);
     snapshot.saved_layout_settings = Object.assign({}, snapshot.settings);
     snapshot.saved_layout_pins = Object.assign({}, snapshot.pins);
     snapshot.saved_layout_orbit_pins = Object.assign({}, snapshot.orbit_pins);
-    snapshot.view_state.pan_x = this.cameraTarget.x;
-    snapshot.view_state.pan_y = this.cameraTarget.y;
-    snapshot.view_state.zoom = this.cameraTarget.zoom;
-    snapshot.view_state.camera_saved = true;
-    snapshot.view_state.search_query = this.searchInputEl?.value || this.searchInputValue;
-    snapshot.view_state.node_filter =
-      this.apiVisibleNodeIds instanceof Set ? [...this.apiVisibleNodeIds] : null;
+    const views = this.app.workspace
+      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
+      .map((leaf) => leaf.view);
+    const main = this.subgraphScope
+      ? views.find((view) => !view.subgraphScope && view.isOpen)
+      : this;
+    if (main) {
+      snapshot.view_state.pan_x = main.cameraTarget.x;
+      snapshot.view_state.pan_y = main.cameraTarget.y;
+      snapshot.view_state.zoom = main.cameraTarget.zoom;
+      snapshot.view_state.camera_saved = true;
+      snapshot.view_state.search_query = main.searchInputEl?.value || main.searchInputValue;
+      snapshot.view_state.node_filter =
+        main.apiVisibleNodeIds instanceof Set ? [...main.apiVisibleNodeIds] : null;
+    }
+    for (const view of views)
+      if (view.hasValidSubgraphScope()) {
+        snapshot.subgraph_cameras[view.subgraphScope.id] = { ...view.cameraTarget };
+        snapshot.subgraph_filters[view.subgraphScope.id] = view.captureScopedFilter();
+      }
     snapshot.view_state.side_panel_sections = {};
     return snapshot;
   }
 
   restoreLayoutViewState() {
+    if (this.subgraphScope) {
+      const filter = this.plugin.data.subgraph_filters?.[this.subgraphScope.id];
+      this.searchInputValue = filter?.query || 'name:';
+      this.searchMode =
+        filter?.mode || (this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find');
+      if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
+      this.searchSelectedNodeId = null;
+      this.searchMatchedNodeIds = new Set();
+      this.apiVisibleNodeIds = Array.isArray(filter?.node_filter)
+        ? new Set(filter.node_filter)
+        : null;
+      const camera =
+        this.hasValidSubgraphScope() && this.plugin.data.subgraph_cameras[this.subgraphScope.id];
+      if (camera) {
+        this.camera = { ...camera };
+        this.cameraTarget = { ...camera };
+      }
+      this.pendingSubgraphFit = !camera;
+      this.markSearchVisibilityDirty();
+      return;
+    }
     const state = this.plugin.data.view_state;
     this.searchInputValue = state.search_query || 'name:';
     if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
@@ -6137,7 +6622,9 @@ class GraphFrontierView extends ItemView {
     const step = this.plugin.clampGridStep(this.plugin.getSettings().grid_step);
     const occupied = new Set();
 
+    const parents = hierarchy(this.plugin.data.subgraphs);
     for (const [nodeId, pos] of Object.entries(this.plugin.data.pins)) {
+      if ((parents.get(nodeId) || null) !== (this.subgraphScope?.id || null)) continue;
       if (nodeId === exceptNodeId) continue;
       if (!pos || typeof pos !== 'object') continue;
       const gx = Math.round(pos.x / step);
@@ -6211,14 +6698,45 @@ class GraphFrontierView extends ItemView {
 
   // View-state persistence and file opening helpers.
   persistViewState() {
+    this.persistCameraState();
+    this.plugin.schedulePersist(1200);
+  }
+
+  hasValidSubgraphScope() {
+    return (
+      !!this.subgraphScope &&
+      this.subgraphScope.layout === this.plugin.getActiveLayoutFileName() &&
+      this.plugin.data.subgraphs.some((group) => group.id === this.subgraphScope.id)
+    );
+  }
+
+  persistCameraState() {
+    if (this.subgraphScope) {
+      if (this.hasValidSubgraphScope()) {
+        this.plugin.data.subgraph_cameras[this.subgraphScope.id] = { ...this.cameraTarget };
+        this.plugin.data.subgraph_filters[this.subgraphScope.id] = this.captureScopedFilter();
+      }
+      return;
+    }
     this.plugin.data.view_state.pan_x = this.cameraTarget.x;
     this.plugin.data.view_state.pan_y = this.cameraTarget.y;
     this.plugin.data.view_state.zoom = this.cameraTarget.zoom;
-    this.plugin.schedulePersist(1200);
+  }
+
+  captureScopedFilter() {
+    return {
+      query: this.searchInputEl?.value || this.searchInputValue,
+      mode: this.searchMode,
+      node_filter: this.apiVisibleNodeIds instanceof Set ? [...this.apiVisibleNodeIds] : null,
+    };
   }
 
   async openNodeFile(nodeId) {
     const node = this.nodeById.get(nodeId);
+    if (node?.meta?.subgraph) {
+      await this.openSubgraphSeparately(nodeId);
+      return;
+    }
     if (node?.meta?.darkEnergy) {
       this.editDarkEnergy(node);
       return;
@@ -6261,7 +6779,8 @@ class GraphFrontierView extends ItemView {
     const visibleNodeIds = this.getFilterVisibleNodeIds();
     const hasFilter = visibleNodeIds instanceof Set;
     const zoom = Math.max(this.camera.zoom, 0.0001);
-    const maxCandidateRadius = 4 + 2 / zoom;
+    const hasSubgraphs = !!this.plugin.data.subgraphs?.length;
+    const maxCandidateRadius = (hasSubgraphs ? 8 : 4) + (hasSubgraphs ? 5 : 2) / zoom;
 
     if (!this.isNodeSpatialIndexFresh()) {
       // Moving nodes may have crossed buckets. Scan current coordinates without
@@ -6297,7 +6816,7 @@ class GraphFrontierView extends ItemView {
     if (!bestNode) return null;
 
     const baseRadius = this.getNodeRadius(bestNode);
-    const maxDist = Math.max(1, baseRadius + 2 / zoom);
+    const maxDist = Math.max(1, baseRadius + (bestNode.meta?.subgraph ? 4.2 : 2) / zoom);
     if (bestDist2 > maxDist * maxDist) return null;
 
     return bestNode;
@@ -6324,7 +6843,7 @@ class GraphFrontierView extends ItemView {
     if (!bestNode) return null;
 
     const baseRadius = this.getNodeRadius(bestNode);
-    const maxDist = Math.max(1, baseRadius + 2 / zoom);
+    const maxDist = Math.max(1, baseRadius + (bestNode.meta?.subgraph ? 4.2 : 2) / zoom);
     if (bestDist2 > maxDist * maxDist) return null;
 
     return bestNode;

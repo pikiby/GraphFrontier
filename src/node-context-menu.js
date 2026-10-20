@@ -61,6 +61,21 @@ function buildNodeContextMenu(view, node, clientX, clientY) {
     add(menu, 'Delete gravity node', 'trash', () => view.removeDarkEnergy(node));
     menu.addSeparator();
   }
+  if (node.meta?.subgraph) {
+    add(menu, 'Open subgraph in pane', 'panels-top-left', () =>
+      view.openSubgraphSeparately(node.id)
+    );
+    add(menu, 'Rename subgraph', 'pencil', () => view.editSubgraph(node));
+    add(menu, 'Ungroup subgraph', 'ungroup', () => view.ungroupSubgraph(node.id));
+    menu.addSeparator();
+  }
+  add(
+    menu,
+    'Combine selected into subgraph',
+    'circle',
+    () => view.editSubgraph(),
+    view.selectedNodeIds.size > 0
+  );
   const copy = async (text) => {
     if (!(await view.copyTextToClipboard(text))) throw new Error('Clipboard is unavailable');
   };

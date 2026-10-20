@@ -51,6 +51,7 @@ function getDarkEnergyTargets(view) {
     return cached.targets;
   const targets = new Map();
   for (const item of items) {
+    if (!view.nodeById.has(item.id)) continue;
     const rules = item.queries.map((query) => view.plugin.parseGroupQuery(query)).filter(Boolean);
     for (const node of view.nodes) {
       if (node.meta?.darkEnergy) continue;

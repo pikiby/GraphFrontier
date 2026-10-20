@@ -1,5 +1,6 @@
 const { Plugin, Notice } = require('obsidian');
 const { normalizeDarkEnergy, darkEnergyNodes } = require('./dark-energy');
+const { normalizeSubgraphs, subgraphNodes, normalizeSubgraphSpaces } = require('./subgraphs');
 const { NODE_VISUAL_SETTINGS, normalizeNodeVisuals } = require('./node-visuals');
 const { GraphFrontierApi } = require('./api');
 const { McpController, GraphFrontierMcpSettingTab } = require('./mcp-settings');
@@ -358,12 +359,43 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       node_visual_settings: normalizeNodeVisuals(safe.node_visual_settings),
       groups: [],
       dark_energy: normalizeDarkEnergy(safe.dark_energy, (query) => this.parseGroupQuery(query)),
+      subgraphs: normalizeSubgraphs(safe.subgraphs),
+      subgraph_cameras: {},
+      subgraph_filters: {},
       blacklist: [],
       whitelist: [],
       hotkeys: {},
       settings: Object.assign({}, DEFAULT_DATA.settings, settings),
       view_state: Object.assign({}, DEFAULT_DATA.view_state, viewState),
     };
+
+    for (const group of normalized.subgraphs) {
+      const filter = safe.subgraph_filters?.[group.id];
+      if (filter && typeof filter === 'object') {
+        normalized.subgraph_filters[group.id] = {
+          query:
+            typeof filter.query === 'string' && this.parseGroupQuery(filter.query)
+              ? filter.query.slice(0, 4096)
+              : 'name:',
+          mode: filter.mode === 'filter' ? 'filter' : 'find',
+          node_filter: Array.isArray(filter.node_filter)
+            ? [
+                ...new Set(
+                  filter.node_filter.filter((id) => typeof id === 'string' && id.length <= 4096)
+                ),
+              ]
+            : null,
+        };
+      }
+      const camera = safe.subgraph_cameras?.[group.id];
+      if (camera && [camera.x, camera.y, camera.zoom].every(Number.isFinite)) {
+        normalized.subgraph_cameras[group.id] = {
+          x: camera.x,
+          y: camera.y,
+          zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camera.zoom)),
+        };
+      }
+    }
 
     for (const [nodeId, size] of Object.entries(safe.node_label_sizes || {})) {
       if (typeof size !== 'number' || !Number.isFinite(size)) continue;
@@ -715,7 +747,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         ]
       : null;
 
-    return normalized;
+    return normalizeSubgraphSpaces(normalized, safe.subgraph_coordinates);
   }
 
   // Utility helpers: clamp functions, id generation, and color normalization.
@@ -1787,6 +1819,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
     this.groupSuggestionIndex = this.buildGroupSuggestionIndex(markdownFiles);
     nodes.push(...darkEnergyNodes(this.data.dark_energy));
+    nodes.push(...subgraphNodes(this.data.subgraphs));
     return { nodes, edges: filteredEdges };
   }
 

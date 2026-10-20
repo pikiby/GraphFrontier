@@ -54,7 +54,7 @@ const layoutName = z.string().min(1).max(180);
 const tools = [
   [
     'get_configuration',
-    'Read all settings, groups, blacklist/whitelist, gravity definitions, hotkeys and UI state.',
+    'Read all settings, groups, blacklist/whitelist, gravity and subgraph definitions, hotkeys and UI state.',
     readRef,
     'getConfiguration',
     true,
@@ -189,6 +189,18 @@ const tools = [
       y: position.y.optional(),
     },
     'gravityNodes',
+  ],
+  [
+    'subgraph_nodes',
+    'Create a named layout-only container from selection or memberIds, rename it, open its independent local graph in an Obsidian pane, or ungroup at the current container position without deleting notes. No in-place expansion. Membership is fixed until Ungroup.',
+    {
+      ...ref,
+      action: z.enum(['create', 'rename', 'open', 'ungroup']),
+      id: id.optional(),
+      name: z.string().min(1).max(300).optional(),
+      memberIds: ids.optional(),
+    },
+    'subgraphNodes',
   ],
   ['list_layouts', 'List saved layouts and the current layout.', {}, 'listLayouts', true],
   [

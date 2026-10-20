@@ -645,8 +645,12 @@ function drawNodes(view, ctx) {
     ctx.globalAlpha = nodeAlpha;
     ctx.fillStyle = fillColor;
     ctx.beginPath();
-    ctx.arc(pointX, pointY, radius, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.arc(pointX, pointY, radius + (node.meta?.subgraph ? 2 : 0), 0, Math.PI * 2);
+    if (node.meta?.subgraph) {
+      ctx.strokeStyle = fillColor;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    } else ctx.fill();
 
     if (node.meta?.darkEnergy) {
       ctx.strokeStyle = fillColor;
@@ -664,7 +668,7 @@ function drawNodes(view, ctx) {
       ctx.strokeStyle = theme.selection;
       ctx.lineWidth = Math.max(hoverLineWidth, selectedLineWidth);
       ctx.beginPath();
-      ctx.arc(pointX, pointY, radius + 2, 0, Math.PI * 2);
+      ctx.arc(pointX, pointY, radius + (node.meta?.subgraph ? 4 : 2), 0, Math.PI * 2);
       ctx.stroke();
     }
 

@@ -257,7 +257,7 @@ function stepSimulation(view) {
     );
   }
   const hasDarkEnergy = view.plugin.data?.dark_energy?.some(
-    (item) => item.strength > 0 || item.repulsion > 0
+    (item) => view.nodeById.has(item.id) && (item.strength > 0 || item.repulsion > 0)
   );
   const noForces = !hasRepel && !hasCenter && !hasLink && !hasDarkEnergy;
   const minRepelDistance = 28;

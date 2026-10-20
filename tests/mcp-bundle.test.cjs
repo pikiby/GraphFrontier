@@ -162,7 +162,9 @@ test('CSP-restricted desktop bundle serves real MCP without vault node_modules; 
       requestInit: { headers: { Authorization: `Bearer ${token}` } },
     })
   );
-  assert.equal((await client.listTools()).tools.length, 32);
+  const tools = await client.listTools();
+  assert.equal(tools.tools.length, 33);
+  assert(tools.tools.some((tool) => tool.name === 'subgraph_nodes'));
   const result = await client.callTool({ name: 'list_views', arguments: {} });
   assert.equal(result.structuredContent.views.length, 1);
   assert.equal(JSON.stringify(result).includes(token), false);

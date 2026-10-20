@@ -62,7 +62,8 @@ test('official SDK handshake, tools/list and all graph tools work over authentic
   const { url, view, writes, preferences } = await setup(t);
   const c = await client(t, url);
   const tools = await c.listTools();
-  assert.equal(tools.tools.length, 32);
+  assert.equal(tools.tools.length, 33);
+  assert(tools.tools.some((tool) => tool.name === 'subgraph_nodes'));
   const call = (name, args = {}) => c.callTool({ name, arguments: args });
   const listed = await call('list_views');
   const ref = listed.structuredContent.views[0];
@@ -200,7 +201,7 @@ test('occupied ports fail cleanly without disturbing the existing server', async
   await assert.rejects(duplicate.start(), { code: 'EADDRINUSE' });
   await duplicate.stop();
   const c = await client(t, url);
-  assert.equal((await c.listTools()).tools.length, 32);
+  assert.equal((await c.listTools()).tools.length, 33);
 });
 
 test('stop during startup settles without leaking a listener', { timeout: 2000 }, async () => {

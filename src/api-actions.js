@@ -3,6 +3,7 @@ const { GraphApiError, fail } = require('./api-errors');
 const { validate } = require('./api-tools');
 const { NODE_VISUAL_SETTINGS, getNodeVisualSetting } = require('./node-visuals');
 const { PREFIX } = require('./dark-energy');
+const { SUBGRAPH_PREFIX } = require('./subgraphs');
 const { HOTKEY_COMMANDS } = require('./constants');
 const copy = (value) => JSON.parse(JSON.stringify(value));
 
@@ -41,8 +42,10 @@ class GraphFrontierActions extends LayoutApi {
     return parsed;
   }
 
-  changed({ rebuild = false, kick = false, panel = false } = {}) {
+  changed({ rebuild = false, kick = false, panel = false, scopeView = null } = {}) {
     for (const view of this.views()) {
+      if (scopeView && (view.subgraphScope?.id || null) !== (scopeView.subgraphScope?.id || null))
+        continue;
       view.layoutEditVersion++;
       view.layoutAutosaveDirty = true;
       view.layoutStillFrames = 0;
@@ -65,6 +68,7 @@ class GraphFrontierActions extends LayoutApi {
       blacklist: copy(this.plugin.data.blacklist),
       whitelist: copy(this.plugin.data.whitelist),
       gravity: copy(this.plugin.data.dark_energy),
+      subgraphs: copy(this.plugin.data.subgraphs),
       hotkeys: copy(this.plugin.data.hotkeys),
       commands: copy(HOTKEY_COMMANDS),
       search: {
@@ -174,7 +178,10 @@ class GraphFrontierActions extends LayoutApi {
         });
       if (args.strongPull === false) this.plugin.clearNodeMultiplier(node.id);
     }
-    this.changed({ kick: args.multiplier !== undefined || args.strongPull !== undefined });
+    this.changed({
+      kick: args.multiplier !== undefined || args.strongPull !== undefined,
+      scopeView: view,
+    });
     return this.getNodeSettings({ viewId: args.viewId, nodeIds: args.nodeIds });
   }
 
@@ -246,7 +253,7 @@ class GraphFrontierActions extends LayoutApi {
     if (args.query.trim()) this.query(args.query);
     if (args.mode) {
       view.searchMode = args.mode;
-      this.plugin.data.settings.search_mode = args.mode;
+      if (!view.subgraphScope) this.plugin.data.settings.search_mode = args.mode;
     }
     if (args.showConnections !== undefined)
       this.plugin.data.settings.show_search_connections = args.showConnections;
@@ -344,7 +351,7 @@ class GraphFrontierActions extends LayoutApi {
       }
     }
     view.markNodeSpatialIndexDirty();
-    this.changed({ kick: true });
+    this.changed({ kick: true, scopeView: view });
     return this.state(view);
   }
 
@@ -379,8 +386,46 @@ class GraphFrontierActions extends LayoutApi {
         } else await view[args.mode === 'grid' ? 'pinNodeToGrid' : 'pinNodeExact'](node.id, node);
       }
     }
-    this.changed({ kick: true });
+    this.changed({ kick: true, scopeView: view });
     return this.state(view);
+  }
+
+  async subgraphNodes(raw) {
+    const args = this.input('subgraphNodes', raw);
+    const view = this.resolve(args, true);
+    const existing = this.plugin.data.subgraphs.find((group) => group.id === args.id);
+    if (args.action !== 'create' && !existing) fail('NODE_NOT_FOUND', 'Subgraph not found');
+    if (args.action !== 'create' && args.memberIds !== undefined)
+      fail('INVALID_ARGUMENT', 'Only creation accepts memberIds; use Ungroup to release members');
+    try {
+      if (args.action === 'create') {
+        if (args.id) fail('INVALID_ARGUMENT', 'IDs are generated for new subgraphs');
+        const group = view.setSubgraph({
+          id: `${SUBGRAPH_PREFIX}${this.plugin.createGroupId()}`,
+          name: args.name || 'Subgraph',
+          members: args.memberIds ?? [...view.selectedNodeIds],
+        });
+        return { ...this.state(view), subgraph: copy(group) };
+      }
+      if (args.action === 'rename') {
+        if (!args.name?.trim()) fail('INVALID_ARGUMENT', 'Enter a subgraph name');
+        return {
+          ...this.state(view),
+          subgraph: copy(view.setSubgraph({ ...existing, name: args.name })),
+        };
+      }
+      if (!view.nodeById.has(args.id))
+        fail('NODE_NOT_FOUND', 'Open the parent graph to target this container');
+      if (args.action === 'ungroup') view.ungroupSubgraph(args.id);
+      else if (args.action === 'open') {
+        const child = await view.openSubgraphSeparately(args.id);
+        return { ...this.state(view), openedView: this.state(child) };
+      }
+      return this.state(view);
+    } catch (error) {
+      if (error instanceof GraphApiError) throw error;
+      fail('INVALID_ARGUMENT', error.message);
+    }
   }
 
   gravityNodes(raw) {

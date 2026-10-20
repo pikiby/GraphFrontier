@@ -6,7 +6,7 @@
 
 GraphFrontier is an interactive graph workspace for Obsidian, with its own rendering and physics engine, independent of the built-in Graph View.
 
-Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
+Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, combine selections into named subgraphs, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
 Use it to:
 
@@ -40,6 +40,7 @@ Use it to:
       <img src="docs/media/moving.gif" alt="Move selected nodes together" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Move selected nodes together</strong></p>
+      <p>Hold Shift while box-selecting separate areas to add to your selection. Click empty space normally to clear it.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/unpin_linked_grid.gif" alt="Move linked nodes and keep position demo" width="100%">
@@ -69,6 +70,20 @@ Use it to:
       <img src="docs/media/layouts.gif" alt="Save and switch between layouts" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Save and switch between layouts</strong></p>
+    </td>
+  </tr>
+  <tr style="background-color: transparent;">
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/subgraphs.gif" alt="Combine selected nodes into a named subgraph and open its contents in a separate pane" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Organize selected nodes into subgraphs</strong></p>
+      <p>Keep a simple container in the main graph and explore its contents in an independent pane.</p>
+    </td>
+    <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
+      <img src="docs/media/open_url.gif" alt="Open a note's URL property from its node context menu" width="100%">
+      <br>
+      <p style="font-size: 1.05em;"><strong>Open URLs from note properties</strong></p>
+      <p>Use Open URL in a node's context menu to follow its note's URL in your default browser.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
@@ -124,7 +139,7 @@ Use it to:
 ## API And AI-Agent Control
 
 GraphFrontier's built-in MCP lets an external AI agent search and work with the
-open graph, arrange notes, change visual settings, and save or export layouts.
+open graph, arrange notes, manage subgraphs, change visual settings, and save or export layouts.
 It uses the plugin's existing graph operations; it is not a separate chat or
 model service.
 
@@ -148,6 +163,7 @@ An MCP-capable agent can:
 
 - Search and filter notes, and work with groups, blacklists and whitelists.
 - Arrange and pin nodes, tune physics, and create or position gravity centers.
+- Create and rename subgraphs, open their panes, or ungroup their members.
 - Change global or individual visual settings, including colors, sizes and auras.
 - Create and switch layouts, make backups, and export interactive HTML graphs.
 
@@ -197,7 +213,7 @@ See the [installation guide](docs/installation.md) for source builds and trouble
 
 - **Getting started:** [Installation](docs/installation.md), [Usage](docs/usage.md), [Settings](docs/settings.md).
 - **Advanced:** [Hotkeys and commands](docs/hotkeys.md), [Physics model](docs/physics.md), [Local API and embedded MCP](docs/mcp.md), [Development and project structure](docs/development.md).
-- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.5](docs/releases/0.8.5.md), [release history](docs/releases/).
+- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.6](docs/releases/0.8.6.md), [release history](docs/releases/).
 
 ## Support
 

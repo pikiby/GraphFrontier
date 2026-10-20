@@ -104,6 +104,7 @@ class GraphFrontierApi extends GraphFrontierActions {
       nodeCount: view.nodes.length,
       edgeCount: view.edges.length,
       selectionCount: view.selectedNodeIds.size,
+      subgraphId: view.subgraphScope?.id || null,
       camera: { x: view.camera.x, y: view.camera.y, zoom: view.camera.zoom },
     };
   }
@@ -169,7 +170,13 @@ class GraphFrontierApi extends GraphFrontierActions {
         result.push({
           id: item.id,
           label: item.label || item.id,
-          type: item.meta?.darkEnergy ? 'gravity' : item.meta?.isAttachment ? 'attachment' : 'note',
+          type: item.meta?.subgraph
+            ? 'subgraph'
+            : item.meta?.darkEnergy
+              ? 'gravity'
+              : item.meta?.isAttachment
+                ? 'attachment'
+                : 'note',
           x: item.x,
           y: item.y,
           visible: shown,

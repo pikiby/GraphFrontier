@@ -158,6 +158,7 @@ class LayoutApi {
   restoreLayoutCamera() {
     const s = this.plugin.data.view_state;
     for (const v of this.views()) {
+      if (v.subgraphScope) continue;
       v.camera = { x: s.pan_x, y: s.pan_y, zoom: s.zoom };
       v.cameraTarget = { ...v.camera };
       v.markSearchVisibilityDirty();
