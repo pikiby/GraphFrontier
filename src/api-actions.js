@@ -4,7 +4,7 @@ const { validate } = require('./api-tools');
 const { NODE_VISUAL_SETTINGS, getNodeVisualSetting } = require('./node-visuals');
 const { PREFIX } = require('./dark-energy');
 const { SUBGRAPH_PREFIX } = require('./subgraphs');
-const { HOTKEY_COMMANDS } = require('./constants');
+const { HOTKEY_COMMANDS, normalizeAttachmentExtensions } = require('./constants');
 const copy = (value) => JSON.parse(JSON.stringify(value));
 
 class GraphFrontierActions extends LayoutApi {
@@ -89,6 +89,11 @@ class GraphFrontierActions extends LayoutApi {
       view = this.resolve(args, true),
       keys = Object.keys(args.settings);
     Object.assign(this.plugin.data.settings, args.settings);
+    if (keys.includes('excluded_attachment_extensions')) {
+      this.plugin.data.settings.excluded_attachment_extensions = normalizeAttachmentExtensions(
+        args.settings.excluded_attachment_extensions
+      );
+    }
     if (keys.includes('strong_pull_multiplier')) this.plugin.applyStrongPullToMarkedNodes();
     if (keys.some((k) => ['link_distance', 'orbit_distance'].includes(k)))
       this.plugin.recomputeOrbitRadiiAllViews();
@@ -99,16 +104,20 @@ class GraphFrontierActions extends LayoutApi {
       }
     this.changed({
       rebuild: keys.some((k) =>
-        ['hide_orphans', 'hide_attachments', 'existing_files_only'].includes(k)
+        [
+          'hide_orphans',
+          'hide_attachments',
+          'include_unlinked_attachments',
+          'excluded_attachment_extensions',
+          'existing_files_only',
+        ].includes(k)
       ),
       kick: keys.some((k) =>
         [
-          'attachments_on_orbits',
           'base_link_strength',
           'link_distance',
           'strong_pull_multiplier',
           'orbit_distance',
-          'attachment_link_distance_multiplier',
           'repel_strength',
           'repel_radius',
           'center_strength',
@@ -565,6 +574,12 @@ class GraphFrontierActions extends LayoutApi {
       app = this.plugin.app;
     let text;
     const file = app.vault.getAbstractFileByPath(node.id);
+    const isFile = (entry) => !!entry && typeof entry.extension === 'string';
+    if (
+      ['copy_path', 'copy_system_path', 'copy_obsidian_url'].includes(args.action) &&
+      (!isFile(file) || node.id.startsWith(PREFIX) || node.id.startsWith(SUBGRAPH_PREFIX))
+    )
+      fail('NODE_NOT_FOUND', 'File not found.');
     if (args.action === 'copy_name') text = node.label || node.id;
     if (args.action === 'copy_path') text = node.id;
     if (args.action === 'copy_obsidian_url')
@@ -580,10 +595,17 @@ class GraphFrontierActions extends LayoutApi {
           .getLinkedNodeIds(node.id)
           .map((id) => view.nodeById.get(id))
           .filter(Boolean)
+          .filter(
+            (n) =>
+              args.action !== 'copy_linked_paths' ||
+              (!n.id.startsWith(PREFIX) &&
+                !n.id.startsWith(SUBGRAPH_PREFIX) &&
+                isFile(app.vault.getAbstractFileByPath(n.id)))
+          )
           .map((n) =>
             args.action === 'copy_linked_names'
               ? view.getLinkedNodeDisplayName(n)
-              : view.getLinkedNodeDisplayPath(n)
+              : app.vault.getAbstractFileByPath(n.id).path
           )
       );
     if (text !== undefined) {

@@ -87,9 +87,13 @@ test('every current global setting has a typed MCP field; invalid patches are at
   const before = structuredClone(f.plugin.data);
   for (const settings of [
     { node_color: 'red' },
+    { attachment_node_color: 'red' },
     { damping: 2 },
     { layout_autosave: 'false' },
     { unknown: 1 },
+    { attachment_size_multiplier: 0.8 },
+    { attachment_link_distance_multiplier: 14 },
+    { attachments_on_orbits: false },
     JSON.parse('{"__proto__":{}}'),
   ])
     assert.throws(() => f.api.updateSettings({ ...f.ref(), settings }), {
@@ -101,6 +105,10 @@ test('every current global setting has a typed MCP field; invalid patches are at
     settings: { node_color: '#aabbcc', damping: 0.5, layout_autosave: true, repel_strength: 15 },
   });
   assert.equal(f.plugin.data.settings.node_color, '#aabbcc');
+  f.api.updateSettings({ ...f.ref(), settings: { attachment_node_color: '#123456' } });
+  assert.equal(f.plugin.data.settings.attachment_node_color, '#123456');
+  f.api.updateSettings({ ...f.ref(), settings: { attachment_node_color: null } });
+  assert.equal(f.plugin.data.settings.attachment_node_color, null);
   assert.equal(f.view.layoutPaused, false);
   assert.equal(f.view.layoutAutosaveDirty, true);
   f.api.updateSettings({ ...f.ref(), settings: { layout_autosave: false } });
@@ -382,6 +390,57 @@ test('UI state/hotkeys, pause/resume and copying linked names reuse plugin funct
   assert.equal(copied.copied, false);
 });
 
+test('path copies require existing files and linked paths exclude non-files', async (t) => {
+  const f = setup(t);
+  const { vault, file, folder } = mobileVault(t, false);
+  Object.assign(f.app.vault, vault);
+  file('alpha.md');
+  file('beta.md');
+  folder('folder');
+  f.app.vault.adapter.getFullPath = (path) => `/vault/${path}`;
+  const gravity = 'graphfrontier:dark-energy:g';
+  const subgraph = 'graphfrontier:subgraph:s';
+  for (const id of [gravity, subgraph, 'missing.md', 'folder'])
+    f.view.nodeById.set(id, { id, label: `label ${id}` });
+  const clipboard = t.mock.method(f.view, 'copyTextToClipboard', async () => true);
+  for (const [action, text] of [
+    ['copy_path', 'alpha.md'],
+    ['copy_system_path', '/vault/alpha.md'],
+    ['copy_obsidian_url', 'obsidian://open?vault=Test%20vault&file=alpha.md'],
+  ]) {
+    assert.deepEqual(
+      await f.api.nodeAction({ ...f.ref(), nodeId: 'alpha.md', action, clipboard: true }),
+      {
+        text,
+        copied: true,
+      }
+    );
+    const count = clipboard.mock.callCount();
+    for (const nodeId of [gravity, subgraph, 'missing.md', 'folder', 'unknown.md']) {
+      await assert.rejects(f.api.nodeAction({ ...f.ref(), nodeId, action, clipboard: true }), {
+        code: 'NODE_NOT_FOUND',
+      });
+      assert.equal(clipboard.mock.callCount(), count);
+    }
+  }
+  for (const nodeId of [gravity, subgraph])
+    assert.equal(
+      (await f.api.nodeAction({ ...f.ref(), nodeId, action: 'copy_name' })).text,
+      `label ${nodeId}`
+    );
+  t.mock.method(f.view, 'getLinkedNodeIds', () => [
+    'beta.md',
+    gravity,
+    subgraph,
+    'missing.md',
+    'folder',
+  ]);
+  assert.equal(
+    (await f.api.nodeAction({ ...f.ref(), nodeId: 'alpha.md', action: 'copy_linked_paths' })).text,
+    'beta.md'
+  );
+});
+
 test('export writes a working HTML induced subgraph, excludes unrequested contents and refuses overwrite', async (t) => {
   const f = setup(t);
   const { vault, contents, file } = mobileVault(t, false);
@@ -455,11 +514,11 @@ test('partial rule updates and explicit multi-node highlighting preserve unrelat
   assert.equal(f.view.getSearchHighlightNodeIds(), null);
 });
 
-test('current attachment-distance minimum survives save normalization and deleted active layout loads fallback', async (t) => {
+test('global link-distance minimum survives save normalization and deleted active layout loads fallback', async (t) => {
   const f = setup(t);
-  f.api.updateSettings({ ...f.ref(), settings: { attachment_link_distance_multiplier: 1 } });
+  f.api.updateSettings({ ...f.ref(), settings: { link_distance: 1 } });
   await f.api.createLayout({ ...f.ref(), name: 'active' });
-  assert.equal(f.plugin.getSettings().attachment_link_distance_multiplier, 1);
+  assert.equal(f.plugin.getSettings().link_distance, 1);
   await f.api.deleteLayout({ ...f.ref(), name: 'active' });
   assert.equal(f.plugin.getActiveLayoutFileName(), 'data.json');
   assert.equal((await f.api.listBackups({ name: 'active' })).items.length, 1);
@@ -512,4 +571,149 @@ test('a valid backup can recover a corrupt destination, preserving its damaged b
   await assert.rejects(f.api.restoreLayout({ ...f.ref(), backupId: damaged.backupId }), {
     code: 'BACKUP_READ_FAILED',
   });
+});
+
+test('removed individual attachment multiplier is rejected atomically by the API', (t) => {
+  const f = setup(t);
+  const before = structuredClone(f.plugin.data);
+  assert.throws(
+    () =>
+      f.api.updateNodeSettings({
+        ...f.ref(),
+        nodeIds: ['alpha.md'],
+        settings: { node_size_scale: 2, attachment_size_multiplier: 0.8 },
+      }),
+    { code: 'INVALID_ARGUMENT' }
+  );
+  assert.deepEqual(f.plugin.data, before);
+});
+
+test('attachment exclusions API validates atomically, normalizes and rebuilds graph data', (t) => {
+  const f = setup(t);
+  const refresh = t.mock.method(f.view, 'refreshFromVault', () => {});
+  for (const value of ['png', null, [1], {}]) {
+    assert.throws(() =>
+      f.api.updateSettings({
+        ...f.ref(),
+        settings: {
+          hide_attachments: true,
+          excluded_attachment_extensions: value,
+        },
+      })
+    );
+    assert.equal(f.plugin.data.settings.hide_attachments, false);
+    assert.deepEqual(f.plugin.data.settings.excluded_attachment_extensions, []);
+  }
+  f.api.updateSettings({
+    ...f.ref(),
+    settings: {
+      excluded_attachment_extensions: ['PNG', ' png ', '', 'missing'],
+    },
+  });
+  assert.deepEqual(f.plugin.data.settings.excluded_attachment_extensions, ['png', '', 'missing']);
+  assert.equal(refresh.mock.callCount(), 1);
+});
+
+test('include unlinked attachments is a boolean API setting that rebuilds graph data', (t) => {
+  const f = setup(t);
+  const refresh = t.mock.method(f.view, 'refreshFromVault', () => {});
+  assert.throws(() =>
+    f.api.updateSettings({
+      ...f.ref(),
+      settings: { include_unlinked_attachments: 'true' },
+    })
+  );
+  assert.equal(f.plugin.data.settings.include_unlinked_attachments, false);
+  for (const value of [true, false]) {
+    const before = refresh.mock.callCount();
+    f.api.updateSettings({ ...f.ref(), settings: { include_unlinked_attachments: value } });
+    assert.equal(f.plugin.data.settings.include_unlinked_attachments, value);
+    assert.equal(refresh.mock.callCount(), before + 1);
+  }
+});
+
+test('path actions distinguish reserved prefixes from similar real filenames and never copy on failure', async (t) => {
+  const f = setup(t);
+  const { vault, file, folder } = mobileVault(t, false);
+  Object.assign(f.app.vault, vault);
+  const valid = [
+    'graphfrontier:dark-energy-other.md',
+    'graphfrontier:subgraph-other.md',
+    'assets/README',
+  ];
+  const reserved = ['graphfrontier:dark-energy:real.md', 'graphfrontier:subgraph:real.md'];
+  for (const id of [...valid, ...reserved]) {
+    const entry = file(id);
+    if (id === 'assets/README') entry.extension = '';
+    f.view.nodeById.set(id, { id, label: id });
+  }
+  folder('assets/folder');
+  f.view.nodeById.set('assets/folder', { id: 'assets/folder', label: 'folder' });
+  f.view.nodeById.set('assets/missing.md', { id: 'assets/missing.md', label: 'missing' });
+  const clipboard = t.mock.method(f.view, 'copyTextToClipboard', async () => true);
+  for (const id of valid) {
+    assert.deepEqual(await f.api.nodeAction({ ...f.ref(), nodeId: id, action: 'copy_path' }), {
+      text: id,
+      copied: false,
+    });
+  }
+  assert.equal(clipboard.mock.callCount(), 0);
+  for (const id of [...reserved, 'assets/folder', 'assets/missing.md']) {
+    await assert.rejects(
+      f.api.nodeAction({ ...f.ref(), nodeId: id, action: 'copy_path', clipboard: true }),
+      { code: 'NODE_NOT_FOUND' }
+    );
+    assert.equal(clipboard.mock.callCount(), 0);
+  }
+  t.mock.method(f.view, 'getLinkedNodeIds', () => [
+    ...valid,
+    ...reserved,
+    'assets/folder',
+    'assets/missing.md',
+    'absent',
+  ]);
+  const result = await f.api.nodeAction({
+    ...f.ref(),
+    nodeId: valid[0],
+    action: 'copy_linked_paths',
+    clipboard: true,
+  });
+  assert.equal(result.text, valid.join(',\n'));
+  assert.equal(result.copied, true);
+  assert.equal(clipboard.mock.callCount(), 1);
+  assert.equal(clipboard.mock.calls[0].arguments[0], result.text);
+});
+
+test('system path unavailability and rejected clipboard leave opt-in copy results unreported', async (t) => {
+  const f = setup(t);
+  const { vault, file } = mobileVault(t, false);
+  Object.assign(f.app.vault, vault);
+  file('alpha.md');
+  delete f.app.vault.adapter.getFullPath;
+  const clipboard = t.mock.method(f.view, 'copyTextToClipboard', async () => false);
+  await assert.rejects(
+    f.api.nodeAction({
+      ...f.ref(),
+      nodeId: 'alpha.md',
+      action: 'copy_system_path',
+      clipboard: true,
+    }),
+    { code: 'UNAVAILABLE' }
+  );
+  assert.equal(clipboard.mock.callCount(), 0);
+  await assert.rejects(
+    f.api.nodeAction({ ...f.ref(), nodeId: 'alpha.md', action: 'copy_path', clipboard: true }),
+    { code: 'UNAVAILABLE' }
+  );
+  assert.equal(clipboard.mock.callCount(), 1);
+  assert.deepEqual(
+    await f.api.nodeAction({
+      ...f.ref(),
+      nodeId: 'alpha.md',
+      action: 'copy_path',
+      clipboard: false,
+    }),
+    { text: 'alpha.md', copied: false }
+  );
+  assert.equal(clipboard.mock.callCount(), 1);
 });

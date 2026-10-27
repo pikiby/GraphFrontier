@@ -37,6 +37,11 @@ GraphFrontier commands are registered in Obsidian command palette and can be ass
 - If no active GraphFrontier view exists, command shows a notice.
 - Hotkeys work best when focus is not inside a text input.
 
+Exact pin, grid pin and unpin commands use the current selection when nonempty, otherwise
+the node under the cursor. Other explicit-target and linked commands remain single-target.
+Ctrl+C / Cmd+C copies selected node names while the graph is active, preserving normal
+text/input copying.
+
 ## Suggested Starter Mapping
 
 - `Open GraphFrontier`: quick global shortcut

@@ -331,6 +331,72 @@ test('onOpen and subsequent setState do not reload the root, inherit its search,
   assert.equal(f.view.layoutPaused, true);
 });
 
+for (const order of ['pending', 'restored', 'before-open', 'after-open']) {
+  test(`saved child opens with physics and its own camera with ${order} scope initialization`, async (t) => {
+    const camera = { x: 700, y: 800, zoom: 1.5 };
+    const f = setup(t, {
+      subgraphs: [group('one', ['a.md', 'b.md'])],
+      saved_positions: { 'a.md': { x: -50, y: 0 }, 'b.md': { x: 50, y: 0 } },
+      pins: { 'a.md': { x: -50, y: 0, mode: 'exact' } },
+      subgraph_cameras: { [P + 'one']: camera },
+      subgraph_filters: { [P + 'one']: { query: 'name:', mode: 'find' } },
+      view_state: { camera_saved: true, pan_x: 5000, pan_y: 4000, zoom: 2, search_query: 'name:c' },
+      settings: {
+        repel_strength: 0,
+        center_strength: 0,
+        base_link_strength: 100,
+        link_distance: 10,
+      },
+    });
+    const root = f.view.nodes.map((node) => ({ ...point(node), vx: node.vx, vy: node.vy }));
+    const scope = { id: P + 'one', layout: 'data.json' };
+    const leaf = { app: f.app };
+    if (order === 'pending') f.plugin.pendingSubgraphScopes = new WeakMap([[leaf, scope]]);
+    if (order === 'restored') leaf.getViewState = () => ({ state: { subgraph: scope } });
+    const child = new GraphFrontierView(leaf, f.plugin);
+    for (const method of [
+      'render',
+      'buildSidePanel',
+      'buildQuickPreviewPanel',
+      'updateCanvasBackgroundColor',
+      'bindEvents',
+      'installResizeObserver',
+      'resizeCanvas',
+      'runFrame',
+    ])
+      child[method] = () => {};
+    t.mock.method(f.plugin, 'setActiveLayoutFile', () =>
+      assert.fail('No root reload on child entry')
+    );
+    if (order === 'before-open') await child.setState({ subgraph: scope });
+    await child.onOpen();
+    await child.setState({ subgraph: scope });
+    assert.deepEqual(child.camera, camera);
+    assert.deepEqual(child.cameraTarget, camera);
+    assert.deepEqual(ids(child), ['a.md', 'b.md']);
+    assert.equal(child.searchInputValue, 'name:');
+    assert.equal(child.layoutPaused, false);
+    assert.deepEqual(point(child.nodeById.get('b.md')), { x: 50, y: 0 });
+    child.stepSimulation();
+    const moved = point(child.nodeById.get('b.md'));
+    assert.notEqual(moved.x, 50);
+    assert.deepEqual(point(child.nodeById.get('a.md')), { x: -50, y: 0 });
+    await child.setState({ subgraph: { ...scope } });
+    assert.deepEqual(
+      point(child.nodeById.get('b.md')),
+      moved,
+      'repeated state must not restore positions'
+    );
+    assert.equal(child.layoutPaused, false);
+    assert.equal(f.view.layoutPaused, true);
+    assert.deepEqual(
+      f.view.nodes.map((node) => ({ ...point(node), vx: node.vx, vy: node.vy })),
+      root
+    );
+    assert.equal(f.writes.length, 0);
+  });
+}
+
 test('Ungroup uses current live container center plus latest local offsets, not original coordinates or stale pins', async (t) => {
   const f = setup(t);
   f.makeGroup();

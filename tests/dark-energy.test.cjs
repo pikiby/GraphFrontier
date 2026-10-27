@@ -128,7 +128,7 @@ test('energy moves only matching free nodes and leaves the center stationary', (
   assert.equal(view.nodeById.get(center().id).x, 200);
 });
 
-test('pins, active drag and isolated attachments do not receive dark energy forces', (t) => {
+test('pins and active drag block dark energy forces, but attachment classification does not', (t) => {
   const { view, plugin, node } = setup(t);
   plugin.setPin(node.id, { x: 0, y: 0 });
   view.stepSimulation();
@@ -141,7 +141,13 @@ test('pins, active drag and isolated attachments do not receive dark energy forc
   node.meta.isAttachment = true;
   view.kickLayoutSearch();
   view.stepSimulation();
-  assert.equal(node.x, 0);
+  const attachmentX = node.x;
+  assert(attachmentX > 0);
+  Object.assign(node, { x: 0, y: 0, vx: 0, vy: 0 });
+  node.meta.isAttachment = false;
+  view.kickLayoutSearch();
+  view.stepSimulation();
+  assert.equal(node.x, attachmentX);
 });
 
 test('multiple centers combine their influence and strength zero disables attraction', (t) => {
@@ -374,7 +380,7 @@ test('repulsion affects only nonmatching nodes, fades with distance and reuses m
   assert.equal(targets.has(center().id), false);
 });
 
-test('repulsion runs with attraction disabled but respects pins, orbits, drag, isolation and visibility', (t) => {
+test('repulsion runs with attraction disabled but respects pins, orbits, drag and visibility, equally for attachments', (t) => {
   const { view, plugin } = setup(t, [center({ strength: 0, repulsion: 50 })]);
   const other = view.nodeById.get('other.md');
   plugin.setPin(other.id, { x: -200, y: 0 });
@@ -388,8 +394,13 @@ test('repulsion runs with attraction disabled but respects pins, orbits, drag, i
   other.meta.isAttachment = true;
   view.kickLayoutSearch();
   view.stepSimulation();
-  assert.equal(other.x, -200);
+  const attachmentX = other.x;
+  assert(attachmentX < -200);
+  Object.assign(other, { x: -200, y: 0, vx: 0, vy: 0 });
   other.meta.isAttachment = false;
+  view.kickLayoutSearch();
+  view.stepSimulation();
+  assert.equal(other.x, attachmentX);
   plugin.setOrbitPin(other.id, { anchor_id: center().id, radius: 20, angle: 0 });
   view.stepSimulation();
   assert.equal(other.x, 220);

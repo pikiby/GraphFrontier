@@ -16,7 +16,7 @@ Then velocity is damped and position is updated each frame.
 ## Main Controls And Meaning
 
 - `Link strength`: stronger spring between linked nodes
-- `Link distance`: preferred distance of regular linked nodes
+- `Link distance`: preferred distance of all linked nodes
 - `Repel strength`: stronger anti-overlap spreading
 - `Repel radius`: distance cutoff for repel interactions
 - `Center strength`: stronger pull toward center
@@ -33,7 +33,6 @@ Repel is distance-limited:
 Derived radii:
 
 - orphan-related repel uses a slightly wider radius (`Repel radius * 1.25`)
-- attachment-only orphan-like interactions use base radius or orphan radius depending on pair type
 
 ## Stabilization Logic
 
@@ -61,7 +60,7 @@ Pinning constrains movement, not influence. Exact/grid/orbit-pinned nodes still
 repel eligible free neighbors and exert link forces, including Strong pull.
 The pinned node itself does not move under those forces; orbit-pinned nodes
 follow their anchor's position. Force calculations between two fixed nodes are
-skipped because neither can move. Attachment-isolation rules still apply.
+skipped because neither can move. This applies equally to notes and attachments.
 
 ## Orbit Geometry
 
@@ -79,27 +78,17 @@ Explicit orbit pinning can also arrange attachments around an anchor.
 
 ## Node Classes In Simulation
 
-GraphFrontier now treats several node classes differently for stability:
+Notes and attachments share the same simulation. Only topology distinguishes
+connected nodes from orphans (`degree = 0`), including within a filtered graph.
+A note linked only to attachments is an ordinary connected node. Attachments
+participate equally in springs, repulsion, center pull and gravity-node forces.
+The layout center includes all connected nodes, falling back to all nodes if none are connected.
+There is no attachment isolation or automatic attachment orbit placement.
 
-- Main nodes: regular non-attachment nodes with regular links
-- Orphans: nodes with `degree = 0`
-- Attachments: non-Markdown files; isolation mode limits interaction to their main node and sibling attachments
-- Attachment-only anchors: regular nodes linked only to attachments
+## Orphan Repel
 
-Attachment-only anchors use orphan-like mechanics with reduced force.  
-This prevents jitter while keeping them integrated with orphan/main repulsion behavior.
-
-## Orphan And Attachment-Oriented Repel
-
-Additional repel layers are applied on top of main repel:
-
-- orphan <-> orphan
-- orphan <-> main
-- attachment-only <-> attachment-only
-- orphan <-> attachment-only
-- attachment-only <-> main
-
-These layers help keep peripheral nodes separated from the core while preserving smooth motion.
+Additional repel layers separate orphan/orphan and orphan/connected pairs.
+These depend only on node degree, not file classification.
 
 ## Why Graph Can Still Move
 
@@ -109,7 +98,7 @@ Even with many controls low, movement may continue if:
 - links remain stretched
 - center pull remains active
 - nodes are being dragged or constraints are changing
-- orphan/attachment class interactions are still active
+- orphan interactions are still active
 
 If needed, reduce link/center/repel and increase damping to calm down faster.
 

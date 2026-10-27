@@ -136,6 +136,65 @@ function graph(t, scheme, variables) {
   return { ...f, ...recorded };
 }
 
+test('attachment labels show real filenames without changing note labels or appearance', (t) => {
+  const { view, ctx, calls } = graph(t, 'dark');
+  const cases = [
+    ['assets/diagram.pdf', 'diagram', { fileName: 'diagram', fileType: 'pdf' }, 'diagram.pdf'],
+    ['assets/diagram.pdf', 'diagram.pdf', { fileType: 'pdf' }, 'diagram.pdf'],
+    ['assets/archive.tar.gz', 'archive.tar', { fileType: 'gz' }, 'archive.tar.gz'],
+    ['assets/IMAGE.PNG', 'IMAGE', { fileType: 'png' }, 'IMAGE.PNG'],
+    ['assets.v1/README', 'README', { fileType: 'attachment' }, 'README'],
+    ['assets/README', 'README', { fileType: 'pdf' }, 'README'],
+    ['assets/.env', '.env', { fileType: 'env' }, '.env'],
+    ['old.pdf', 'old', { path: 'assets/actual.svg', fileType: 'pdf' }, 'actual.svg'],
+    ['', 'diagram', { fileName: 'diagram', fileType: 'pdf' }, 'diagram.pdf'],
+    ['', 'diagram', { fileName: 'diagram.PDF', fileType: 'pdf' }, 'diagram.PDF'],
+    ['', 'README', { fileType: 'attachment' }, 'README'],
+    ['', 'README', { fileType: 'file' }, 'README'],
+    ['', 'README', {}, 'README'],
+  ];
+  const note = view.nodes[0];
+  for (const [id, label, meta, expected] of cases) {
+    const attachment = { id, label, meta: { isAttachment: true, ...meta }, x: 30, y: 0, degree: 0 };
+    view.nodes = [note, attachment];
+    for (const zoom of [0.5, render.getLabelZoomThreshold(view) * 1.035, 12]) {
+      view.camera.zoom = zoom;
+      calls.length = 0;
+      render.drawNodes(view, ctx);
+      const labels = calls.filter((call) => call.kind === 'text');
+      if (!labels.length) continue;
+      assert.equal(labels.length, 2);
+      assert.equal(labels[0].text, 'Alpha');
+      assert.equal(labels[1].text, expected);
+      assert.deepEqual({ ...labels[1], text: 'Alpha' }, labels[0]);
+      assert.equal(attachment.label, label, 'display must not mutate graph labels');
+    }
+  }
+});
+
+test('hovered attachments show one ordinary filename label and retain highlighting', (t) => {
+  const { view, ctx, calls } = graph(t, 'dark');
+  view.nodes = [
+    {
+      id: 'assets/diagram.pdf',
+      label: 'diagram',
+      x: 0,
+      y: 0,
+      degree: 0,
+      meta: { isAttachment: true, fileType: 'pdf' },
+    },
+  ];
+  view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
+  view.hoverNodeId = 'assets/diagram.pdf';
+  view.camera.zoom = render.getLabelZoomThreshold(view) * 0.2;
+  render.drawNodes(view, ctx);
+  assert.deepEqual(
+    calls.filter((call) => call.kind === 'text').map((call) => call.text),
+    ['diagram.pdf']
+  );
+  assert(calls.some((call) => call.kind === 'stroke' && call.color === view.canvasTheme.selection));
+});
+
 test('Find keeps all matching nodes bright while another node has hover focus', (t) => {
   const { view, ctx } = graph(t, 'dark');
   view.nodes = ['Grafana', 'GraphFrontier', 'NATS'].map((label, index) => ({
@@ -236,7 +295,7 @@ for (const scheme of ['light', 'dark']) {
     const labels = calls.filter((call) => call.kind === 'text');
     assert.equal(labels[0].alpha, 1);
     assert.equal(labels[0].color, view.canvasTheme.text);
-    assert.equal(labels[1].color, view.canvasTheme.text, 'hover tooltip also follows theme');
+    assert.equal(labels.length, 1, 'hover does not draw a duplicate title');
     view.hoverNodeId = null;
     view.camera.zoom = render.getLabelZoomThreshold(view) * 2;
     calls.length = 0;
@@ -421,6 +480,33 @@ test('exported HTML executes aura drawing with the node color and transparent ou
   );
 });
 
+test('exported HTML renders attachment filenames and unchanged note labels', async (t) => {
+  const { view, app } = graph(t, 'dark');
+  view.nodes.push(
+    { id: 'assets/report.PDF', label: 'report', x: 30, y: 0, degree: 0 },
+    { id: 'assets/README', label: 'README', x: 60, y: 0, degree: 0 }
+  );
+  view.nodeMetaById = new Map([
+    ['assets/report.PDF', { isAttachment: true, path: 'assets/report.PDF', fileType: 'pdf' }],
+    ['assets/README', { isAttachment: true, path: 'assets/README', fileType: 'attachment' }],
+  ]);
+  const { vault, contents } = mobileVault(t, false);
+  Object.assign(app.vault, vault);
+  await view.commandExportStaticHtml({ exportPath: 'labels.html' });
+  const html = contents.get('labels.html');
+  assert.equal(typeof html, 'string');
+  const payload = JSON.parse(html.match(/const EXPORT_DATA = (.*);/)[1]);
+  assert.deepEqual(
+    payload.nodes.map((node) => node.label),
+    ['Alpha', 'report.PDF', 'README']
+  );
+  const { calls } = runExport(html);
+  assert.deepEqual(
+    calls.filter((call) => call.kind === 'text').map((call) => call.text),
+    ['Alpha', 'report.PDF', 'README']
+  );
+});
+
 for (const scheme of ['light', 'dark']) {
   test(`${scheme}: generated HTML executes themed drawing, hover, selection, zoom and panel updates`, async (t) => {
     const { view, html } = await exportGraph(t, scheme);
@@ -453,7 +539,15 @@ for (const scheme of ['light', 'dark']) {
     );
     calls.length = 0;
     windowEvents.mousemove(point);
-    assert.equal(calls.at(-1).color, view.canvasTheme.text, 'tooltip uses exported theme');
+    const hoveredLabels = calls.filter((call) => call.kind === 'text');
+    assert.deepEqual(
+      hoveredLabels.map((call) => call.text),
+      ['Alpha']
+    );
+    assert.equal(hoveredLabels[0].color, view.canvasTheme.text);
+    assert(
+      calls.some((call) => call.kind === 'stroke' && call.color === view.canvasTheme.selection)
+    );
   });
 }
 
@@ -473,4 +567,54 @@ test('custom theme colours are carried into standalone HTML without Obsidian CSS
   assert.equal(calls.find((call) => call.kind === 'text').color, '#46342a');
   assert.equal(calls.find((call) => call.kind === 'stroke').color, '#836d5c');
   assert(html.includes('background: #f2e6cc;'));
+});
+
+test('special attachment filenames remain literal and safe in canvas and exported HTML', async (t) => {
+  const { view, app, ctx, calls } = graph(t, 'dark');
+  const names = ['雪 "quoted" <img onerror="alert(1)">.PnG', "café 'notes'", 'line\u2028break.PDF'];
+  const note = {
+    id: 'ordinary.md',
+    label: 'Note </script> "雪"',
+    x: 0,
+    y: 0,
+    degree: 0,
+    meta: { path: 'ordinary.md' },
+  };
+  const nodes = names.map((name, i) => ({
+    id: `assets/${name}`,
+    label: `short ${i}`,
+    x: 0,
+    y: 0,
+    degree: 0,
+    meta: { isAttachment: true, path: `assets/${name}`, fileType: 'incorrect' },
+  }));
+  view.nodes = [note, ...nodes];
+  view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
+  view.nodeMetaById = new Map(view.nodes.map((node) => [node.id, node.meta]));
+  render.drawNodes(view, ctx);
+  const expected = [note.label, ...names];
+  assert.deepEqual(
+    calls.filter((call) => call.kind === 'text').map((call) => call.text),
+    expected
+  );
+  const { vault, contents } = mobileVault(t, false);
+  Object.assign(app.vault, vault);
+  await view.commandExportStaticHtml({ exportPath: 'special-labels.html', includeContents: false });
+  const html = contents.get('special-labels.html');
+  assert.equal(typeof html, 'string');
+  assert.equal((html.match(/<script>/g) || []).length, 1);
+  assert.equal((html.match(/<\/script>/g) || []).length, 1);
+  assert.ok(!html.includes('<img onerror='));
+  const payload = JSON.parse(html.match(/const EXPORT_DATA = (.*);/)[1]);
+  assert.deepEqual(
+    payload.nodes.map((node) => node.label),
+    expected
+  );
+  assert.deepEqual(
+    runExport(html)
+      .calls.filter((call) => call.kind === 'text')
+      .map((call) => call.text),
+    expected
+  );
+  assert.equal(nodes[0].label, 'short 0');
 });

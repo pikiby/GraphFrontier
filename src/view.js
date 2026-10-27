@@ -1,4 +1,4 @@
-const { ItemView, Notice, Menu, MarkdownRenderer, Modal } = require('obsidian');
+const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Scope } = require('obsidian');
 const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
 const { ExportModal } = require('./export-modal');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
@@ -26,6 +26,7 @@ const {
 
 const {
   DEFAULT_DATA,
+  normalizeAttachmentExtensions,
   GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
   NODE_MULTIPLIER_MAX,
@@ -39,7 +40,6 @@ const {
   updateLayoutCenter: updateLayoutCenterPhysics,
   getOrbitRadiusBySpacing,
   getOrbitRadiusForAnchor,
-  buildAttachmentAutoOrbitMap: buildAttachmentAutoOrbitMapPhysics,
   recomputeOrbitRadii: recomputeOrbitRadiiPhysics,
   stepCameraSmoothing: stepCameraSmoothingPhysics,
   stepSimulation: stepSimulationPhysics,
@@ -50,7 +50,7 @@ const {
   renderFrame: renderFrameRender,
   getHoverDimAlpha,
   hexToRgba,
-  drawFocusedNodeTitle: drawFocusedNodeTitleRender,
+  getNodeLabelText,
   getNodeRadius: getNodeRadiusRender,
   getLabelZoomThreshold: getLabelZoomThresholdRender,
   getLabelFontSize: getLabelFontSizeRender,
@@ -233,8 +233,7 @@ class GraphFrontierView extends ItemView {
       this.refreshFromVault({
         keepCamera: true,
         forceSavedPositions: true,
-        skipLayoutKick:
-          !this.subgraphScope || !!this.plugin.data.subgraph_cameras?.[this.subgraphScope.id],
+        skipLayoutKick: !this.subgraphScope,
       });
   }
 
@@ -270,19 +269,18 @@ class GraphFrontierView extends ItemView {
     this.installResizeObserver();
     this.resizeCanvas();
 
-    const hasSavedLayoutPositions = Object.keys(this.plugin.data.saved_positions || {}).length > 0;
+    // Saved coordinates seed normal settling; only duplicate roots/read failures stay paused.
+    const skipLayoutKick = !this.subgraphScope && (alreadyOpen || !loaded);
     this.refreshFromVault({
       keepCamera: this.subgraphScope
         ? !!this.plugin.data.subgraph_cameras?.[this.subgraphScope.id]
         : !!(loaded && this.plugin.data.view_state.camera_saved),
       forceSavedPositions: loaded,
-      skipLayoutKick: this.subgraphScope
-        ? !!this.plugin.data.subgraph_cameras?.[this.subgraphScope.id]
-        : alreadyOpen || !loaded || hasSavedLayoutPositions,
+      skipLayoutKick,
     });
     if (!this.subgraphScope && this.plugin.data.view_state.search_query && this.isSearchFilled()) {
       this.commitSearchSelectionFromInput(this.searchInputValue);
-      if (hasSavedLayoutPositions) {
+      if (skipLayoutKick) {
         this.layoutPaused = true;
         this.layoutAutosaveDirty = false;
       }
@@ -331,6 +329,13 @@ class GraphFrontierView extends ItemView {
   }
 
   bindEvents() {
+    // View scopes run before the app scope; null key also matches non-Latin layouts.
+    if (Scope) {
+      this.scope = new Scope(this.app.scope);
+      for (const modifier of ['Ctrl', 'Meta']) {
+        this.scope.register([modifier], null, (event) => this.onSelectedNodeCopyKeyDown(event));
+      }
+    }
     this.registerEvent(
       this.app.workspace.on('css-change', () => {
         this.updateCanvasBackgroundColor();
@@ -389,6 +394,7 @@ class GraphFrontierView extends ItemView {
   // Right side panel assembly: toggles, sliders, and layout action buttons.
   buildSidePanel() {
     if (!this.sidePanelEl) return;
+    this.closeInputSuggestMenu();
     this.sidePanelEl.empty();
     this.sideControls.clear();
     this.searchModeToggleEl = null;
@@ -453,51 +459,11 @@ class GraphFrontierView extends ItemView {
       inverted: true,
       hint: 'Show nodes without links (orphans)',
     });
-    this.addSideToggle(displaySection, 'Show attachments', 'hide_attachments', 'data', {
-      inverted: true,
-      rebuildPanelOnChange: true,
-      hint: 'Show non-markdown files as attachment nodes',
-    });
-    if (!this.plugin.data.settings.hide_attachments) {
-      this.addSideToggle(
-        displaySection,
-        'Attachments no-physics',
-        'attachments_on_orbits',
-        'render',
-        {
-          hint: 'Attachments interact only with their main node and other attachments',
-          onChange: () => {
-            this.kickLayoutSearch();
-          },
-        }
-      );
-      this.addSideSlider(
-        displaySection,
-        'Attachment size',
-        'attachment_size_multiplier',
-        0.1,
-        1,
-        0.1,
-        'render',
-        {
-          hint: 'Scale multiplier for attachment node size',
-        }
-      );
-      this.addSideSlider(
-        displaySection,
-        'Attachment link distance',
-        'attachment_link_distance_multiplier',
-        1,
-        100,
-        1,
-        'render',
-        {
-          hint: 'Target distance for links connected to attachments',
-        }
-      );
-    }
     this.addSideSlider(displaySection, 'Grid step', 'grid_step', 5, 50, 5, 'render', {
       hint: 'Grid cell size in world coordinates',
+    });
+    this.addSideSlider(displaySection, 'Grid thickness', 'grid_line_width', 0.1, 1, 0.1, 'render', {
+      hint: 'Grid line thickness in CSS pixels, independent of zoom',
     });
     const colorRow = displaySection.createDiv({ cls: 'graphfrontier-sidepanel-row' });
     colorRow.createSpan({ text: 'Node color', cls: 'graphfrontier-sidepanel-label' });
@@ -508,6 +474,9 @@ class GraphFrontierView extends ItemView {
     this.sideControls.set('node_color', { type: 'color', input: colorInput });
     this.registerDomEvent(colorInput, 'input', () => {
       this.plugin.data.settings.node_color = colorInput.value;
+      const attachmentColor = this.sideControls.get('attachment_node_color');
+      if (attachmentColor && this.plugin.data.settings.attachment_node_color == null)
+        attachmentColor.input.value = colorInput.value;
       this.plugin.persistNodeVisualSettings();
     });
     this.addSideSlider(displaySection, 'Node size', 'node_size_scale', 0.1, 4, 0.01, 'render', {
@@ -538,6 +507,46 @@ class GraphFrontierView extends ItemView {
       hint: 'How strongly non-focused nodes/edges are dimmed',
     });
 
+    const attachmentsSection = this.createSidePanelSection(body, {
+      id: 'attachments',
+      title: 'Attachments',
+      openByDefault: true,
+    });
+    attachmentsSection.addClass('graphfrontier-attachments-content');
+    this.addSideToggle(attachmentsSection, 'Show attachments', 'hide_attachments', 'data', {
+      inverted: true,
+      rebuildPanelOnChange: true,
+      hint: 'Show non-markdown files as attachment nodes',
+    });
+    if (!this.plugin.data.settings.hide_attachments) {
+      this.buildAttachmentFileTypesControl(attachmentsSection);
+      this.addSideToggle(
+        attachmentsSection,
+        'Show unlinked attachments',
+        'include_unlinked_attachments',
+        'data',
+        {
+          hint: 'Include all vault non-markdown files when Show attachments is on; Show orphans still applies',
+        }
+      );
+      const colorRow = attachmentsSection.createDiv({ cls: 'graphfrontier-sidepanel-row' });
+      colorRow.createSpan({ text: 'Attachment node color', cls: 'graphfrontier-sidepanel-label' });
+      const colorInput = colorRow.createEl('input', { type: 'color' });
+      colorInput.setAttribute('aria-label', 'Attachment node color');
+      colorInput.addClass('graphfrontier-group-color-input');
+      const inheritedColor = () =>
+        this.plugin.getSettings().attachment_node_color ?? this.plugin.getSettings().node_color;
+      colorInput.value = inheritedColor();
+      this.sideControls.set('attachment_node_color', {
+        type: 'color',
+        input: colorInput,
+        getValue: inheritedColor,
+      });
+      this.registerDomEvent(colorInput, 'input', () => {
+        this.plugin.data.settings.attachment_node_color = colorInput.value;
+        this.plugin.persistNodeVisualSettings();
+      });
+    }
     const physicsSection = this.createSidePanelSection(body, {
       id: 'physics',
       title: 'Physics',
@@ -547,7 +556,7 @@ class GraphFrontierView extends ItemView {
       hint: 'Spring force for graph links',
     });
     this.addSideSlider(physicsSection, 'Link distance', 'link_distance', 1, 50, 1, 'render', {
-      hint: 'Target distance for regular links',
+      hint: 'Target distance for all graph links',
     });
     this.addSideSlider(
       physicsSection,
@@ -564,10 +573,10 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(physicsSection, 'Orbit distance', 'orbit_distance', 1, 100, 1, 'render', {
       hint: 'Desired spacing between nodes pinned to same orbit',
     });
-    this.addSideSlider(physicsSection, 'Repel strength', 'repel_strength', 0, 100, 1, 'render', {
+    this.addSideSlider(physicsSection, 'Repel strength', 'repel_strength', 0, 200, 1, 'render', {
       hint: 'Repulsion force between nodes',
     });
-    this.addSideSlider(physicsSection, 'Repel radius', 'repel_radius', 20, 500, 5, 'render', {
+    this.addSideSlider(physicsSection, 'Repel radius', 'repel_radius', 20, 1000, 5, 'render', {
       hint: 'Repulsion cutoff radius for node-to-node interactions',
     });
     this.addSideSlider(physicsSection, 'Center strength', 'center_strength', 1, 100, 1, 'render', {
@@ -659,6 +668,178 @@ class GraphFrontierView extends ItemView {
     });
 
     return content;
+  }
+
+  buildAttachmentFileTypesControl(parentEl) {
+    const prefix = 'File type: ';
+    const row = parentEl.createDiv({ cls: 'graphfrontier-find-row' });
+    const wrap = row.createDiv({
+      cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor graphfrontier-file-types-search',
+    });
+    const input = wrap.createEl('input', {
+      cls: 'graphfrontier-find-input',
+      type: 'text',
+      placeholder: 'File types',
+      attr: { 'aria-label': 'File types', 'aria-expanded': 'false', 'aria-haspopup': 'listbox' },
+    });
+    const clear = wrap.createEl('button', {
+      cls: 'graphfrontier-search-inline-clear',
+      text: 'x',
+      attr: { type: 'button', 'aria-label': 'Clear file type search' },
+    });
+    const excluded = () =>
+      new Set(
+        normalizeAttachmentExtensions(this.plugin.data.settings.excluded_attachment_extensions)
+      );
+    const label = (extension) => (extension ? '.' + extension : 'No extension');
+    let inventory = this.plugin.getAttachmentExtensionInventory();
+    let query = '';
+    let editing = false;
+    let showingSummary = false;
+    const syncClear = () => {
+      clear.toggleClass('is-visible', editing && query.length > 0);
+      clear.disabled = !editing || !query;
+    };
+    const showSummary = (closed = true) => {
+      if (closed) {
+        editing = false;
+        query = '';
+      }
+      showingSummary = true;
+      const exclusions = excluded();
+      const selected = inventory.filter(([extension]) => !exclusions.has(extension));
+      input.value =
+        prefix +
+        (selected.length === inventory.length
+          ? 'All file types'
+          : selected.length
+            ? selected
+                .slice(0, 3)
+                .map(([extension]) => label(extension))
+                .join(', ') + (selected.length > 3 ? ' +' + (selected.length - 3) : '')
+            : 'No file types');
+      input.setAttr('title', input.value);
+      input.setAttr('aria-expanded', closed ? 'false' : 'true');
+      syncClear();
+    };
+    const open = () => {
+      if (!editing) {
+        inventory = this.plugin.getAttachmentExtensionInventory();
+        editing = true;
+        showingSummary = false;
+        input.value = prefix + query;
+      }
+      const search = query.trim().toLowerCase().replace(/^\./, '');
+      const matched = inventory.filter(([extension]) =>
+        (extension || label(extension)).toLowerCase().includes(search)
+      );
+      const items = matched.map(([extension, count]) => ({
+        title: label(extension),
+        value: extension || '__no_extension__',
+        kind: 'attachment-extension',
+        extension,
+        count,
+        isChecked: () => !excluded().has(extension),
+      }));
+      items.push(
+        { title: 'All', value: 'all', kind: 'bulk' },
+        { title: 'None', value: 'none', kind: 'bulk' }
+      );
+      this.showInputSuggestMenu(
+        input,
+        items,
+        (value, item) => {
+          const next = excluded();
+          if (item.kind === 'bulk') {
+            for (const [extension] of matched) {
+              if (value === 'all') next.delete(extension);
+              else next.add(extension);
+            }
+          } else if (next.has(item.extension)) next.delete(item.extension);
+          else next.add(item.extension);
+          this.plugin.data.settings.excluded_attachment_extensions = [...next];
+          // Keep the active query and existing option callbacks while showing the new selection.
+          showSummary(false);
+          this.plugin.schedulePersist();
+          this.applyRefreshMode('data');
+        },
+        {
+          multiSelect: true,
+          matchInputWidth: true,
+          onClose: showSummary,
+          clearButtonEl: clear,
+          title: matched.length ? '' : 'No matching file types',
+        }
+      );
+      input.setAttr('aria-expanded', 'true');
+      syncClear();
+    };
+    const openIfClosed = () => {
+      if (this.inputSuggestInputEl !== input) open();
+    };
+    this.registerDomEvent(input, 'focus', openIfClosed);
+    this.registerDomEvent(input, 'click', openIfClosed);
+    this.registerDomEvent(input, 'beforeinput', (event) => {
+      const inputType = event.inputType || '';
+      if (!inputType) return;
+      if (showingSummary) {
+        showingSummary = false;
+        query = '';
+        input.value = prefix;
+        input.setSelectionRange(prefix.length, prefix.length);
+        if (inputType.startsWith('delete')) {
+          event.preventDefault();
+          open();
+          return;
+        }
+      }
+      if (
+        inputType.startsWith('delete') &&
+        input.selectionEnd <= prefix.length &&
+        (input.selectionStart < prefix.length || inputType.includes('Backward'))
+      ) {
+        event.preventDefault();
+        return;
+      }
+      this.protectQueryInputPrefix(input, event, prefix);
+    });
+    this.registerDomEvent(input, 'input', () => {
+      showingSummary = false;
+      query = input.value.startsWith(prefix) ? input.value.slice(prefix.length) : input.value;
+      if (!input.value.startsWith(prefix)) input.value = prefix + query;
+      open();
+    });
+    this.registerDomEvent(input, 'blur', () => {
+      if (this.inputSuggestInputEl === input) this.closeInputSuggestMenu();
+    });
+    this.registerDomEvent(input, 'keydown', (event) => {
+      event.stopPropagation();
+      if (this.inputSuggestInputEl !== input) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeInputSuggestMenu();
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        this.moveInputSuggestSelection(event.key === 'ArrowDown' ? 1 : -1);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        this.selectInputSuggestActive();
+      }
+    });
+    for (const name of ['keyup', 'keypress']) {
+      this.registerDomEvent(input, name, (event) => event.stopPropagation());
+    }
+    this.registerDomEvent(clear, 'mousedown', (event) => event.preventDefault());
+    this.registerDomEvent(clear, 'click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      query = '';
+      showingSummary = false;
+      input.value = prefix;
+      open();
+      input.focus();
+    });
+    showSummary();
   }
 
   addSideToggle(parentEl, label, key, refreshMode, options = {}) {
@@ -803,7 +984,6 @@ class GraphFrontierView extends ItemView {
         key === 'base_link_strength' ||
         key === 'link_distance' ||
         key === 'orbit_distance' ||
-        key === 'attachment_link_distance_multiplier' ||
         key === 'repel_strength' ||
         key === 'repel_radius' ||
         key === 'center_strength' ||
@@ -1328,8 +1508,8 @@ class GraphFrontierView extends ItemView {
     );
   }
 
-  protectQueryInputPrefix(input, event) {
-    const length = this.getSearchInputPrefix(input.value).length;
+  protectQueryInputPrefix(input, event, prefix = this.getSearchInputPrefix(input.value)) {
+    const length = prefix.length;
     const start = input.selectionStart;
     const end = input.selectionEnd;
     if (start === end && start <= length && event.inputType.startsWith('delete')) {
@@ -2134,7 +2314,7 @@ class GraphFrontierView extends ItemView {
 
   // Shared input suggestion popup used by both search and group editor inputs.
   showInputSuggestMenu(inputEl, suggestions, onSelect, meta = {}) {
-    this.closeInputSuggestMenu();
+    this.closeInputSuggestMenu(this.inputSuggestInputEl !== inputEl);
     if (!inputEl || !Array.isArray(suggestions) || suggestions.length === 0) return;
 
     const normalizedSuggestions = [];
@@ -2165,6 +2345,13 @@ class GraphFrontierView extends ItemView {
         description: String(rawSuggestion?.description || '').trim(),
         selectable: rawSuggestion?.selectable !== false,
         kind: String(rawSuggestion?.kind || 'default'),
+        ...(meta.multiSelect
+          ? {
+              extension: rawSuggestion.extension,
+              count: rawSuggestion.count,
+              isChecked: rawSuggestion.isChecked,
+            }
+          : {}),
         onAction,
         actionLabel: onAction ? String(rawSuggestion?.actionLabel || '').trim() || 'x' : '',
         actionTitle: onAction ? String(rawSuggestion?.actionTitle || '').trim() : '',
@@ -2175,24 +2362,66 @@ class GraphFrontierView extends ItemView {
     const ownerDocument = inputEl.ownerDocument || this.contentEl.ownerDocument;
     const ownerWindow = ownerDocument.defaultView || this.contentEl.win;
     if (!ownerDocument || !ownerWindow || !ownerDocument.body) return;
+    const viewport = meta.matchInputWidth ? ownerWindow.visualViewport : null;
 
     const menuEl = ownerDocument.createElement('div');
     menuEl.className = 'graphfrontier-input-menu';
     menuEl.setAttribute('role', 'listbox');
+    if (meta.matchInputWidth) menuEl.classList.add('graphfrontier-input-menu-match-width');
+    let listEl = menuEl;
+    let controlsEl = null;
+    if (meta.multiSelect) {
+      menuEl.classList.add('graphfrontier-input-menu-multi');
+      menuEl.setAttribute('role', 'group');
+      controlsEl = ownerDocument.createElement('div');
+      controlsEl.className = 'graphfrontier-input-menu-controls';
+      menuEl.appendChild(controlsEl);
+      listEl = ownerDocument.createElement('div');
+      listEl.className = 'graphfrontier-input-menu-list';
+      listEl.setAttribute('role', 'listbox');
+      listEl.setAttribute('aria-multiselectable', 'true');
+      menuEl.appendChild(listEl);
+    }
 
     if (meta && typeof meta.title === 'string' && meta.title.trim()) {
       const headerEl = ownerDocument.createElement('div');
       headerEl.className = 'graphfrontier-input-menu-header';
       headerEl.textContent = meta.title.trim();
-      menuEl.appendChild(headerEl);
+      listEl.appendChild(headerEl);
     }
 
     const selectableEntries = [];
+    const syncChecks = () => {
+      for (const { itemEl, suggestion, checkbox } of selectableEntries) {
+        if (!checkbox) continue;
+        checkbox.checked = !!suggestion.isChecked();
+        itemEl.setAttribute('aria-selected', String(checkbox.checked));
+      }
+    };
+    const select = (value, suggestion) => {
+      onSelect(value, suggestion);
+      if (meta.multiSelect) syncChecks();
+      else this.closeInputSuggestMenu();
+    };
     for (const suggestion of normalizedSuggestions) {
-      const itemEl = ownerDocument.createElement('div');
-      itemEl.className = 'graphfrontier-input-menu-item';
-      itemEl.setAttribute('role', 'option');
+      const isBulk = meta.multiSelect && suggestion.kind === 'bulk';
+      const itemEl = ownerDocument.createElement(isBulk ? 'button' : 'div');
+      itemEl.className = isBulk
+        ? 'graphfrontier-sidepanel-toggle graphfrontier-sidepanel-inline-toggle graphfrontier-input-menu-bulk'
+        : 'graphfrontier-input-menu-item';
+      if (isBulk) itemEl.setAttribute('type', 'button');
+      else itemEl.setAttribute('role', 'option');
       const hasAction = typeof suggestion.onAction === 'function';
+      let checkbox = null;
+      if (meta.multiSelect && typeof suggestion.isChecked === 'function') {
+        itemEl.classList.add('graphfrontier-input-menu-check-item');
+        checkbox = ownerDocument.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.tabIndex = -1;
+        checkbox.setAttribute('aria-label', suggestion.title);
+        checkbox.addEventListener('change', () => select(String(suggestion.value), suggestion));
+        itemEl.appendChild(checkbox);
+      }
 
       let textContainerEl = itemEl;
       if (hasAction) {
@@ -2218,6 +2447,14 @@ class GraphFrontierView extends ItemView {
         textContainerEl.appendChild(descEl);
       }
 
+      if (checkbox && suggestion.count != null) {
+        const countEl = ownerDocument.createElement('span');
+        countEl.className = 'graphfrontier-input-menu-count';
+        countEl.textContent = String(suggestion.count);
+        countEl.setAttribute('title', 'Files in the whole vault');
+        itemEl.appendChild(countEl);
+      }
+
       if (hasAction) {
         const actionBtnEl = ownerDocument.createElement('button');
         actionBtnEl.className = 'graphfrontier-group-remove';
@@ -2236,16 +2473,24 @@ class GraphFrontierView extends ItemView {
 
       if (!suggestion.selectable) itemEl.classList.add('is-disabled');
       else {
-        selectableEntries.push({ itemEl, suggestion });
+        selectableEntries.push({ itemEl, suggestion, checkbox });
         itemEl.addEventListener('mousedown', (event) => {
           event.preventDefault();
           event.stopPropagation();
-          onSelect(String(suggestion.value), suggestion);
-          this.closeInputSuggestMenu();
+          if (!meta.multiSelect) select(String(suggestion.value), suggestion);
         });
       }
-      menuEl.appendChild(itemEl);
+      if (meta.multiSelect && suggestion.selectable) {
+        itemEl.addEventListener('click', (event) => {
+          if (event.target === checkbox) return;
+          event.preventDefault();
+          event.stopPropagation();
+          select(String(suggestion.value), suggestion);
+        });
+      }
+      (isBulk ? controlsEl : listEl).appendChild(itemEl);
     }
+    syncChecks();
 
     const setActiveIndex = (nextIndex) => {
       if (selectableEntries.length <= 0) return false;
@@ -2256,41 +2501,76 @@ class GraphFrontierView extends ItemView {
       const activeEntry = selectableEntries[boundedIndex];
       if (!activeEntry) return false;
       activeEntry.itemEl.classList.add('is-active');
-      activeEntry.itemEl.scrollIntoView({ block: 'nearest' });
+      if (!meta.multiSelect) activeEntry.itemEl.scrollIntoView({ block: 'nearest' });
+      else if (activeEntry.itemEl.parentElement === listEl) {
+        // Scroll only the options, never the popup or its pinned bulk controls.
+        const itemRect = activeEntry.itemEl.getBoundingClientRect();
+        const listRect = listEl.getBoundingClientRect();
+        if (itemRect.top < listRect.top) listEl.scrollTop -= listRect.top - itemRect.top;
+        else if (itemRect.bottom > listRect.bottom)
+          listEl.scrollTop += itemRect.bottom - listRect.bottom;
+      }
       return true;
     };
 
     const placeMenu = () => {
       if (!inputEl.isConnected || !menuEl.isConnected) {
-        this.closeInputSuggestMenu();
+        // A queued frame from a replaced menu must not close its replacement.
+        if (this.inputSuggestMenu?.menuEl === menuEl) this.closeInputSuggestMenu();
         return;
       }
 
       const inputRect = inputEl.getBoundingClientRect();
       const viewportWidth = Math.max(
         1,
-        ownerWindow.innerWidth || ownerDocument.documentElement.clientWidth || 1
+        viewport?.width || ownerWindow.innerWidth || ownerDocument.documentElement.clientWidth || 1
       );
       const viewportHeight = Math.max(
         1,
-        ownerWindow.innerHeight || ownerDocument.documentElement.clientHeight || 1
+        viewport?.height ||
+          ownerWindow.innerHeight ||
+          ownerDocument.documentElement.clientHeight ||
+          1
       );
       const marginPx = 8;
-      const desiredWidth = Math.max(inputRect.width, 320);
-      const maxWidth = Math.max(240, viewportWidth - marginPx * 2);
+      const desiredWidth = meta.matchInputWidth ? inputRect.width : Math.max(inputRect.width, 320);
+      const maxWidth = Math.max(meta.matchInputWidth ? 1 : 240, viewportWidth - marginPx * 2);
       const menuWidth = Math.min(desiredWidth, maxWidth);
 
-      const maxLeft = Math.max(marginPx, viewportWidth - menuWidth - marginPx);
-      const leftPx = Math.min(Math.max(inputRect.left, marginPx), maxLeft);
+      const minLeft = (viewport?.offsetLeft || 0) + marginPx;
+      const minTop = (viewport?.offsetTop || 0) + marginPx;
+      const maxLeft = Math.max(minLeft, minLeft + viewportWidth - menuWidth - marginPx * 2);
+      const leftPx = Math.min(Math.max(inputRect.left, minLeft), maxLeft);
 
       menuEl.style.width = `${menuWidth}px`;
       menuEl.style.left = `${Math.round(leftPx)}px`;
+      if (meta.multiSelect) {
+        const maxBottom = minTop + viewportHeight - marginPx * 2;
+        const below = Math.max(0, maxBottom - Math.max(minTop, inputRect.bottom + 4));
+        const above = Math.max(0, Math.min(maxBottom, inputRect.top - 4) - minTop);
+        const desiredHeight = Math.min(
+          248,
+          listEl.scrollHeight + controlsEl.offsetHeight + 8 || 248
+        );
+        const useBelow = below >= desiredHeight || below >= above;
+        const available = useBelow ? below : above;
+        menuEl.style.maxHeight = `${Math.min(248, available)}px`;
+        const menuHeight = Math.min(menuEl.offsetHeight, 248, available);
+        const top = useBelow ? inputRect.bottom + 4 : inputRect.top - menuHeight - 4;
+        menuEl.style.top = `${Math.round(Math.max(minTop, Math.min(top, maxBottom - menuHeight)))}px`;
+        return;
+      }
 
       const menuHeight = Math.max(1, menuEl.offsetHeight);
       let topPx = inputRect.bottom + 4;
-      if (topPx + menuHeight > viewportHeight - marginPx) {
-        topPx = Math.max(marginPx, inputRect.top - menuHeight - 4);
+      if (topPx + menuHeight > minTop + viewportHeight - marginPx * 2) {
+        topPx = Math.max(minTop, inputRect.top - menuHeight - 4);
       }
+      if (meta.matchInputWidth)
+        topPx = Math.max(
+          minTop,
+          Math.min(topPx, minTop + viewportHeight - marginPx * 2 - menuHeight)
+        );
       menuEl.style.top = `${Math.round(topPx)}px`;
     };
 
@@ -2304,6 +2584,7 @@ class GraphFrontierView extends ItemView {
       if (!eventTarget) return;
       if (this.inputSuggestMenu.menuEl.contains(eventTarget)) return;
       if (inputEl.contains(eventTarget)) return;
+      if (meta.multiSelect && meta.clearButtonEl?.contains(eventTarget)) return;
       this.closeInputSuggestMenu();
     };
 
@@ -2314,12 +2595,17 @@ class GraphFrontierView extends ItemView {
     ownerDocument.addEventListener('mousedown', closeHandler, true);
     ownerDocument.addEventListener('scroll', repositionHandler, true);
     ownerWindow.addEventListener('resize', repositionHandler, true);
+    viewport?.addEventListener('resize', repositionHandler);
+    viewport?.addEventListener('scroll', repositionHandler);
 
     this.inputSuggestMenu = {
       menuEl,
-      onSelect,
+      onSelect: select,
+      onClose: meta.onClose,
+      multiSelect: !!meta.multiSelect,
       ownerDocument,
       ownerWindow,
+      viewport,
       closeHandler,
       repositionHandler,
       selectableEntries,
@@ -2332,9 +2618,12 @@ class GraphFrontierView extends ItemView {
     this.inputSuggestInputEl = inputEl;
   }
 
-  closeInputSuggestMenu() {
+  closeInputSuggestMenu(notify = true) {
     if (!this.inputSuggestMenu) return;
-    const { ownerDocument, ownerWindow, closeHandler, repositionHandler } = this.inputSuggestMenu;
+    const { ownerDocument, ownerWindow, viewport, closeHandler, repositionHandler, onClose } =
+      this.inputSuggestMenu;
+    viewport?.removeEventListener('resize', repositionHandler);
+    viewport?.removeEventListener('scroll', repositionHandler);
     if (ownerDocument && closeHandler) {
       ownerDocument.removeEventListener('mousedown', closeHandler, true);
     }
@@ -2349,6 +2638,7 @@ class GraphFrontierView extends ItemView {
     }
     this.inputSuggestMenu = null;
     this.inputSuggestInputEl = null;
+    if (notify && typeof onClose === 'function') onClose();
   }
 
   moveInputSuggestSelection(delta) {
@@ -2374,11 +2664,7 @@ class GraphFrontierView extends ItemView {
     const boundedIndex = ((currentIndex % itemCount) + itemCount) % itemCount;
     const activeEntry = this.inputSuggestMenu.selectableEntries[boundedIndex];
     if (!activeEntry || !activeEntry.suggestion) return false;
-    this.inputSuggestMenu.onSelect(
-      String(activeEntry.suggestion.value || ''),
-      activeEntry.suggestion
-    );
-    this.closeInputSuggestMenu();
+    this.inputSuggestMenu.onSelect(String(activeEntry.suggestion.value), activeEntry.suggestion);
     return true;
   }
 
@@ -2950,7 +3236,7 @@ class GraphFrontierView extends ItemView {
       }
 
       if (meta.type === 'color' && activeEl !== meta.input) {
-        meta.input.value = currentValue;
+        meta.input.value = meta.getValue ? meta.getValue() : currentValue;
         continue;
       }
       if (meta.type === 'slider' && activeEl !== meta.input) {
@@ -3228,7 +3514,6 @@ class GraphFrontierView extends ItemView {
     }
     this.boxSelectDrag = null;
 
-    this.applyAutoAttachmentOrbitPositions();
     this.nodeSpatialIndex = null;
     this.nodeSpatialIndexBuildVersion = -1;
     this.markNodeSpatialIndexDirty();
@@ -3354,19 +3639,6 @@ class GraphFrontierView extends ItemView {
     }
   }
 
-  applyAutoAttachmentOrbitPositions() {
-    const autoAttachmentOrbitMap = this.buildAttachmentAutoOrbitMap();
-    for (const [nodeId, orbitMeta] of autoAttachmentOrbitMap.entries()) {
-      const autoNode = this.nodeById.get(nodeId);
-      const anchorNode = this.nodeById.get(orbitMeta.anchor_id);
-      if (!autoNode || !anchorNode) continue;
-      autoNode.x = anchorNode.x + Math.cos(orbitMeta.angle) * orbitMeta.radius;
-      autoNode.y = anchorNode.y + Math.sin(orbitMeta.angle) * orbitMeta.radius;
-      autoNode.vx = 0;
-      autoNode.vy = 0;
-    }
-  }
-
   // Data cleanup and initial framing after graph rebuild.
   cleanupDetachedData(options = {}) {
     void options;
@@ -3489,10 +3761,6 @@ class GraphFrontierView extends ItemView {
 
   drawNodes(ctx) {
     return drawNodesRender(this, ctx);
-  }
-
-  drawFocusedNodeTitle(ctx, node) {
-    return drawFocusedNodeTitleRender(this, ctx, node);
   }
 
   getQuickPreviewModifier() {
@@ -4197,18 +4465,25 @@ class GraphFrontierView extends ItemView {
     if (!node) {
       const menu = new Menu(this.app);
       const position = this.screenToWorld(screenX, screenY);
-      if (this.selectedNodeIds?.size)
+      const sourceData = this.plugin?.data;
+      const snapshot = this.selectedNodeIds?.size ? this.captureNodeActionTargets() : null;
+      if (snapshot?.ids.length) this.addSelectionActionsToMenu(menu, snapshot, clientX, clientY);
+      if (snapshot?.ids.length)
         menu.addItem((item) =>
           item
-            .setTitle('Combine selected into subgraph')
+            .setTitle(this.nodeActionLabel('Combine selected into subgraph', snapshot))
             .setIcon('circle')
-            .onClick(() => this.editSubgraph())
+            .onClick(() => this.editSubgraph(null, snapshot))
         );
       menu.addItem((item) =>
         item
           .setTitle('Create gravity node')
           .setIcon('orbit')
-          .onClick(() => this.editDarkEnergy(null, position))
+          .onClick(() => {
+            if (this.plugin?.data !== sourceData) return;
+            if (snapshot && !this.isNodeActionSnapshotCurrent(snapshot)) return;
+            this.editDarkEnergy(null, position);
+          })
       );
       this.showMenuAtPointer(menu, clientX, clientY, event);
       return;
@@ -4216,9 +4491,12 @@ class GraphFrontierView extends ItemView {
     this.showNodeContextMenu(node, clientX, clientY, event);
   }
 
-  editSubgraph(node = null) {
+  editSubgraph(node = null, snapshot = null) {
+    if (snapshot && !this.isNodeActionSnapshotCurrent(snapshot)) return;
     const source = this.plugin.data;
-    const selected = [...this.selectedNodeIds].filter((id) => this.nodeById.has(id));
+    const selected = snapshot
+      ? this.resolveNodeActionTargets(snapshot).map((entry) => entry.id)
+      : [...this.selectedNodeIds].filter((id) => this.nodeById.has(id));
     if (!node && !selected.length) {
       new Notice('Select nodes to combine');
       return;
@@ -4474,13 +4752,25 @@ class GraphFrontierView extends ItemView {
     this.showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent);
   }
 
-  addVisualSettingsToMenu(menu, node, clientX, clientY) {
+  addVisualSettingsToMenu(
+    menu,
+    node,
+    clientX,
+    clientY,
+    snapshot = this.captureNodeActionTargets(node),
+    options = {}
+  ) {
+    const displayNodes = snapshot.ids.map((id) => this.nodeById.get(id)).filter(Boolean);
+    if (!displayNodes.length && node) displayNodes.push(node);
     const syncControls = [];
-    for (const spec of NODE_VISUAL_SETTINGS) {
-      if (spec.edges && node.meta?.darkEnergy) continue;
-      if (spec.attachment && !node.meta?.isAttachment) continue;
+    for (const spec of options.advancedOnly ? [] : NODE_VISUAL_SETTINGS) {
+      const eligible = (entry) => !spec.edges || !entry.meta?.darkEnergy;
+      const nodes = displayNodes.filter(eligible);
+      if (!nodes.length) continue;
       menu.addItem((item) => {
-        item.setTitle(spec.label).setIcon('sliders-horizontal');
+        item
+          .setTitle(this.nodeActionLabel(spec.label, snapshot, nodes.length))
+          .setIcon('sliders-horizontal');
         const controls = item.dom.createDiv({
           cls: 'graphfrontier-node-text-size graphfrontier-node-visual-control',
         });
@@ -4500,10 +4790,24 @@ class GraphFrontierView extends ItemView {
             ? null
             : controls.createSpan({ cls: 'graphfrontier-sidepanel-value' });
         const sync = () => {
-          const inherited = getNodeVisualOverride(this.plugin, node.id, spec.key) === null;
-          input.value = String(getNodeVisualSetting(this.plugin, node.id, spec.key));
-          value?.setText(this.formatSliderValue(Number(input.value), spec.step));
-          input.setAttribute('title', inherited ? 'Global value' : 'Individual value');
+          const current = this.resolveNodeActionTargets(snapshot).filter(eligible);
+          const values = (current.length ? current : nodes).map((entry) =>
+            getNodeVisualSetting(this.plugin, entry.id, spec.key)
+          );
+          const mixed = values.some((entry) => entry !== values[0]);
+          const inherited = (current.length ? current : nodes).every(
+            (entry) => getNodeVisualOverride(this.plugin, entry.id, spec.key) === null
+          );
+          input.value = String(values[0]);
+          value?.setText(mixed ? 'Mixed' : this.formatSliderValue(Number(input.value), spec.step));
+          input.setAttribute('aria-valuetext', mixed ? 'Mixed' : String(values[0]));
+          input.setAttribute(
+            'title',
+            mixed ? 'Mixed values' : inherited ? 'Global value' : 'Individual value'
+          );
+          item.setTitle(
+            this.nodeActionLabel(spec.label, snapshot, nodes.length) + (mixed ? ' (Mixed)' : '')
+          );
         };
         syncControls.push(sync);
         sync();
@@ -4511,26 +4815,35 @@ class GraphFrontierView extends ItemView {
           controls.addEventListener(eventName, (event) => event.stopPropagation());
         }
         input.addEventListener('input', () => {
-          this.plugin.setNodeVisualSetting(
-            node.id,
-            spec.key,
-            spec.type === 'color' ? input.value : Number(input.value)
-          );
-          sync();
+          for (const entry of this.resolveNodeActionTargets(snapshot).filter(eligible)) {
+            this.plugin.setNodeVisualSetting(
+              entry.id,
+              spec.key,
+              spec.type === 'color' ? input.value : Number(input.value)
+            );
+          }
+          syncControls.forEach((sync) => sync());
         });
       });
     }
 
-    menu.addItem((item) =>
-      item
-        .setTitle('Reset visual settings')
-        .setIcon('rotate-ccw')
-        .onClick(() => {
-          this.plugin.resetNodeVisualSettings(node.id);
+    if (!options.advancedOnly) {
+      menu.addItem((item) => {
+        item.setIcon('rotate-ccw').onClick(() => {
+          for (const entry of this.getNodeVisualResetTargets(snapshot))
+            this.plugin.resetNodeVisualSettings(entry.id);
           syncControls.forEach((sync) => sync());
-        })
-    );
-    if (node.meta?.darkEnergy) return;
+        });
+        const syncReset = () => {
+          const count = this.getNodeVisualResetTargets(snapshot).length;
+          item.setTitle(this.nodeActionLabel('Reset visual settings', snapshot, count));
+          item.setDisabled(count === 0);
+        };
+        syncControls.push(syncReset);
+        syncReset();
+      });
+    }
+    if (options.basicOnly || !node || node.meta?.darkEnergy) return;
 
     const isStrongPullNode = this.plugin.isStrongPullNode(node.id);
     if (!isStrongPullNode) {
@@ -4539,6 +4852,8 @@ class GraphFrontierView extends ItemView {
           .setTitle('Strong pull')
           .setIcon('zap')
           .onClick(async () => {
+            if (!this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id))
+              return;
             const strong = this.plugin.clampStrongPullMultiplier(
               this.plugin.getSettings().strong_pull_multiplier
             );
@@ -4556,6 +4871,8 @@ class GraphFrontierView extends ItemView {
           .setTitle('Clear strong pull')
           .setIcon('x')
           .onClick(async () => {
+            if (!this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id))
+              return;
             this.plugin.clearNodeMultiplier(node.id);
             this.kickLayoutSearch();
             new Notice(`Strong pull cleared: ${node.id}`);
@@ -4567,6 +4884,8 @@ class GraphFrontierView extends ItemView {
         .setTitle('Paint edges')
         .setIcon('palette')
         .onClick(async () => {
+          if (!this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id))
+            return;
           await this.promptPickPaintedEdgeColor(node.id, clientX, clientY);
         })
     );
@@ -4576,6 +4895,8 @@ class GraphFrontierView extends ItemView {
           .setTitle('Clear painted edges')
           .setIcon('x')
           .onClick(async () => {
+            if (!this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id))
+              return;
             this.plugin.clearPaintedEdgeColor(node.id);
             this.plugin.renderAllViews();
             new Notice(`Painted edges cleared: ${node.id}`);
@@ -4816,10 +5137,10 @@ class GraphFrontierView extends ItemView {
   }
 
   async commandPinNode() {
-    const node = this.getCommandTargetNodeOrNotice();
-    if (!node) return;
-    await this.pinNodeExact(node.id, { x: node.x, y: node.y });
-    new Notice(`Pinned: ${node.id}`);
+    const snapshot = this.captureCommandNodeActionTargets();
+    if (!snapshot.ids.length) return;
+    const count = this.applyNodePinAction(snapshot, 'exact');
+    new Notice(`Pinned: ${count} nodes`);
   }
 
   async commandToggleSelectionUnderCursor() {
@@ -4945,7 +5266,7 @@ class GraphFrontierView extends ItemView {
 
         return {
           id: node.id,
-          label: String(node.label || ''),
+          label: String(getNodeLabelText({ ...node, meta }) || ''),
           labelMinimumSize: getLabelMinimumSizeRender(this, node.id),
           labelMinZoom: getLabelZoomThresholdRender(this, node.id),
           dimAlpha:
@@ -5016,6 +5337,7 @@ class GraphFrontierView extends ItemView {
       settings: {
         showGrid: !!this.plugin.getSettings().show_grid,
         gridStep: this.plugin.clampGridStep(this.plugin.getSettings().grid_step),
+        gridLineWidth: this.plugin.clampGridLineWidth(this.plugin.getSettings().grid_line_width),
         edgeWidth: this.plugin.clampNumber(
           this.plugin.getSettings().edge_width_scale,
           0.01,
@@ -5228,6 +5550,10 @@ class GraphFrontierView extends ItemView {
       const labelFontSize = Number(EXPORT_DATA.settings?.labelFontSize) || 1.8;
       const showGrid = !!EXPORT_DATA.settings?.showGrid;
       const gridStep = Number(EXPORT_DATA.settings?.gridStep) || 20;
+      const rawGridLineWidth = Number(EXPORT_DATA.settings?.gridLineWidth);
+      const gridLineWidth = Number.isFinite(rawGridLineWidth)
+        ? Math.max(0.1, Math.min(1, rawGridLineWidth))
+        : 1;
       const minZoom = Number(EXPORT_DATA.settings?.minZoom) || 0.1;
       const maxZoom = Number(EXPORT_DATA.settings?.maxZoom) || 12;
       const zoomStepFactor = Number(EXPORT_DATA.settings?.zoomStepFactor) || 1.12;
@@ -5297,19 +5623,25 @@ class GraphFrontierView extends ItemView {
         ctx.save();
         ctx.globalAlpha = EXPORT_DATA.theme.gridOpacity;
         ctx.strokeStyle = EXPORT_DATA.theme.grid;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
+        ctx.lineWidth = gridLineWidth;
+        // Chromium can drop subpixel lines when a crossed grid shares one path.
+        const strokeSeparately = gridLineWidth < 1;
+        if (!strokeSeparately) ctx.beginPath();
         for (let x = startX; x <= endX; x += gridStep) {
+          if (strokeSeparately) ctx.beginPath();
           const sx = Math.round(worldToScreen(x, 0).x) + 0.5;
           ctx.moveTo(sx, 0);
           ctx.lineTo(sx, viewHeight);
+          if (strokeSeparately) ctx.stroke();
         }
         for (let y = startY; y <= endY; y += gridStep) {
+          if (strokeSeparately) ctx.beginPath();
           const sy = Math.round(worldToScreen(0, y).y) + 0.5;
           ctx.moveTo(0, sy);
           ctx.lineTo(viewWidth, sy);
+          if (strokeSeparately) ctx.stroke();
         }
-        ctx.stroke();
+        if (!strokeSeparately) ctx.stroke();
         ctx.restore();
       }
 
@@ -5402,48 +5734,6 @@ class GraphFrontierView extends ItemView {
             ctx.restore();
           }
         }
-      }
-
-      function drawHoverTooltip() {
-        if (!hoveredNodeId) return;
-        const node = nodeById.get(hoveredNodeId);
-        if (!node) return;
-        const point = worldToScreen(node.x, node.y);
-        const label = String(node.label || '');
-        if (!label) return;
-        const type = String(node.fileType || '').trim();
-        const text = type ? label + ' (' + type + ')' : label;
-
-        ctx.save();
-        ctx.font = '13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-        const textWidth = ctx.measureText(text).width;
-        const padX = 7;
-        const padY = 4;
-        const boxWidth = textWidth + padX * 2;
-        const boxHeight = 13 + padY * 2;
-        const radius = Math.min(8, boxHeight / 2);
-        const boxX = Math.max(6, Math.min(viewWidth - boxWidth - 6, point.x - boxWidth / 2));
-        const boxY = Math.max(6, point.y - boxHeight - 10);
-
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = EXPORT_DATA.theme.surface;
-        ctx.beginPath();
-        ctx.moveTo(boxX + radius, boxY);
-        ctx.lineTo(boxX + boxWidth - radius, boxY);
-        ctx.arcTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius, radius);
-        ctx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
-        ctx.arcTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight, radius);
-        ctx.lineTo(boxX + radius, boxY + boxHeight);
-        ctx.arcTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius, radius);
-        ctx.lineTo(boxX, boxY + radius);
-        ctx.arcTo(boxX, boxY, boxX + radius, boxY, radius);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = EXPORT_DATA.theme.text;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText(text, boxX + padX, boxY + padY);
-        ctx.restore();
       }
 
       function escapeHtml(text) {
@@ -5652,7 +5942,6 @@ class GraphFrontierView extends ItemView {
         drawAuras();
         drawEdges();
         drawNodes();
-        drawHoverTooltip();
         const selectedText = selectedNodeId
           ? nodeById.get(selectedNodeId)?.label || selectedNodeId
           : 'none';
@@ -5775,19 +6064,17 @@ class GraphFrontierView extends ItemView {
   }
 
   async commandPinToGrid() {
-    const node = this.getCommandTargetNodeOrNotice();
-    if (!node) return;
-    await this.pinNodeToGrid(node.id, { x: node.x, y: node.y });
-    new Notice(`Pinned to grid: ${node.id}`);
+    const snapshot = this.captureCommandNodeActionTargets();
+    if (!snapshot.ids.length) return;
+    const count = this.applyNodePinAction(snapshot, 'grid');
+    new Notice(`Pinned: ${count} nodes`);
   }
 
   async commandUnpinNode() {
-    const node = this.getCommandTargetNodeOrNotice();
-    if (!node) return;
-    this.plugin.removePin(node.id);
-    this.plugin.removeOrbitPin(node.id);
-    this.kickLayoutSearch();
-    new Notice(`Unpinned: ${node.id}`);
+    const snapshot = this.captureCommandNodeActionTargets();
+    if (!snapshot.ids.length) return;
+    const count = this.applyNodePinAction(snapshot, 'unpin');
+    new Notice(`Unpinned: ${count} nodes`);
   }
 
   async commandPinLinkedToOrbit() {
@@ -5957,6 +6244,7 @@ class GraphFrontierView extends ItemView {
   }
 
   async promptPickPaintedEdgeColor(nodeId, clientX = null, clientY = null) {
+    const snapshot = { ...this.captureNodeActionTargets(), ids: [nodeId] };
     const sourceData = this.plugin.data;
     const initialColor = this.plugin.getPaintedEdgeColor(nodeId) || '#ef6f6c';
     const hostDocument = this.contentEl.ownerDocument || document;
@@ -5981,11 +6269,18 @@ class GraphFrontierView extends ItemView {
     colorInput.style.zIndex = '9999';
     colorInput.style.pointerEvents = 'none';
 
+    let disposed = false;
     const cleanup = () => {
+      if (disposed) return;
+      disposed = true;
       colorInput.remove();
     };
     const applySelectedColor = () => {
-      if (this.plugin.data !== sourceData) {
+      if (disposed) return;
+      if (
+        this.plugin.data !== sourceData ||
+        !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === nodeId)
+      ) {
         cleanup();
         return;
       }
@@ -6000,6 +6295,7 @@ class GraphFrontierView extends ItemView {
       applySelectedColor();
     });
     this.registerDomEvent(colorInput, 'blur', () => {
+      if (disposed) return;
       window.setTimeout(cleanup, 40);
     });
 
@@ -6200,18 +6496,13 @@ class GraphFrontierView extends ItemView {
     new Notice(`Unpinned ${targetLabel}: ${unpinnedCount}`);
   }
 
-  // Orbit geometry and auto-orbit rules for linked nodes and attachments.
+  // Manual orbit geometry for linked nodes and attachments.
   getOrbitRadiusBySpacing(orbitNodeCount, minRadius) {
     return getOrbitRadiusBySpacing(this.plugin, orbitNodeCount, minRadius);
   }
 
   getOrbitRadiusForAnchor(orbitNodeCount) {
     return getOrbitRadiusForAnchor(this.plugin, orbitNodeCount);
-  }
-
-  buildAttachmentAutoOrbitMap() {
-    if (this.plugin.data.settings.attachments_on_orbits === false) return new Map();
-    return buildAttachmentAutoOrbitMapPhysics(this);
   }
 
   recomputeOrbitRadii() {
@@ -6326,6 +6617,199 @@ class GraphFrontierView extends ItemView {
     const path = String(meta?.path || '').trim();
     if (path) return path;
     return String(node.id || '').trim();
+  }
+
+  // Menu/hotkey actions snapshot IDs, not mutable selection or node positions.
+  captureNodeActionTargets(node = null) {
+    const ids = node && !this.selectedNodeIds.has(node.id) ? [node.id] : [...this.selectedNodeIds];
+    return {
+      ids: [...new Set(ids)].filter((id) => this.nodeById.has(id)),
+      data: this.plugin.data,
+      layout: this.plugin.getActiveLayoutFileName(),
+      scope: JSON.stringify(this.subgraphScope || null),
+    };
+  }
+
+  isNodeActionSnapshotCurrent(snapshot) {
+    return (
+      snapshot.data === this.plugin.data &&
+      snapshot.layout === this.plugin.getActiveLayoutFileName() &&
+      snapshot.scope === JSON.stringify(this.subgraphScope || null)
+    );
+  }
+
+  resolveNodeActionTargets(snapshot) {
+    if (!this.isNodeActionSnapshotCurrent(snapshot)) return [];
+    return snapshot.ids.map((id) => this.nodeById.get(id)).filter(Boolean);
+  }
+
+  captureCommandNodeActionTargets() {
+    if (this.getSelectedNodesForCopy().length) return this.captureNodeActionTargets();
+    const node = this.getCommandTargetNodeOrNotice();
+    return this.captureNodeActionTargets(node);
+  }
+
+  nodeActionLabel(title, snapshot, count = snapshot.ids.length) {
+    if (snapshot.ids.length <= 1) return title;
+    return `${title} · ${count === snapshot.ids.length ? count : count + ' of ' + snapshot.ids.length} nodes`;
+  }
+
+  getSelectedNodesForCopy() {
+    return this.resolveNodeActionTargets(this.captureNodeActionTargets());
+  }
+
+  getNodeCopyValue(node, kind) {
+    if (kind === 'names') return this.getLinkedNodeDisplayName(node);
+    if (node.meta?.darkEnergy || node.meta?.subgraph) return '';
+    const file = this.app.vault.getAbstractFileByPath(node.id);
+    if (!file || typeof file.extension !== 'string') return '';
+    if (kind === 'systemPaths') return this.app.vault.adapter.getFullPath?.(file.path) || '';
+    return file.path;
+  }
+
+  addNodeCopyActionsToMenu(menu, snapshot) {
+    for (const [kind, title, single] of [
+      ['names', 'Copy names', 'Copy name'],
+      ['paths', 'Copy vault paths', 'From vault folder'],
+      ['systemPaths', 'Copy system paths', 'Copy system root'],
+    ]) {
+      const count = this.resolveNodeActionTargets(snapshot).filter((node) =>
+        this.getNodeCopyValue(node, kind)
+      ).length;
+      if (!count) continue;
+      menu.addItem((item) =>
+        item
+          .setTitle(this.nodeActionLabel(snapshot.ids.length > 1 ? title : single, snapshot, count))
+          .setIcon('copy')
+          .onClick(() => this.copySelectedNodes(kind, snapshot))
+      );
+    }
+  }
+
+  getNodeVisualResetTargets(snapshot) {
+    const data = this.plugin.data;
+    return this.resolveNodeActionTargets(snapshot).filter(
+      ({ id }) =>
+        Object.keys(data.node_visual_settings?.[id] || {}).length > 0 ||
+        data.node_label_sizes?.[id] != null ||
+        data.painted_edge_colors?.[id] != null
+    );
+  }
+
+  getNodePinActionTargets(snapshot, mode) {
+    return this.resolveNodeActionTargets(snapshot).filter((node) => {
+      const pin = this.plugin.getPin(node.id);
+      if (mode === 'unpin') return pin || this.plugin.isOrbitPinned(node.id);
+      if (mode === 'grid') return !pin || pin.mode !== 'grid';
+      return !pin || pin.mode !== 'exact' || pin.x !== node.x || pin.y !== node.y;
+    });
+  }
+
+  applyNodePinAction(snapshot, mode) {
+    const nodes = this.getNodePinActionTargets(snapshot, mode);
+    if (!nodes.length) return 0;
+    const all = this.resolveNodeActionTargets(snapshot);
+    const step = this.plugin.clampGridStep(this.plugin.getSettings().grid_step);
+    const occupied = this.getOccupiedGridCells(new Set(all.map((node) => node.id)));
+    if (mode === 'grid') {
+      // Keep unchanged grid pins reserved before assigning any eligible target.
+      for (const node of all) {
+        const pin = this.plugin.getPin(node.id);
+        if (pin?.mode === 'grid')
+          occupied.add(this.gridKey(Math.round(pin.x / step), Math.round(pin.y / step)));
+      }
+    }
+    const placements = nodes.map((node) => {
+      if (mode !== 'grid') return { node, next: { x: node.x, y: node.y } };
+      const next = this.findNearestFreeGridCell(node.x, node.y, step, occupied);
+      if (occupied.has(this.gridKey(next.gx, next.gy))) throw new Error('No free grid cell');
+      occupied.add(this.gridKey(next.gx, next.gy));
+      return { node, next };
+    });
+    for (const { node, next } of placements) {
+      if (mode === 'unpin') {
+        this.plugin.removePin(node.id);
+        this.plugin.removeOrbitPin(node.id);
+      } else {
+        this.plugin.setPin(node.id, next, { mode });
+        Object.assign(node, { x: next.x, y: next.y, vx: 0, vy: 0 });
+      }
+    }
+    this.markNodeSpatialIndexDirty();
+    this.kickLayoutSearch();
+    return nodes.length;
+  }
+
+  addSelectionActionsToMenu(menu, snapshot, clientX, clientY) {
+    const submenu = (title, icon, fillSubmenu) =>
+      this.addContextSubmenuItem(menu, {
+        title,
+        icon,
+        clientX,
+        clientY,
+        fillSubmenu,
+      });
+    submenu('Copy', 'copy', (target) => this.addNodeCopyActionsToMenu(target, snapshot));
+    for (const [mode, title, icon] of [
+      ['exact', snapshot.ids.length > 1 ? 'Pin nodes' : 'Pin node', 'pin'],
+      ['grid', 'Pin to grid', 'grid'],
+      ['unpin', snapshot.ids.length > 1 ? 'Unpin' : 'Unpin node', 'pin-off'],
+    ]) {
+      const count = this.getNodePinActionTargets(snapshot, mode).length;
+      if (count)
+        menu.addItem((item) =>
+          item
+            .setTitle(this.nodeActionLabel(title, snapshot, count))
+            .setIcon(icon)
+            .onClick(() => this.applyNodePinAction(snapshot, mode))
+        );
+    }
+    submenu(this.nodeActionLabel('Visual settings', snapshot), 'settings-2', (target) =>
+      this.addVisualSettingsToMenu(target, null, clientX, clientY, snapshot, { basicOnly: true })
+    );
+  }
+
+  onSelectedNodeCopyKeyDown(event) {
+    if (
+      event.defaultPrevented ||
+      event.isComposing ||
+      event.altKey ||
+      event.shiftKey ||
+      !(event.ctrlKey || event.metaKey) ||
+      (event.ctrlKey && event.metaKey) ||
+      !(event.code === 'KeyC' || String(event.key).toLowerCase() === 'c') ||
+      this.app.workspace.activeLeaf?.view !== this
+    )
+      return;
+    const doc = this.contentEl.ownerDocument;
+    const editable = (el) =>
+      el?.isContentEditable ||
+      !!el?.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"])');
+    if (editable(event.target) || editable(doc.activeElement)) return;
+    if (doc.getSelection()?.isCollapsed === false) return;
+    // Body/document targets are normal after clicking a non-focusable canvas.
+    if (event.target !== doc && event.target !== doc.body && !this.contentEl.contains(event.target))
+      return;
+    if (!this.getSelectedNodesForCopy().length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void this.copySelectedNodes('names');
+    return false;
+  }
+
+  async copySelectedNodes(kind = 'names', snapshot = this.captureNodeActionTargets()) {
+    const values = this.resolveNodeActionTargets(snapshot)
+      .map((node) => this.getNodeCopyValue(node, kind))
+      .filter(Boolean);
+    if (!values.length) return false;
+    try {
+      const copied = await this.copyTextToClipboard(values.join('\n'));
+      new Notice(copied ? `Copied ${kind}: ${values.length}` : `Failed to copy ${kind}`);
+      return copied;
+    } catch {
+      new Notice(`Failed to copy ${kind}`);
+      return false;
+    }
   }
 
   async copyTextToClipboard(text) {
@@ -6624,8 +7108,10 @@ class GraphFrontierView extends ItemView {
 
     const parents = hierarchy(this.plugin.data.subgraphs);
     for (const [nodeId, pos] of Object.entries(this.plugin.data.pins)) {
+      if (!this.nodeById.has(nodeId)) continue;
       if ((parents.get(nodeId) || null) !== (this.subgraphScope?.id || null)) continue;
-      if (nodeId === exceptNodeId) continue;
+      if (nodeId === exceptNodeId || (exceptNodeId instanceof Set && exceptNodeId.has(nodeId)))
+        continue;
       if (!pos || typeof pos !== 'object') continue;
       const gx = Math.round(pos.x / step);
       const gy = Math.round(pos.y / step);
@@ -6732,22 +7218,26 @@ class GraphFrontierView extends ItemView {
   }
 
   async openNodeFile(nodeId) {
-    const node = this.nodeById.get(nodeId);
-    if (node?.meta?.subgraph) {
-      await this.openSubgraphSeparately(nodeId);
-      return;
-    }
-    if (node?.meta?.darkEnergy) {
-      this.editDarkEnergy(node);
-      return;
-    }
-    const abstractFile = this.app.vault.getAbstractFileByPath(nodeId);
-    if (!abstractFile) return;
-    if (typeof abstractFile.extension === 'string' && abstractFile.extension.toLowerCase() !== 'md')
-      return;
-    if (typeof this.app.workspace.getLeaf === 'function' && typeof abstractFile.path === 'string') {
-      const leaf = this.app.workspace.getLeaf(true);
-      await leaf.openFile(abstractFile);
+    try {
+      const node = this.nodeById.get(nodeId);
+      if (node?.meta?.subgraph) {
+        await this.openSubgraphSeparately(nodeId);
+        return;
+      }
+      if (node?.meta?.darkEnergy) {
+        await this.editDarkEnergy(node);
+        return;
+      }
+      const file = this.app.vault.getAbstractFileByPath(nodeId);
+      if (!file || typeof file.extension !== 'string' || typeof file.path !== 'string') return;
+      // Route external files before creating a leaf, which would leave an empty tab.
+      if (!this.app.viewRegistry.getTypeByExtension(file.extension)) {
+        await this.app.openWithDefaultApp(file.path);
+        return;
+      }
+      await this.app.workspace.getLeaf(true).openFile(file);
+    } catch (error) {
+      new Notice(`Cannot open file: ${error?.message || error}`);
     }
   }
 

@@ -231,7 +231,7 @@ named entity or repository note without confirming its identity.
 anchor explicitly as well if requested. `targetKind` limits linked actions to
 regular nodes, attachments or both. Orbit mode requires an anchor. Pinning fixes
 position but keeps the node's repulsion, link influence and Strong pull toward
-eligible free nodes. Attachment-isolation rules still apply.
+eligible free nodes. Notes and attachments use the same physics.
 
 Copy actions return text; `clipboard: true` also writes it to the clipboard.
 Linked names and paths use commas followed by line breaks, without a trailing

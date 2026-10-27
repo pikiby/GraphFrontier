@@ -75,13 +75,12 @@ test('normalization accepts only finite visual parameters, retaining legacy text
   assert.equal(getNodeVisualSetting(plugin, 'a', 'label_font_size'), 16);
 });
 
-test('node size, attachment size, text zoom and dimming resolve per node', (t) => {
+test('node size, text zoom and dimming resolve per node', (t) => {
   const { view, plugin } = fixture(t);
   const a = { id: 'a', degree: 1, meta: { isAttachment: true } };
   const b = { ...a, id: 'b' };
   const before = render.getNodeRadius(view, b);
   plugin.setNodeVisualSetting('a', 'node_size_scale', 2);
-  plugin.setNodeVisualSetting('a', 'attachment_size_multiplier', 1);
   assert(render.getNodeRadius(view, a) > before);
   assert.equal(render.getNodeRadius(view, b), before);
   plugin.setNodeVisualSetting('a', 'label_zoom_steps', 20);
@@ -127,10 +126,11 @@ test('edge widths prefer explicit endpoint overrides and batch differently sized
   assert.deepEqual(widths, [0.25, 0.8]);
 });
 
-test('one reset clears all visual controls and attachment control is conditional', (t) => {
+test('one reset clears all visual controls, identical for notes and attachments', (t) => {
   const { view, plugin, app } = fixture(t);
   app.vault.getAbstractFileByPath = () => null;
   const node = { id: 'a', label: 'A', meta: { isAttachment: true } };
+  view.nodeById.set(node.id, node);
   const menu = buildNodeContextMenu(view, node, 0, 0);
   const visual = menu.items.find((item) => item.title === 'Visual settings').submenu;
   for (const definition of NODE_VISUAL_SETTINGS) {
@@ -151,11 +151,16 @@ test('one reset clears all visual controls and attachment control is conditional
   resets[0].callback();
   for (const spec of NODE_VISUAL_SETTINGS)
     assert.equal(getNodeVisualOverride(plugin, node.id, spec.key), null);
+  const attachmentTitles = visual.items.map((item) => item.title);
+  assert(!attachmentTitles.includes('Attachment size'));
   node.meta.isAttachment = false;
   const ordinary = buildNodeContextMenu(view, node, 0, 0).items.find(
     (item) => item.title === 'Visual settings'
   ).submenu;
-  assert(!ordinary.items.some((item) => item.title === 'Attachment size'));
+  assert.deepEqual(
+    ordinary.items.map((item) => item.title),
+    attachmentTitles
+  );
 });
 
 test('visual overrides survive saved layouts and are removed when loading an older layout', async (t) => {
@@ -187,7 +192,10 @@ test('HTML export carries individual radii, label thresholds, dimming and edge w
   view.canvasEl = { clientWidth: 600, clientHeight: 400 };
   view.ctx = {};
   view.nodes[0].label = 'Alpha';
-  view.nodes.push({ id: 'b', label: 'B', x: 50, y: 50, degree: 0 });
+  view.nodes.push({ id: 'b', label: 'B', x: 50, y: 50, degree: 0, meta: { isAttachment: true } });
+  // Raw legacy values must be inert even before persistence normalization.
+  plugin.data.settings.attachment_size_multiplier = 0.1;
+  plugin.data.node_visual_settings.b = { node_size_scale: 1.7, attachment_size_multiplier: 0.1 };
   view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
   view.edges = [{ source: 'alpha.md', target: 'b' }];
   app.vault.getAbstractFileByPath = () => null;
@@ -202,6 +210,17 @@ test('HTML export carries individual radii, label thresholds, dimming and edge w
   await view.commandExportStaticHtml({ exportPath: 'node-visual-export.html' });
   const html = contents.get('node-visual-export.html');
   assert.equal(typeof html, 'string');
+  const payload = JSON.parse(html.match(/const EXPORT_DATA = (.*);/)[1]);
+  for (const node of view.nodes) {
+    const exported = payload.nodes.find((item) => item.id === node.id);
+    assert.equal(exported.radius, render.getNodeRadius(view, node));
+    assert.equal(exported.labelMinZoom, render.getLabelZoomThreshold(view, node.id));
+  }
+  const attachment = view.nodeById.get('b');
+  assert.equal(
+    payload.nodes.find((item) => item.id === 'b').radius,
+    render.getNodeRadius(view, { ...attachment, meta: { isAttachment: false } })
+  );
   assert(html.includes('"auraRadius":400'));
   assert(html.includes('"color":"#123456"'));
   assert(html.includes('"dimAlpha":1'));
@@ -218,6 +237,24 @@ test('base color, groups and individual color have explicit priority; invalid co
   plugin.setNodeVisualSetting('a', 'node_color', '#abcdef');
   plugin.setNodeVisualSetting('a', 'node_color', 'invalid');
   assert.equal(getNodeColor(plugin, node, '#112233'), '#abcdef');
+  const attachment = { id: 'attachment.pdf', meta: { isAttachment: true } };
+  assert.equal(plugin.getSettings().attachment_node_color, null);
+  assert.equal(getNodeColor(plugin, attachment), '#445566');
+  plugin.data.settings.attachment_node_color = '#654321';
+  assert.equal(getNodeColor(plugin, attachment), '#654321');
+  assert.equal(getNodeColor(plugin, { id: 'other.md' }), '#445566');
+  assert.equal(getNodeColor(plugin, attachment, '#112233'), '#112233');
+  plugin.setNodeVisualSetting(attachment.id, 'node_color', '#abcdef');
+  assert.equal(getNodeColor(plugin, attachment, '#112233'), '#abcdef');
+  for (const value of [null, '#123456', 'invalid']) {
+    const normalized = plugin.normalizeData({
+      settings: { attachment_node_color: value },
+      saved_layout_settings: { attachment_node_color: value },
+    });
+    const expected = value === 'invalid' ? null : value;
+    assert.equal(normalized.settings.attachment_node_color, expected);
+    assert.equal(normalized.saved_layout_settings.attachment_node_color, expected);
+  }
 });
 
 test('size supports four and gravity menus omit inapplicable controls', (t) => {
@@ -292,4 +329,87 @@ test('auras default off, retain offscreen coverage, obey filters and do not chan
   view.getFilterVisibleNodeIds = () => new Set();
   render.drawNodeAuras(view, ctx);
   assert.equal(draws, 2);
+});
+
+for (const scale of [0.1, 0.8, 2, 4]) {
+  test(
+    'attachment size equals same-topology note size at scale ' + scale + ' with legacy settings',
+    (t) => {
+      const { plugin, view } = fixture(t, {
+        settings: { node_size_scale: scale, attachment_size_multiplier: 0.8 },
+        node_visual_settings: { a: { attachment_size_multiplier: 0.1 } },
+      });
+      assert.deepEqual(plugin.data.node_visual_settings, {});
+      for (const degree of [0, 1, 4, 100]) {
+        const node = { id: 'a', degree, meta: { isAttachment: false } };
+        for (const override of [null, 0.1, 1.3, 4]) {
+          plugin.setNodeVisualSetting('a', 'node_size_scale', override);
+          const expected = render.getNodeRadius(view, node);
+          plugin.data.settings.attachment_size_multiplier = 0.1;
+          plugin.data.node_visual_settings.a = {
+            ...plugin.data.node_visual_settings.a,
+            attachment_size_multiplier: 0.1,
+          };
+          assert.equal(
+            render.getNodeRadius(view, { ...node, meta: { isAttachment: true } }),
+            expected
+          );
+        }
+      }
+    }
+  );
+}
+
+test('attachment labels use the same zoom thresholds, text overrides and dimming as notes', (t) => {
+  const { plugin, view } = fixture(t);
+  const node = {
+    id: 'a',
+    label: 'diagram',
+    degree: 2,
+    x: 0,
+    y: 0,
+    meta: { path: 'assets/diagram.pdf', fileType: 'pdf' },
+  };
+  view.nodes = [node];
+  view.nodeById = new Map([[node.id, node]]);
+  view.viewWidth = 500;
+  view.viewHeight = 500;
+  let calls = [];
+  const ctx = {
+    beginPath() {},
+    arc() {},
+    fill() {},
+    stroke() {},
+    fillText(...args) {
+      calls.push({ args, alpha: this.globalAlpha, font: this.font });
+    },
+  };
+  for (const overridden of [false, true]) {
+    if (overridden) {
+      plugin.setNodeVisualSetting('a', 'label_zoom_steps', 30);
+      plugin.setNodeVisualSetting('a', 'label_font_size', 16);
+      plugin.setNodeVisualSetting('a', 'hover_dim_strength', 80);
+    }
+    const threshold = render.getLabelZoomThreshold(view, node.id);
+    for (const zoom of [threshold / 2, threshold, threshold * 2, 8]) {
+      for (const focused of [false, true]) {
+        view.camera.zoom = zoom;
+        view.focusNodeId = focused ? 'other' : null;
+        view.focusProgress = focused ? 1 : 0;
+        node.meta.isAttachment = false;
+        calls = [];
+        render.drawNodes(view, ctx);
+        const expected = calls.map((call) => ({
+          ...call,
+          args: ['diagram.pdf', ...call.args.slice(1)],
+        }));
+        node.meta.isAttachment = true;
+        calls = [];
+        render.drawNodes(view, ctx);
+        assert.deepEqual(calls, expected);
+        if (zoom === 8)
+          assert.equal(calls.length, 1, 'visible attachment label must actually draw');
+      }
+    }
+  }
 });

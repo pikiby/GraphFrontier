@@ -14,6 +14,162 @@ function holdWrite(t, adapter) {
   return { entered: entered.promise, release: release.resolve };
 }
 
+test('attachment extensions filter linked and unlinked files exactly, without dangling edges', (t) => {
+  const { plugin, app } = fixture(t);
+  const files = ['alpha.md', 'photo.PNG', 'scan.png2', 'LICENSE', 'free.PDF', 'upper.MD'].map(
+    (path) => ({
+      path,
+      basename: path,
+      extension: path.includes('.') ? path.split('.').pop() : '',
+    })
+  );
+  app.vault.getFiles = () => files;
+  app.vault.getMarkdownFiles = () => [files[0], files[5]];
+  app.vault.getAbstractFileByPath = (path) => files.find((file) => file.path === path);
+  app.metadataCache.getFileCache = () => ({});
+  app.metadataCache.resolvedLinks = {
+    'alpha.md': { 'photo.PNG': 1, 'scan.png2': 1, LICENSE: 1, 'missing.PNG': 1 },
+  };
+  Object.assign(plugin.data.settings, {
+    hide_attachments: false,
+    hide_orphans: false,
+    existing_files_only: false,
+    excluded_attachment_extensions: ['PNG', '', 'md'],
+  });
+  const collect = () => Object.getPrototypeOf(plugin).collectGraphData.call(plugin);
+  for (const unlinked of [false, true]) {
+    plugin.data.settings.include_unlinked_attachments = unlinked;
+    const graph = collect();
+    assert.deepEqual(
+      graph.nodes.map((n) => n.id).sort(),
+      ['alpha.md', 'scan.png2', 'upper.MD', ...(unlinked ? ['free.PDF'] : [])].sort()
+    );
+    assert.deepEqual(graph.edges, [{ source: 'alpha.md', target: 'scan.png2' }]);
+  }
+  plugin.data.settings.excluded_attachment_extensions = [];
+  assert(collect().nodes.some((n) => n.id === 'LICENSE' && n.meta.isAttachment));
+  plugin.data.settings.hide_orphans = true;
+  assert(!collect().nodes.some((n) => n.id === 'free.PDF'));
+});
+
+test('attachment exclusion arrays normalize safely and round-trip without dropping absent types', async (t) => {
+  const { plugin, view, writes, putLayout } = fixture(t);
+  for (const value of [null, {}, 'png', 1]) {
+    assert.deepEqual(
+      plugin.normalizeData({ settings: { excluded_attachment_extensions: value } }).settings
+        .excluded_attachment_extensions,
+      []
+    );
+  }
+  const normalized = plugin.normalizeData({
+    settings: {
+      excluded_attachment_extensions: [' PNG ', 'png', '', null, 7, {}, 'missing'],
+    },
+  });
+  assert.deepEqual(normalized.settings.excluded_attachment_extensions, ['png', '', 'missing']);
+  plugin.data.settings.excluded_attachment_extensions =
+    normalized.settings.excluded_attachment_extensions;
+  assert.equal(await view.saveCurrentLayout(), true);
+  const saved = JSON.parse(writes.at(-1).contents);
+  assert.deepEqual(saved.settings.excluded_attachment_extensions, ['png', '', 'missing']);
+  assert.deepEqual(saved.saved_layout_settings.excluded_attachment_extensions, [
+    'png',
+    '',
+    'missing',
+  ]);
+  plugin.data.settings.excluded_attachment_extensions = [];
+  assert.equal(await view.loadSavedLayout(), true);
+  assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, ['png', '', 'missing']);
+  putLayout({ settings: {} });
+  assert.equal(await view.loadSavedLayout(), true);
+  assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, []);
+});
+
+test('file type control searches cached inventory, refreshes on reopen and bulk actions target matches', (t) => {
+  const { plugin, app, view } = fixture(t);
+  let files = ['png', 'PNG', 'pdf', '', 'md', 'MD'].map((extension) => ({ extension }));
+  const enumerate = t.mock.fn(() => files);
+  app.vault.getFiles = enumerate;
+  const win = {
+    innerWidth: 1920,
+    innerHeight: 1080,
+    addEventListener() {},
+    removeEventListener() {},
+    requestAnimationFrame() {},
+  };
+  const doc = { defaultView: win, addEventListener() {}, removeEventListener() {} };
+  const decorate = (el) => {
+    Object.assign(el, {
+      ownerDocument: doc,
+      style: {},
+      isConnected: true,
+      offsetHeight: 300,
+      classList: { add() {}, remove() {} },
+      scrollIntoView() {},
+      appendChild(child) {
+        child.parentElement = this;
+        this.children.push(child);
+      },
+      remove() {
+        this.isConnected = false;
+      },
+      getBoundingClientRect: () => ({ left: 1600, top: 200, bottom: 230, width: 250 }),
+    });
+    const create = el.createEl.bind(el);
+    el.createEl = (tag, options) => decorate(create(tag, options));
+    return el;
+  };
+  doc.body = decorate(element());
+  doc.createElement = () => decorate(element());
+  const parent = decorate(element());
+  const refresh = t.mock.method(view, 'applyRefreshMode', () => {});
+  const persist = t.mock.method(plugin, 'schedulePersist', () => {});
+  plugin.data.settings.excluded_attachment_extensions = ['missing'];
+  view.buildAttachmentFileTypesControl(parent);
+  const trigger = parent.children[0].children[0].children[0];
+  assert.equal(trigger.tag, 'input');
+  assert.equal(enumerate.mock.callCount(), 1, 'initial summary uses current inventory');
+  trigger.events.click();
+  const search = trigger;
+  const entries = () => view.inputSuggestMenu.selectableEntries;
+  const formats = () => entries().filter((entry) => entry.checkbox);
+  const select = (value) =>
+    entries()
+      .find((entry) => entry.suggestion.value === value)
+      .itemEl.events.click({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(formats().length, 3);
+  assert.deepEqual(
+    formats().map((entry) => entry.suggestion.title),
+    ['No extension', '.pdf', '.png']
+  );
+  assert.equal(formats()[2].suggestion.count, 2);
+  assert(formats().every((entry) => entry.checkbox.checked));
+  search.value = 'PnG';
+  search.events.input();
+  assert.equal(enumerate.mock.callCount(), 2);
+  assert.equal(formats().length, 1);
+  select('none');
+  assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, ['missing', 'png']);
+  assert.equal(formats()[0].checkbox.checked, false);
+  select('all');
+  assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, ['missing']);
+  const checkbox = formats()[0].checkbox;
+  checkbox.checked = false;
+  checkbox.events.change();
+  assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, ['missing', 'png']);
+  files = [{ extension: 'webp' }];
+  view.closeInputSuggestMenu();
+  assert.equal(trigger.value, 'File type: No extension, .pdf');
+  trigger.events.click();
+  assert.equal(trigger.value, 'File type: ');
+  assert.equal(formats()[0].suggestion.title, '.webp');
+  assert.equal(formats()[0].checkbox.checked, true);
+  select('all');
+  assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, ['missing', 'png']);
+  assert.equal(refresh.mock.callCount(), 4);
+  assert.equal(persist.mock.callCount(), 4);
+});
+
 test('successful file write propagates true through persistActiveLayoutFile', async (t) => {
   const { plugin, writes } = fixture(t);
   assert.equal(await plugin.persistActiveLayoutFile(), true);
@@ -372,8 +528,8 @@ test('autosave-off close reloads all fields even without dirty and reopen uses d
   await view.onOpen();
   assert.deepEqual(plugin.data, saved);
   assert.equal(view.nodeById.get('alpha.md').x, 15);
-  assert.equal(view.layoutPaused, true);
-  assert.equal(view.layoutAutosaveDirty, false);
+  assert.equal(view.layoutPaused, false);
+  assert.equal(view.layoutAutosaveDirty, true);
   assert.equal(writes.length, 0);
 });
 
@@ -439,11 +595,110 @@ test('onOpen synchronizes search mode from disk before building controls', async
   assert.deepEqual(modesAtBuild, ['filter']);
 });
 
+for (const [mode, query] of [
+  ['find', ''],
+  ['find', 'name:alpha'],
+  ['filter', 'name:alpha'],
+]) {
+  test(`onOpen restores saved root positions and camera but starts physics (${mode}, ${query || 'no search'})`, async (t) => {
+    const { view, putLayout, writes } = fixture(t);
+    putLayout({
+      saved_positions: { 'alpha.md': { x: 300, y: 200 } },
+      settings: { center_strength: 100, layout_autosave: false, search_mode: mode },
+      view_state: { camera_saved: true, pan_x: 40, pan_y: 50, zoom: 1.5, search_query: query },
+    });
+    const kick = t.mock.method(view, 'kickLayoutSearch');
+    await view.onOpen();
+    await view.setState({});
+    const node = view.nodeById.get('alpha.md');
+    assert.deepEqual({ x: node.x, y: node.y }, { x: 300, y: 200 });
+    assert.deepEqual(view.camera, { x: 40, y: 50, zoom: 1.5 });
+    assert.deepEqual(view.cameraTarget, view.camera);
+    assert.equal(view.layoutPaused, false);
+    const kicks = kick.mock.callCount();
+    for (let i = 0; i < 5; i += 1) view.stepSimulation();
+    assert.notEqual(node.x, 300);
+    assert.notEqual(node.y, 200);
+    assert.equal(kick.mock.callCount(), kicks);
+    assert.equal(writes.length, 0);
+  });
+}
+
+test('opening a saved root retains manual exact/grid pins and orbit geometry while free nodes move', async (t) => {
+  const { plugin, view, graph, putLayout } = fixture(t);
+  graph.nodes.push(...['grid.md', 'moon.md', 'free.md'].map((id) => ({ id, label: id })));
+  const pins = {
+    'alpha.md': { x: 20, y: 30, mode: 'exact' },
+    'grid.md': { x: 100, y: 100, mode: 'grid' },
+  };
+  const orbit = { 'moon.md': { anchor_id: 'alpha.md', radius: 40, angle: 0 } };
+  putLayout({
+    pins,
+    orbit_pins: orbit,
+    saved_positions: { 'free.md': { x: 300, y: 200 } },
+    settings: { center_strength: 100, layout_autosave: false },
+  });
+  await view.onOpen();
+  for (let i = 0; i < 5; i += 1) view.stepSimulation();
+  for (const [id, pin] of Object.entries(pins)) {
+    const node = view.nodeById.get(id);
+    assert.deepEqual({ x: node.x, y: node.y }, { x: pin.x, y: pin.y });
+  }
+  const moon = view.nodeById.get('moon.md');
+  assert.deepEqual({ x: moon.x, y: moon.y }, { x: 60, y: 30 });
+  assert.notEqual(view.nodeById.get('free.md').x, 300);
+  assert.deepEqual(plugin.data.pins, pins);
+  assert.deepEqual(plugin.data.orbit_pins, orbit);
+});
+
+test('entry starts once and the frame loop lets an equilibrium layout sleep normally', async (t) => {
+  const { view, putLayout, writes } = fixture(t);
+  putLayout({
+    saved_positions: { 'alpha.md': { x: 0, y: 0 } },
+    settings: { center_strength: 0, repel_strength: 0, layout_autosave: false },
+  });
+  const frames = [];
+  view.contentEl.win.requestAnimationFrame = (callback) => frames.push(callback);
+  view.runFrame = loadSource('view.js').GraphFrontierView.prototype.runFrame;
+  const kick = t.mock.method(view, 'kickLayoutSearch');
+  await view.onOpen();
+  assert.equal(view.layoutPaused, false);
+  for (let i = 0; i < 12; i += 1) frames.shift()();
+  assert.equal(view.layoutPaused, true);
+  assert.equal(kick.mock.callCount(), 1);
+  assert.equal(writes.length, 0);
+});
+
+for (const reason of ['read failure', 'another open root']) {
+  test(`onOpen keeps the safety pause for ${reason}, including restored filter search`, async (t) => {
+    const { plugin, view, app, files, layoutPath, writes } = fixture(t, {
+      saved_positions: { 'alpha.md': { x: 300, y: 200 } },
+      settings: { center_strength: 100, search_mode: 'filter' },
+      view_state: { search_query: 'name:alpha' },
+    });
+    if (reason === 'read failure') files.set(layoutPath(), '{bad JSON');
+    else {
+      app.workspace.getLeavesOfType().push({ view: { isOpen: true } });
+      t.mock.method(plugin, 'setActiveLayoutFile', () => assert.fail('No duplicate root reload'));
+    }
+    const data = structuredClone(plugin.data);
+    const expectedX = reason === 'read failure' ? view.nodeById.get('alpha.md').x : 300;
+    await view.onOpen();
+    for (let i = 0; i < 5; i += 1) view.stepSimulation();
+    assert.equal(view.layoutPaused, true);
+    assert.equal(view.layoutAutosaveDirty, false);
+    assert.equal(view.nodeById.get('alpha.md').x, expectedX);
+    assert.deepEqual(plugin.data, data);
+    assert.equal(writes.length, 0);
+  });
+}
+
 test('topology-neutral metadata/vault refresh preserves pause, coordinates and dirty state', async (t) => {
   const { plugin, view, putLayout, events, flushTimers } = fixture(t);
   putLayout({ saved_positions: { 'alpha.md': { x: 15, y: 25 }, hidden: { x: 70, y: 80 } } });
   await plugin.onload();
   await view.onOpen();
+  await view.loadSavedLayout({ silent: true });
   assert.equal(view.layoutPaused, true);
   for (const dirty of [false, true]) {
     view.layoutAutosaveDirty = dirty;
@@ -466,6 +721,7 @@ test('adding a node through a passive vault refresh wakes settled physics', asyn
   putLayout({ saved_positions: { 'alpha.md': { x: 15, y: 25 } } });
   await plugin.onload();
   await view.onOpen();
+  await view.loadSavedLayout({ silent: true });
   assert.equal(view.layoutPaused, true);
 
   graph.nodes.push({ id: 'late.md', label: 'late' });
@@ -572,4 +828,256 @@ test('real physics autosave consumes saveCurrentLayout boolean and retains dirty
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(view.layoutAutosaveDirty, true);
   assert.deepEqual(plugin.data.saved_positions, {});
+});
+
+test('old attachment controls are dropped from settings, rollback and node overrides without changing layouts', async (t) => {
+  const { plugin, view, putLayout, files, layoutPath } = fixture(t);
+  const legacy = {
+    attachment_size_multiplier: 0.8,
+    attachment_link_distance_multiplier: 14,
+    attachments_on_orbits: false,
+  };
+  const retained = {
+    settings: {
+      node_size_scale: 1.3,
+      link_distance: 37,
+      grid_line_width: 0.3,
+      repel_strength: 200,
+      repel_radius: 1000,
+    },
+    saved_layout_settings: {
+      node_size_scale: 2,
+      link_distance: 41,
+      grid_step: 30,
+      grid_line_width: 0.5,
+    },
+    pins: { 'alpha.md': { x: 25, y: 40, mode: 'grid' } },
+    orbit_pins: { 'image.png': { anchor_id: 'alpha.md', radius: 71, angle: 1.2 } },
+    saved_layout_pins: { 'alpha.md': { x: 25, y: 40, mode: 'exact' } },
+    saved_layout_orbit_pins: { 'image.png': { anchor_id: 'alpha.md', radius: 71, angle: 1.2 } },
+    saved_positions: { 'alpha.md': { x: 25, y: 40 }, 'image.png': { x: 100, y: -20 } },
+    node_visual_settings: { 'alpha.md': { node_size_scale: 1.7, hover_dim_strength: 40 } },
+    node_force_multipliers: { 'alpha.md': 3 },
+    view_state: { camera_x: 12, camera_y: -15, camera_zoom: 2 },
+  };
+  const old = {
+    ...retained,
+    settings: { ...retained.settings, ...legacy },
+    saved_layout_settings: { ...retained.saved_layout_settings, ...legacy },
+    node_visual_settings: {
+      'alpha.md': { ...retained.node_visual_settings['alpha.md'], attachment_size_multiplier: 0.8 },
+      'image.png': { attachment_size_multiplier: 0.1 },
+    },
+  };
+  const original = structuredClone(old);
+  const expected = plugin.normalizeData(retained);
+  assert.deepEqual(plugin.normalizeData(old), expected);
+  assert.deepEqual(old, original, 'loading must not mutate the input layout');
+  putLayout(old);
+  assert.equal(await view.loadSavedLayout({ silent: true }), true);
+  assert.deepEqual(plugin.data, expected);
+  assert.equal(await view.saveCurrentLayout({ silent: true }), true);
+  const written = JSON.parse(files.get(layoutPath()));
+  for (const key of Object.keys(legacy)) {
+    assert(!(key in written.settings));
+    assert(!(key in written.saved_layout_settings));
+  }
+  assert.deepEqual(written.pins, expected.pins);
+  assert.deepEqual(written.orbit_pins, expected.orbit_pins);
+  assert.deepEqual(written.saved_positions, expected.saved_positions);
+  assert.deepEqual(written.node_visual_settings, expected.node_visual_settings);
+});
+
+test('unlinked attachments require both flags and remain subject to orphan filtering', (t) => {
+  const { plugin, app } = fixture(t);
+  const files = [
+    { path: 'alpha.md', basename: 'alpha', extension: 'md' },
+    { path: 'upper.MD', basename: 'upper', extension: 'MD' },
+    { path: 'linked.png', basename: 'linked', extension: 'png' },
+    { path: 'assets/unused.PDF', basename: 'unused', extension: 'PDF' },
+    { path: 'LICENSE', basename: 'LICENSE', extension: '' },
+  ];
+  app.vault.getMarkdownFiles = () => files.slice(0, 2);
+  app.vault.getAbstractFileByPath = (path) => files.find((file) => file.path === path);
+  const enumerate = t.mock.fn(() => files);
+  app.vault.getFiles = enumerate;
+  app.metadataCache.getFileCache = () => ({});
+  app.metadataCache.resolvedLinks = { 'alpha.md': { 'linked.png': 1 } };
+  const collect = () => Object.getPrototypeOf(plugin).collectGraphData.call(plugin);
+  for (const hide_attachments of [true, false]) {
+    for (const include_unlinked_attachments of [false, true]) {
+      for (const hide_orphans of [true, false]) {
+        Object.assign(plugin.data.settings, {
+          hide_attachments,
+          include_unlinked_attachments,
+          hide_orphans,
+        });
+        const before = enumerate.mock.callCount();
+        const graph = collect();
+        const includeAll = !hide_attachments && include_unlinked_attachments;
+        assert.equal(enumerate.mock.callCount() - before, Number(includeAll));
+        const expected = hide_orphans ? [] : ['alpha.md', 'upper.MD'];
+        if (!hide_attachments) {
+          if (hide_orphans) expected.push('alpha.md');
+          expected.push('linked.png');
+          if (includeAll && !hide_orphans) expected.push('assets/unused.PDF', 'LICENSE');
+        }
+        assert.deepEqual(graph.nodes.map((node) => node.id).sort(), expected.sort());
+        assert.deepEqual(
+          graph.edges,
+          hide_attachments ? [] : [{ source: 'alpha.md', target: 'linked.png' }]
+        );
+        for (const node of graph.nodes) {
+          assert.equal(node.meta.isAttachment, !node.id.toLowerCase().endsWith('.md'));
+        }
+      }
+    }
+  }
+});
+
+test('include unlinked attachments defaults off, normalizes and round-trips per layout', async (t) => {
+  const { plugin, view, writes, putLayout } = fixture(t);
+  assert.equal(plugin.data.settings.include_unlinked_attachments, false);
+  assert.equal(
+    plugin.normalizeData({ settings: { include_unlinked_attachments: 1 } }).settings
+      .include_unlinked_attachments,
+    true
+  );
+  assert.equal(
+    plugin.normalizeData({ settings: { include_unlinked_attachments: null } }).settings
+      .include_unlinked_attachments,
+    false
+  );
+  plugin.data.settings.include_unlinked_attachments = true;
+  assert.equal(await view.saveCurrentLayout(), true);
+  const saved = JSON.parse(writes.at(-1).contents);
+  assert.equal(saved.settings.include_unlinked_attachments, true);
+  assert.equal(saved.saved_layout_settings.include_unlinked_attachments, true);
+  plugin.data.settings.include_unlinked_attachments = false;
+  assert.equal(await view.loadSavedLayout(), true);
+  assert.equal(plugin.data.settings.include_unlinked_attachments, true);
+  putLayout({ settings: {} });
+  assert.equal(await view.loadSavedLayout(), true);
+  assert.equal(plugin.data.settings.include_unlinked_attachments, false);
+});
+
+test('unlinked attachment UI toggle follows Show attachments and uses normal data refresh', (t) => {
+  const { plugin, view } = fixture(t);
+  const fileTypes = t.mock.method(view, 'buildAttachmentFileTypesControl', () => {});
+  view.sidePanelEl = element();
+  view.sidePanelOpen = true;
+  for (const method of [
+    'buildFindSection',
+    'addSideModifierSelect',
+    'addSideSlider',
+    'buildGroupEditorSection',
+    'buildQueryRuleEditorSection',
+    'addLayoutFileSearchRow',
+    'addSideSaveLayoutButton',
+    'syncSidePanelControls',
+  ])
+    t.mock.method(view, method, () => {});
+  const toggles = [];
+  const original = view.addSideToggle.bind(view);
+  t.mock.method(view, 'addSideToggle', (...args) => {
+    toggles.push(args);
+    return original(...args);
+  });
+  const refresh = t.mock.method(view, 'applyRefreshMode', () => {});
+  const persist = t.mock.method(plugin, 'schedulePersist', () => {});
+  plugin.data.settings.hide_attachments = false;
+  Object.getPrototypeOf(view).buildSidePanel.call(view);
+  const index = toggles.findIndex((args) => args[2] === 'hide_attachments');
+  assert.equal(toggles[index + 1][0], toggles[index][0]);
+  assert.equal(toggles[index + 1][1], 'Show unlinked attachments');
+  assert.equal(toggles[index + 1][2], 'include_unlinked_attachments');
+  assert.equal(fileTypes.mock.callCount(), 1);
+  view.sideControls.get('include_unlinked_attachments').input.events.click();
+  assert.equal(plugin.data.settings.include_unlinked_attachments, true);
+  assert.deepEqual(refresh.mock.calls[0].arguments, ['data']);
+  assert.equal(persist.mock.callCount(), 1);
+  assert.equal(toggles[index][4].rebuildPanelOnChange, true);
+  plugin.data.settings.hide_attachments = true;
+  toggles.length = 0;
+  Object.getPrototypeOf(view).buildSidePanel.call(view);
+  assert.equal(view.sideControls.has('include_unlinked_attachments'), false);
+  assert.equal(fileTypes.mock.callCount(), 1, 'file types hidden with attachments off');
+  assert.equal(
+    toggles.some((args) => args[2] === 'include_unlinked_attachments'),
+    false
+  );
+  assert.equal(
+    plugin.data.settings.include_unlinked_attachments,
+    true,
+    'hiding preserves the setting'
+  );
+  plugin.data.settings.hide_attachments = false;
+  Object.getPrototypeOf(view).buildSidePanel.call(view);
+  assert.equal(view.sideControls.has('include_unlinked_attachments'), true);
+  assert.equal(fileTypes.mock.callCount(), 2);
+});
+
+test('excluded types remain excluded after disappearing and returning while new types are included', (t) => {
+  const { plugin, app } = fixture(t);
+  const note = { path: 'note.md', basename: 'note', extension: 'md' };
+  const file = (path, extension) => ({ path, basename: path, extension });
+  let attachments = [file('old.PNG', 'PNG'), file('LICENSE', '')];
+  app.vault.getFiles = () => [note, ...attachments];
+  app.vault.getMarkdownFiles = () => [note];
+  app.vault.getAbstractFileByPath = (path) => [note, ...attachments].find((f) => f.path === path);
+  app.metadataCache.getFileCache = () => ({});
+  Object.assign(plugin.data.settings, {
+    hide_attachments: false,
+    include_unlinked_attachments: true,
+    hide_orphans: false,
+    excluded_attachment_extensions: ['png', ''],
+  });
+  const collect = () => Object.getPrototypeOf(plugin).collectGraphData.call(plugin);
+  assert.deepEqual(
+    collect().nodes.map((node) => node.id),
+    ['note.md']
+  );
+  attachments = [file('new.PDF', 'PDF')];
+  assert.deepEqual(
+    collect()
+      .nodes.map((node) => node.id)
+      .sort(),
+    ['new.PDF', 'note.md']
+  );
+  assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, ['png', '']);
+  attachments.push(file('returned.png', 'png'), file('README', ''));
+  assert.deepEqual(
+    collect()
+      .nodes.map((node) => node.id)
+      .sort(),
+    ['new.PDF', 'note.md']
+  );
+});
+
+test('two saved layouts restore independent attachment visibility and exclusions', async (t) => {
+  const { plugin, view } = fixture(t);
+  Object.assign(plugin.data.settings, {
+    hide_attachments: false,
+    include_unlinked_attachments: true,
+    excluded_attachment_extensions: ['png', ''],
+  });
+  assert.equal(await view.saveCurrentLayout({ silent: true }), true);
+  plugin.data.active_layout_name = 'other.json';
+  Object.assign(plugin.data.settings, {
+    hide_attachments: true,
+    include_unlinked_attachments: false,
+    excluded_attachment_extensions: ['pdf'],
+  });
+  assert.equal(await view.saveCurrentLayout({ silent: true }), true);
+  for (const [name, hide, unlinked, excluded] of [
+    ['data.json', false, true, ['png', '']],
+    ['other.json', true, false, ['pdf']],
+    ['data.json', false, true, ['png', '']],
+  ]) {
+    plugin.data.active_layout_name = name;
+    assert.equal(await view.loadSavedLayout({ silent: true }), true);
+    assert.equal(plugin.data.settings.hide_attachments, hide);
+    assert.equal(plugin.data.settings.include_unlinked_attachments, unlinked);
+    assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, excluded);
+  }
 });

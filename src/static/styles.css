@@ -996,3 +996,90 @@ input.graphfrontier-group-color-input::-webkit-color-swatch {
   background: var(--background-primary);
   box-shadow: none;
 }
+.graphfrontier-input-menu.graphfrontier-input-menu-match-width {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.graphfrontier-input-menu-check-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.graphfrontier-input-menu-check-item input {
+  flex-shrink: 0;
+}
+
+.graphfrontier-input-menu-count {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.graphfrontier-sidepanel .graphfrontier-file-types-search input.graphfrontier-find-input {
+  text-overflow: ellipsis;
+}
+
+.graphfrontier-input-menu.graphfrontier-input-menu-multi {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  max-height: 248px;
+  overflow: hidden;
+}
+
+.graphfrontier-input-menu-list {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.graphfrontier-input-menu-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: 0;
+  box-sizing: border-box;
+  gap: 4px;
+  padding: 2px 2px 4px;
+}
+
+.graphfrontier-input-menu-multi .graphfrontier-input-menu-item {
+  box-sizing: border-box;
+  min-height: 34px;
+}
+
+.graphfrontier-input-menu-controls .graphfrontier-input-menu-bulk {
+  border: 1px solid var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 auto;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.graphfrontier-input-menu-bulk .graphfrontier-input-menu-main {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.graphfrontier-input-menu-multi .graphfrontier-input-menu-check-item {
+  display: flex;
+  align-items: center;
+}
+
+.graphfrontier-input-menu-check-item .graphfrontier-input-menu-main {
+  min-width: 0;
+}
+
+.graphfrontier-sidepanel .graphfrontier-attachments-content > * + * {
+  padding-top: 2px;
+}

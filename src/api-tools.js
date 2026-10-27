@@ -27,16 +27,18 @@ const settings = Object.fromEntries(
   ])
 );
 Object.assign(settings, visuals, {
+  attachment_node_color: color.nullable(),
+  excluded_attachment_extensions: z.array(z.string().max(4096)).max(4096),
   grid_step: number(5, 50).multipleOf(5),
+  grid_line_width: number(0.1, 1).multipleOf(0.1),
   base_link_strength: number(1, 100),
   link_distance: number(1, 50),
-  repel_strength: number(0, 100),
-  repel_radius: number(20, 500),
+  repel_strength: number(0, 200),
+  repel_radius: number(20, 1000),
   center_strength: number(1, 100),
   damping: number(0.01, 0.9),
   strong_pull_multiplier: number(1, 10),
   orbit_distance: number(1, 100),
-  attachment_link_distance_multiplier: number(1, 100),
   search_mode: z.enum(['find', 'filter']),
 });
 for (const key of ['quick_pick_modifier', 'selection_box_modifier', 'selection_toggle_modifier'])

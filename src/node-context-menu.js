@@ -1,9 +1,34 @@
 const { Menu, Notice } = require('obsidian');
 const { openNoteTarget } = require('./note-navigation');
 
-function buildNodeContextMenu(view, node, clientX, clientY) {
+function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   const { app, plugin } = view;
-  const menu = new Menu(app);
+  const menu = options.menu || new Menu(app);
+  const snapshot = options.snapshot || view.captureNodeActionTargets(node);
+  const only = !!options.singleOnly;
+  const singleSnapshot = { ...snapshot, ids: [node.id] };
+  if (!only && snapshot.ids.length > 1) {
+    view.addSelectionActionsToMenu(menu, snapshot, clientX, clientY);
+    menu.addItem((item) =>
+      item
+        .setTitle(view.nodeActionLabel('Combine selected into subgraph', snapshot))
+        .setIcon('circle')
+        .onClick(() => view.editSubgraph(null, snapshot))
+    );
+    view.addContextSubmenuItem(menu, {
+      title: `Only for ${view.getLinkedNodeDisplayName(node)}`,
+      icon: 'file',
+      clientX,
+      clientY,
+      fillSubmenu: (target) =>
+        buildNodeContextMenu(view, node, clientX, clientY, {
+          menu: target,
+          snapshot,
+          singleOnly: true,
+        }),
+    });
+    return menu;
+  }
   const file = app.vault.getAbstractFileByPath(node.id);
   const isFile = !!file && typeof file.extension === 'string';
   const nativeMenu = new Menu(app);
@@ -19,6 +44,7 @@ function buildNodeContextMenu(view, node, clientX, clientY) {
         .setIcon(icon)
         .onClick(async (event) => {
           try {
+            if (!view.resolveNodeActionTargets(singleSnapshot).length) return;
             await callback(event);
           } catch (error) {
             new Notice(`${title}: ${error.message}`);
@@ -73,33 +99,41 @@ function buildNodeContextMenu(view, node, clientX, clientY) {
     menu,
     'Combine selected into subgraph',
     'circle',
-    () => view.editSubgraph(),
-    view.selectedNodeIds.size > 0
+    () => view.editSubgraph(null, snapshot),
+    !only && view.selectedNodeIds.has(node.id) && snapshot.ids.length > 0
   );
-  const copy = async (text) => {
-    if (!(await view.copyTextToClipboard(text))) throw new Error('Clipboard is unavailable');
-  };
 
   add(
     menu,
     'Copy system root',
     'hard-drive',
-    () => copy(app.vault.adapter.getFullPath(file.path)),
-    isFile && typeof app.vault.adapter.getFullPath === 'function'
+    () => view.copySelectedNodes('systemPaths', snapshot),
+    !only && isFile && typeof app.vault.adapter.getFullPath === 'function'
   );
-  submenu('Copy', 'copy', (target) => {
-    add(target, 'Copy name', 'copy', () => copy(String(node.label || node.id)));
-    add(
-      target,
-      'As Obsidian URL',
-      'link',
-      () => app.copyObsidianUrl(file),
-      isFile && typeof app.copyObsidianUrl === 'function'
-    );
-    add(target, 'From vault folder', 'vault', () => copy(file.path), isFile);
-    add(target, 'Copy linked names', 'copy', () => view.copyLinkedNames(node.id), hasLinked);
-    add(target, 'Copy linked paths', 'copy', () => view.copyLinkedPaths(node.id), hasLinked);
-  });
+  submenu(
+    'Copy',
+    'copy',
+    (target) => {
+      add(target, 'Copy name', 'copy', () => view.copySelectedNodes('names', snapshot), !only);
+      add(
+        target,
+        'As Obsidian URL',
+        'link',
+        () => app.copyObsidianUrl(file),
+        isFile && typeof app.copyObsidianUrl === 'function'
+      );
+      add(
+        target,
+        'From vault folder',
+        'vault',
+        () => view.copySelectedNodes('paths', snapshot),
+        !only && isFile
+      );
+      add(target, 'Copy linked names', 'copy', () => view.copyLinkedNames(node.id), hasLinked);
+      add(target, 'Copy linked paths', 'copy', () => view.copyLinkedPaths(node.id), hasLinked);
+    },
+    !only || hasLinked || (isFile && typeof app.copyObsidianUrl === 'function')
+  );
   if (isFile) menu.addSeparator();
 
   const properties = isFile ? app.metadataCache.getFileCache(file)?.frontmatter : null;
@@ -161,15 +195,15 @@ function buildNodeContextMenu(view, node, clientX, clientY) {
     menu,
     'Pin node',
     'pin',
-    () => view.pinNodeExact(node.id, { x: node.x, y: node.y }),
-    !plugin.isPinned(node.id) || plugin.getPinMode(node.id) !== 'exact'
+    () => view.applyNodePinAction(snapshot, 'exact'),
+    !only && view.getNodePinActionTargets(snapshot, 'exact').length > 0
   );
   add(
     menu,
     'Pin to grid',
     'grid',
-    () => view.pinNodeToGrid(node.id, { x: node.x, y: node.y }),
-    !plugin.isPinned(node.id) || plugin.getPinMode(node.id) !== 'grid'
+    () => view.applyNodePinAction(snapshot, 'grid'),
+    !only && view.getNodePinActionTargets(snapshot, 'grid').length > 0
   );
   submenu(
     'Pin linked',
@@ -189,12 +223,25 @@ function buildNodeContextMenu(view, node, clientX, clientY) {
     },
     hasLinked
   );
-  add(menu, 'Unpin node', 'pin-off', unpin, pinned);
+  add(
+    menu,
+    'Unpin node',
+    'pin-off',
+    () => view.applyNodePinAction(snapshot, 'unpin'),
+    !only && pinned
+  );
   menu.addSeparator();
 
-  submenu('Visual settings', 'settings-2', (target) => {
-    view.addVisualSettingsToMenu(target, node, clientX, clientY);
-  });
+  submenu(
+    only ? 'Advanced visual settings' : 'Visual settings',
+    'settings-2',
+    (target) => {
+      view.addVisualSettingsToMenu(target, node, clientX, clientY, singleSnapshot, {
+        advancedOnly: only,
+      });
+    },
+    !only || !node.meta?.darkEnergy
+  );
   if (node.meta?.darkEnergy) return menu;
   menu.addSeparator();
 

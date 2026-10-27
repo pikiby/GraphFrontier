@@ -16,7 +16,9 @@ The view opens as a regular tab and can be moved between panes/sidebars.
 - Drag empty area: pan
 - Mouse wheel: zoom
 - Drag node: move node
-- Left click node: open markdown file (if node is a markdown file)
+- Left click file node: open in a new Obsidian tab using its registered editor/viewer
+  (including installed view plugins); unsupported vault formats open in the default external app.
+  Missing files and folders are ignored; opening errors are shown as notices.
 
 ## Touch Navigation
 
@@ -47,10 +49,10 @@ gravity node** removes only the object. No Markdown files or links are created.
 Matching free nodes are attracted to the center while ordinary graph forces continue.
 The **Repulsion** slider (0-100, default 0/off) pushes nonmatching nodes away without
 changing attraction. Repulsion fades smoothly to zero at 1000 graph units from the center.
-Like attraction, it respects pins, active dragging and attachment isolation, and is saved
+Like attraction, it respects pins and active dragging, and is saved
 with the layout. Gravity centers do not repel each other.
-Pinned, orbit-pinned and actively dragged nodes are not pulled. Attachment isolation
-settings still apply. Multiple centers combine their attraction. Centers stay visible
+Pinned, orbit-pinned and actively dragged nodes are not pulled. Attachments obey the same
+force rules as notes. Multiple centers combine their attraction. Centers stay visible
 when search or blacklist/whitelist hide notes, but hidden notes do not participate in physics.
 
 Objects, rules, strength and positions belong to the active layout and follow its existing
@@ -85,7 +87,9 @@ interior is not translated. Notes and their links/settings remain intact.
 Save from any pane merges all open local spaces and retains closed/filtered members,
 without replacing the main camera or search with an inner pane's state. Autosave off
 stays off; mutations remain dirty until an explicit save. Creation and Ungroup wake
-physics immediately. Explicit layout restoration stays paused. A stale pane after a
+physics immediately. Opening a root or subgraph pane restores saved positions and camera,
+then lets free nodes settle automatically without a click. Manual pins and orbit constraints
+are retained. Explicit Load/Reset layout restoration stays paused. A stale pane after a
 layout switch or Ungroup remains empty instead of exposing the whole vault.
 
 Whitelist, blacklist and exact node filters still apply to canonical members and links.
@@ -121,7 +125,7 @@ Flow:
 ## Right-Click Context Menu On Node
 
 **Visual settings** provides per-node sliders for node size, edge width, painted edge width,
-text zoom, text size and hover dimming. Attachment nodes also offer attachment size.
+text zoom, text size and hover dimming. Notes and attachments use the same size controls.
 Node size supports up to x4 in both menus. **Text zoom** supports 1-40 steps in both menus. **Node color** sets the global base color or
 an individual override; individual color takes priority over Groups, then the global base.
 **Color aura** is available only in individual settings: 0 disables it (the default),
@@ -153,7 +157,28 @@ paths open in Obsidian; external files and folders open through the desktop's de
 Paths can be absolute, vault-relative, or start with `~/`. External paths must exist on the
 current device. The note and normal node click behavior are unchanged.
 
-The menu is arranged in this order:
+Right-clicking a selected node targets the entire selection. Right-clicking an unselected
+node targets only that node, without changing selection. Empty canvas offers compatible
+actions for the selection, without picking an arbitrary node. Targets are captured when
+the menu opens; removed nodes are ignored and switching layout invalidates old actions.
+
+The ordinary **Copy** submenu copies names, vault paths and available system paths, one
+per line. **Ctrl+C** / **Cmd+C** copies selected names through the same action, except in
+text inputs or when native text is selected. Batch labels include eligible counts, such
+as **Unpin · 3 of 5 nodes**. Exact/grid pinning and unpinning support selections; unchanged
+exact pins and already-grid pins are skipped. Grid placement reserves unique cells,
+excludes batch targets' old pins, preserves unchanged grid pins and protects outsiders.
+Grid occupancy ignores stale pins for nodes absent from the current graph or outside
+the current graph scope, so they do not block available cells.
+
+Basic **Visual settings** and reset apply to eligible selected nodes. Each control shows
+its eligible count; mixed values are marked **Mixed**, including colors, without writing
+anything on opening. Edge controls omit gravity nodes. In a multi-node menu, file opening/properties, rename, deletion, linked/orbit-center
+operations, native plugin actions, Strong pull and edge painting remain single-only under
+**Only for <name>**. Deletion never becomes a batch operation. Blank-canvas selection
+menus have no single-only actions.
+
+For one effective target, the menu is arranged in this order:
 
 - **Copy system root**, then **Copy**: Obsidian URL, vault-relative path, linked names and linked paths.
 - **Open path**, **Open URL**, then **Open**: same tab, new window, default app, system explorer and file navigation.
@@ -162,7 +187,7 @@ The menu is arranged in this order:
 - **Select linked nodes**, **Bookmark**, then **Other**: move, bookmark, merge, add to search and local graph.
 - **Delete** at the bottom uses Obsidian's normal deletion confirmation.
 
-Actions appear only when applicable: YAML actions require the corresponding property, unpin actions require matching pins, and linked actions require linked nodes. The text-size slider changes only this node; **Use global text size** removes its override.
+Actions appear only when applicable: YAML actions require the corresponding property, unpin actions require matching pins, and linked actions require linked nodes. The text-size slider changes the effective targets; **Reset visual settings** removes their overrides.
 
 ## Layout Persistence
 

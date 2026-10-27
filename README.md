@@ -8,6 +8,9 @@ GraphFrontier is an interactive graph workspace for Obsidian, with its own rende
 
 Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, combine selections into named subgraphs, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
+Include attachments as ordinary graph nodes, filter them by file type, and apply
+selection actions to multiple nodes at once. See the [0.8.7 release notes](docs/releases/0.8.7.md).
+
 Use it to:
 
 - Explore connections and discover patterns in your notes
@@ -34,7 +37,7 @@ Use it to:
       <img src="docs/media/pin_node_grid.gif" alt="Pin node to grid demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Pin nodes to the grid</strong></p>
-      <p>Snap nodes to grid points to keep your arrangement aligned.</p>
+      <p>Snap nodes to grid points and adjust grid line thickness from 0.1 to 1 pixel.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
@@ -118,7 +121,7 @@ Use it to:
       <img src="docs/media/node_visuals.gif" alt="Customize individual node appearance" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Customize individual node appearance</strong></p>
-      <p>Adjust one node's color, size, aura and labels independently.</p>
+      <p>Adjust colors, sizes, auras and labels for one node or a selection.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
@@ -140,7 +143,7 @@ Use it to:
       <img src="docs/media/copy_linked_names.gif" alt="Copy linked names and paths demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Copy linked names and paths</strong></p>
-      <p>Copy sorted names or paths, one per line with commas between items.</p>
+      <p>Copy names and paths from a selection or linked nodes. Ctrl+C / Cmd+C copies selected names.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/export_html.gif" alt="Export interactive HTML graphs with note previews" width="100%">
@@ -150,6 +153,21 @@ Use it to:
     </td>
   </tr>
 </table>
+
+## Attachments And Multi-Node Actions
+
+Show linked attachments alongside notes, or enable **Show unlinked attachments**
+to include other files in the vault. **Show orphans** still applies. Use the
+**File type:** search field to choose multiple extensions and set an attachment
+node color. These settings are saved with each layout.
+
+Attachments use the same size and physics controls as other nodes. Their labels
+include file extensions. Supported files open in Obsidian; other formats use the
+system's default app where available.
+
+Select several nodes to pin, unpin, change compatible visual settings, or copy
+names and paths together. Context-menu counts show how many nodes an action will
+affect; actions that require a single node remain separate.
 
 ## API And AI-Agent Control
 
@@ -228,7 +246,7 @@ See the [installation guide](docs/installation.md) for source builds and trouble
 
 - **Getting started:** [Installation](docs/installation.md), [Usage](docs/usage.md), [Settings](docs/settings.md).
 - **Advanced:** [Hotkeys and commands](docs/hotkeys.md), [Physics model](docs/physics.md), [Local API and embedded MCP](docs/mcp.md), [Development and project structure](docs/development.md).
-- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.6](docs/releases/0.8.6.md), [release history](docs/releases/).
+- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.7](docs/releases/0.8.7.md), [release history](docs/releases/).
 
 ## Support
 

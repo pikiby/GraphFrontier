@@ -245,3 +245,23 @@ test('text-size slider still edits only its node from the Visual settings submen
   assert.equal(plugin.getNodeLabelSize(node.id), 18);
   assert.equal(plugin.getNodeLabelSize('other.md'), null);
 });
+
+test('attachment same-tab opening uses native routing while default-app stays explicit', async (t) => {
+  const { app, view, node, file, calls } = setup(t);
+  file.extension = 'custom';
+  view.leaf = { openFile: async (target) => calls.push(['native', target]) };
+  app.openWithDefaultApp = (path) => calls.push(['external', path]);
+  let open = item(buildNodeContextMenu(view, node, 10, 20), 'Open').submenu;
+  await item(open, 'Open in same tab').callback();
+  await item(open, 'Open in default app').callback();
+  assert.deepEqual(calls, [
+    ['native', file],
+    ['external', file.path],
+  ]);
+  // An unsupported file is handled by openFile itself, not a second menu fallback.
+  view.leaf.openFile = async (target) => app.openWithDefaultApp(target.path);
+  open = item(buildNodeContextMenu(view, node, 10, 20), 'Open').submenu;
+  await item(open, 'Open in same tab').callback();
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.at(-1), ['external', file.path]);
+});

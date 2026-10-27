@@ -29,10 +29,12 @@ const DEFAULT_DATA = {
   hotkeys: {},
   settings: {
     grid_step: 20,
+    grid_line_width: 1,
     show_grid: true,
     hide_orphans: true,
     hide_attachments: true,
-    attachments_on_orbits: true,
+    include_unlinked_attachments: false,
+    excluded_attachment_extensions: [],
     existing_files_only: true,
     search_mode: 'find',
     show_search_connections: false,
@@ -41,6 +43,7 @@ const DEFAULT_DATA = {
     selection_toggle_modifier: 'none',
     node_size_scale: 1,
     node_color: '#7aa2f7',
+    attachment_node_color: null,
     aura_radius: 0,
     aura_brightness: 22,
     edge_width_scale: 0.34,
@@ -50,8 +53,6 @@ const DEFAULT_DATA = {
     hover_dim_strength: 80,
     strong_pull_multiplier: 5,
     orbit_distance: 48,
-    attachment_size_multiplier: 1,
-    attachment_link_distance_multiplier: 20,
     base_link_strength: 46,
     link_distance: 24,
     repel_strength: 51,
@@ -147,7 +148,18 @@ const HOTKEY_KEY_ALIASES = {
   minus: '-',
 };
 
+function normalizeAttachmentExtensions(value) {
+  return Array.isArray(value)
+    ? [
+        ...new Set(
+          value.filter((ext) => typeof ext === 'string').map((ext) => ext.trim().toLowerCase())
+        ),
+      ]
+    : [];
+}
+
 module.exports = {
+  normalizeAttachmentExtensions,
   GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
   NODE_MULTIPLIER_MAX,

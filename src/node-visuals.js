@@ -2,14 +2,6 @@ const { DEFAULT_DATA } = require('./constants');
 
 const NODE_VISUAL_SETTINGS = [
   { key: 'node_size_scale', label: 'Node size', min: 0.1, max: 4, step: 0.01 },
-  {
-    key: 'attachment_size_multiplier',
-    label: 'Attachment size',
-    min: 0.1,
-    max: 1,
-    step: 0.1,
-    attachment: true,
-  },
   { key: 'node_color', label: 'Node color', type: 'color' },
   { key: 'aura_radius', label: 'Color aura', min: 0, max: 5000, step: 10 },
   { key: 'aura_brightness', label: 'Aura brightness', min: 0, max: 50, step: 1 },
@@ -78,6 +70,7 @@ function getNodeColor(plugin, node, groupColor) {
   return (
     getNodeVisualOverride(plugin, node.id, 'node_color') ??
     groupColor ??
+    (node.meta?.isAttachment ? plugin.getSettings().attachment_node_color : null) ??
     getNodeVisualSetting(plugin, node.id, 'node_color')
   );
 }

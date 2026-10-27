@@ -227,3 +227,138 @@ test('malformed URL is rejected and native path errors are reported without fs',
   assert.match(notices.at(-1), /File not found/);
   assert.equal(opened, true);
 });
+
+// Model the native openFile contract verified in Obsidian 1.14.5 app.js:
+// registered views use setViewState; other vault files use openWithDefaultApp.
+function nativeFileLeaf(app, registry, opened) {
+  return {
+    async openFile(file) {
+      const type = registry.get(file.extension);
+      if (type) opened.push([type, file.path]);
+      else app.openWithDefaultApp(file.path);
+    },
+  };
+}
+
+test('graph file clicks create native leaves only for registered internal views', async (t) => {
+  const { app, view } = fixture(t);
+  const opened = [];
+  const external = [];
+  const registry = new Map([
+    ['md', 'markdown'],
+    ['png', 'image'],
+    ['pdf', 'pdf'],
+    ['txt', 'plugin-text'],
+    ['js', 'plugin-code'],
+    ['custom', 'plugin-custom'],
+  ]);
+  app.viewRegistry = { getTypeByExtension: (extension) => registry.get(extension) };
+  app.openWithDefaultApp = (path) => external.push(path);
+  app.vault.getAbstractFileByPath = (path) => ({ path, extension: path.split('.').at(-1) });
+  let leaves = 0;
+  app.workspace.getLeaf = (newLeaf) => {
+    assert.equal(newLeaf, true, 'preserve the graph tab');
+    leaves++;
+    return nativeFileLeaf(app, registry, opened);
+  };
+  view.leaf = { openFile: () => assert.fail('Must not replace graph tab') };
+  for (const extension of [...registry.keys(), 'unsupported']) {
+    await view.openNodeFile(`file.${extension}`);
+  }
+  assert.equal(leaves, 6);
+  assert.deepEqual(
+    opened,
+    [...registry].map(([extension, type]) => [type, `file.${extension}`])
+  );
+  assert.deepEqual(external, ['file.unsupported']);
+  registry.delete('txt');
+  await view.openNodeFile('file.txt');
+  assert.equal(leaves, 6, 'unregistered extensions must not create a blank leaf');
+  assert.deepEqual(external, ['file.unsupported', 'file.txt'], 'respect plugin unregistration');
+});
+
+test('external graph files never create a leaf or change the active graph tab', async (t) => {
+  const { app, view } = fixture(t);
+  const graphLeaf = { view };
+  app.workspace.activeLeaf = graphLeaf;
+  app.viewRegistry = { getTypeByExtension: () => undefined };
+  app.vault.getAbstractFileByPath = (path) => ({ path, extension: 'unsupported' });
+  app.workspace.getLeaf = () => assert.fail('External opens must not create a leaf');
+  app.workspace.setActiveLeaf = () => assert.fail('External opens must not move graph focus');
+  const opened = [];
+  app.openWithDefaultApp = async (path) => opened.push(path);
+  await view.openNodeFile('file.unsupported');
+  assert.deepEqual(opened, ['file.unsupported']);
+  assert.equal(app.workspace.activeLeaf, graphLeaf);
+
+  const start = notices.length;
+  for (const asynchronous of [false, true]) {
+    app.openWithDefaultApp = () => {
+      opened.push('failed');
+      if (asynchronous) return Promise.reject(new Error('External failed'));
+      throw new Error('External failed');
+    };
+    await assert.doesNotReject(view.openNodeFile('file.unsupported'));
+    assert.equal(app.workspace.activeLeaf, graphLeaf);
+  }
+  assert.equal(opened.length, 3, 'failed external opens are not retried');
+  assert.deepEqual(notices.slice(start), [
+    'Cannot open file: External failed',
+    'Cannot open file: External failed',
+  ]);
+});
+
+test('graph opening ignores missing files, directories and malformed file targets', async (t) => {
+  const { app, view } = fixture(t);
+  app.workspace.getLeaf = () => assert.fail('Must not create a leaf');
+  app.openWithDefaultApp = () => assert.fail('Must not launch an external app');
+  for (const file of [null, { path: 'folder', children: [] }, { extension: 'png' }]) {
+    app.vault.getAbstractFileByPath = () => file;
+    await view.openNodeFile('target');
+  }
+});
+
+test('graph file opening catches sync and async failures without an external retry', async (t) => {
+  const { app, view } = fixture(t);
+  const start = notices.length;
+  app.viewRegistry = { getTypeByExtension: () => 'image' };
+  app.vault.getAbstractFileByPath = () => ({ path: 'file.png', extension: 'png' });
+  app.openWithDefaultApp = () => assert.fail('Must not double-launch after failure');
+  let attempts = 0;
+  app.workspace.getLeaf = () => ({
+    async openFile() {
+      attempts++;
+      throw new Error('Viewer failed');
+    },
+  });
+  await assert.doesNotReject(view.openNodeFile('file.png'));
+  app.workspace.getLeaf = () => {
+    throw new Error('Leaf failed');
+  };
+  await assert.doesNotReject(view.openNodeFile('file.png'));
+  assert.equal(attempts, 1);
+  assert.deepEqual(notices.slice(start), [
+    'Cannot open file: Viewer failed',
+    'Cannot open file: Leaf failed',
+  ]);
+});
+
+test('graph synthetic nodes keep special routing and report rejected operations', async (t) => {
+  const { app, view } = fixture(t);
+  const calls = [];
+  app.vault.getAbstractFileByPath = () => assert.fail('Synthetic nodes are not files');
+  view.nodeById.set('group', { meta: { subgraph: true } });
+  const gravity = { meta: { darkEnergy: true } };
+  view.nodeById.set('gravity', gravity);
+  view.openSubgraphSeparately = async (id) => calls.push(id);
+  view.editDarkEnergy = (node) => calls.push(node);
+  await view.openNodeFile('group');
+  await view.openNodeFile('gravity');
+  assert.deepEqual(calls, ['group', gravity]);
+  const start = notices.length;
+  view.editDarkEnergy = async () => {
+    throw new Error('Gravity failed');
+  };
+  await assert.doesNotReject(view.openNodeFile('gravity'));
+  assert.deepEqual(notices.slice(start), ['Cannot open file: Gravity failed']);
+});

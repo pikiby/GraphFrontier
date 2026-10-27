@@ -99,64 +99,23 @@ function renderFrame(view) {
   drawSelectionBox(view, ctx);
 }
 
-// Draw hovered node title in a compact floating bubble.
-function drawFocusedNodeTitle(view, ctx, node) {
-  const point = view.worldToScreen(node.x, node.y);
-  const labelBase = String(node.label || '');
-  if (!labelBase) return;
-  const fileType = getNodeFileTypeLabel(node);
-  const labelText = fileType ? `${labelBase} (${fileType})` : labelBase;
+function getNodeLabelText(node) {
+  if (!node.meta?.isAttachment) return node.label;
 
-  const fontSize = 13;
-  const padX = 7;
-  const padY = 4;
+  // The real path preserves extension case and extensionless filenames.
+  const path = String(node.meta.path || node.id || '');
+  const filename = path.split('/').pop();
+  if (filename) return filename;
 
-  ctx.save();
-  ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
-  const textWidth = ctx.measureText(labelText).width;
-  const boxWidth = textWidth + padX * 2;
-  const boxHeight = fontSize + padY * 2;
-  const radius = Math.min(8, boxHeight / 2);
-  const boxX = Math.max(6, Math.min(view.viewWidth - boxWidth - 6, point.x - boxWidth / 2));
-  const boxY = Math.max(6, point.y - boxHeight - 10);
-
-  const theme = view.canvasTheme || DARK_THEME;
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = theme.surface;
-  ctx.beginPath();
-  ctx.moveTo(boxX + radius, boxY);
-  ctx.lineTo(boxX + boxWidth - radius, boxY);
-  ctx.arcTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius, radius);
-  ctx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
-  ctx.arcTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight, radius);
-  ctx.lineTo(boxX + radius, boxY + boxHeight);
-  ctx.arcTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius, radius);
-  ctx.lineTo(boxX, boxY + radius);
-  ctx.arcTo(boxX, boxY, boxX + radius, boxY, radius);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = theme.text;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText(labelText, boxX + padX, boxY + padY);
-  ctx.restore();
+  const basename = String(node.meta.fileName || node.label || '');
+  const extension = String(node.meta.fileType || '').trim();
+  if (!basename || !extension || /^(attachment|file)$/i.test(extension)) return basename;
+  return basename.toLowerCase().endsWith(`.${extension.toLowerCase()}`)
+    ? basename
+    : `${basename}.${extension}`;
 }
 
-// Extract node file type used in hover title (md, png, pdf, etc.).
-function getNodeFileTypeLabel(node) {
-  const metaType = String(node?.meta?.fileType || '')
-    .trim()
-    .toLowerCase();
-  if (metaType) return metaType;
-  const pathText = String(node?.id || '').trim();
-  const extMatch = /\.([^.\/]+)$/u.exec(pathText);
-  if (extMatch && extMatch[1]) return String(extMatch[1]).toLowerCase();
-  if (node?.meta?.isAttachment) return 'attachment';
-  return 'md';
-}
-
-// Node radius formula with attachment-specific size multiplier.
+// Shared node radius formula, including attachments.
 function getNodeRadius(view, node) {
   const nodeScaleRaw = view.plugin.clampNumber(
     getNodeVisualSetting(view.plugin, node.id, 'node_size_scale'),
@@ -164,18 +123,10 @@ function getNodeRadius(view, node) {
     4,
     DEFAULT_DATA.settings.node_size_scale
   );
-  const attachmentSizeMultiplier = view.plugin.clampNumber(
-    getNodeVisualSetting(view.plugin, node.id, 'attachment_size_multiplier'),
-    0.1,
-    1,
-    DEFAULT_DATA.settings.attachment_size_multiplier
-  );
   // New node-size scale: 0.1 -> 1, max -> 40.
   const nodeScale = nodeScaleRaw * 10;
   const raw = (3 + Math.log2(node.degree + 2) * 1.4) * (nodeScale / 4);
-  const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
-  const scaledRaw = isAttachmentNode ? raw * attachmentSizeMultiplier : raw;
-  return Math.max(0.2, Math.min(4 * Math.max(1, nodeScaleRaw / 2), scaledRaw / 5));
+  return Math.max(0.2, Math.min(4 * Math.max(1, nodeScaleRaw / 2), raw / 5));
 }
 
 // Convert slider steps into zoom threshold for label visibility.
@@ -322,22 +273,28 @@ function drawGrid(view, ctx) {
   ctx.save();
   ctx.globalAlpha = theme.gridOpacity;
   ctx.strokeStyle = theme.grid;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = view.plugin.clampGridLineWidth(view.plugin.getSettings().grid_line_width);
 
-  ctx.beginPath();
+  // Chromium can drop subpixel lines when a crossed grid shares one path.
+  const strokeSeparately = ctx.lineWidth < 1;
+  if (!strokeSeparately) ctx.beginPath();
   for (let x = startX; x <= endX; x += step) {
+    if (strokeSeparately) ctx.beginPath();
     const sx = view.worldToScreen(x, 0).x;
     const crispX = Math.round(sx) + 0.5;
     ctx.moveTo(crispX, 0);
     ctx.lineTo(crispX, view.viewHeight);
+    if (strokeSeparately) ctx.stroke();
   }
   for (let y = startY; y <= endY; y += step) {
+    if (strokeSeparately) ctx.beginPath();
     const sy = view.worldToScreen(0, y).y;
     const crispY = Math.round(sy) + 0.5;
     ctx.moveTo(0, crispY);
     ctx.lineTo(view.viewWidth, crispY);
+    if (strokeSeparately) ctx.stroke();
   }
-  ctx.stroke();
+  if (!strokeSeparately) ctx.stroke();
   ctx.restore();
 }
 
@@ -493,7 +450,7 @@ function drawEdges(view, ctx) {
   ctx.globalAlpha = 1;
 }
 
-// Draw nodes, labels, hover outlines, and hovered title popup.
+// Draw node auras.
 function drawNodeAuras(view, ctx) {
   const visible = view.getFilterVisibleNodeIds();
   const colors = getGroupColorMap(view);
@@ -638,7 +595,6 @@ function drawNodes(view, ctx) {
           ? focusDimAlpha + (1 - focusDimAlpha) * relationProgress
           : 1;
 
-    const isAttachmentNode = !!(node && node.meta && node.meta.isAttachment);
     let fillColor = getNodeColor(view.plugin, node, groupColor);
     if (isClickFlash) fillColor = '#ffffff';
 
@@ -680,19 +636,17 @@ function drawNodes(view, ctx) {
       isSelectedNode || isHover || isFocusNode,
       getLabelMinimumSize(view, node.id)
     );
-    if (!isAttachmentNode && label.alpha > 0) {
+    if (label.alpha > 0) {
       ctx.globalAlpha = label.alpha;
       ctx.fillStyle = theme.text;
       ctx.font = `${label.fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(node.label, pointX, pointY + radius + 8);
+      ctx.fillText(getNodeLabelText(node), pointX, pointY + radius + 8);
     }
   }
   ctx.globalAlpha = 1;
 
-  const hoverTitleNode = view.hoverNodeId ? view.nodeById.get(view.hoverNodeId) || null : null;
-  if (hoverTitleNode) drawFocusedNodeTitle(view, ctx, hoverTitleNode);
   if (view.clickFlashNodeId && nowMs >= view.clickFlashUntilMs) {
     view.clickFlashNodeId = null;
     view.clickFlashUntilMs = 0;
@@ -726,7 +680,7 @@ module.exports = {
   renderFrame,
   getHoverDimAlpha,
   hexToRgba,
-  drawFocusedNodeTitle,
+  getNodeLabelText,
   getNodeRadius,
   getLabelZoomThreshold,
   getLabelFontSize,

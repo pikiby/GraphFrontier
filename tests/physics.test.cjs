@@ -206,7 +206,7 @@ for (const mode of ['exact', 'grid', 'orbit']) {
 
 for (const mode of ['exact', 'grid']) {
   for (const sameParent of [true, false]) {
-    test(`${mode} pinned attachments repel only siblings (${sameParent ? 'same' : 'different'} parent)`, (t) => {
+    test(`${mode} pinned attachments repel regardless of parent (${sameParent ? 'same' : 'different'} parent)`, (t) => {
       const f = fixture(t, {
         nodes: [
           { id: 'a', meta: { isAttachment: true } },
@@ -228,8 +228,7 @@ for (const mode of ['exact', 'grid']) {
       f.frames();
       assert.equal(f.view.nodeById.get('a').x, 0);
       const free = f.view.nodeById.get('b');
-      if (sameParent) assert(free.x > 60);
-      else assert.equal(free.x, 60);
+      assert(free.x > 60);
     });
   }
 }
@@ -674,3 +673,91 @@ test('explicit layout changes wake a fully settled graph even below the hysteres
   assert(f.view.nodes[0].x < 10);
   assert.equal(f.view.layoutPaused, false);
 });
+
+for (const legacyIsolation of [undefined, false, true]) {
+  for (const forces of ['repel', 'spring', 'center', 'combined']) {
+    for (const filtered of [false, true]) {
+      for (const constraint of ['free', 'exact', 'grid', 'orbit', 'drag']) {
+        test(
+          'same-topology attachment physics: ' +
+            [legacyIsolation, forces, filtered, constraint].join('/'),
+          (t) => {
+            const nodes = [
+              { id: 'core', x: -180, y: -80 },
+              { id: 'a', x: 50, y: 20 },
+              { id: 'b', x: 100, y: 100 },
+              { id: 'note', x: 220, y: 30 },
+              { id: 'orphan', x: -40, y: 160 },
+              { id: 'orphan2', x: -140, y: 130 },
+              { id: 'hidden', x: 400, y: 120 },
+            ];
+            const options = {
+              nodes,
+              edges: [
+                { source: 'core', target: 'a' },
+                { source: 'core', target: 'b' },
+                { source: 'a', target: 'b' },
+                { source: 'a', target: 'note' },
+                { source: 'note', target: 'hidden' },
+              ],
+              settings: {
+                repel_strength: ['repel', 'combined'].includes(forces) ? 200 : 0,
+                base_link_strength: ['spring', 'combined'].includes(forces) ? 20 : 0,
+                center_strength: ['center', 'combined'].includes(forces) ? 25 : 0,
+                link_distance: 45,
+                repel_radius: 1000,
+                layout_autosave: false,
+              },
+              multipliers: { a: 3 },
+              visibleIds: filtered ? new Set(['core', 'a', 'b', 'orphan', 'orphan2']) : null,
+              pins: ['exact', 'grid'].includes(constraint)
+                ? { a: { x: 50, y: 20, mode: constraint } }
+                : {},
+              orbitPins:
+                constraint === 'orbit'
+                  ? {
+                      a: {
+                        anchor_id: 'core',
+                        radius: Math.hypot(230, 100),
+                        angle: Math.atan2(100, 230),
+                      },
+                    }
+                  : {},
+            };
+            const baseline = fixture(t, options);
+            const attachments = fixture(t, {
+              ...options,
+              nodes: nodes.map((node) => ({
+                ...node,
+                meta: { isAttachment: ['a', 'b', 'orphan', 'hidden'].includes(node.id) },
+              })),
+              settings: {
+                ...options.settings,
+                attachment_size_multiplier: 0.8,
+                attachment_link_distance_multiplier: 14,
+                attachments_on_orbits: legacyIsolation,
+              },
+            });
+            if (constraint === 'drag') {
+              baseline.view.dragSelectionOffsets = new Map([['a', { x: 0, y: 0 }]]);
+              attachments.view.dragSelectionOffsets = new Map([['a', { x: 0, y: 0 }]]);
+            }
+            const state = (f) => ({
+              nodes: f.view.nodes.map(({ id, x, y, vx, vy }) => ({ id, x, y, vx, vy })),
+              center: f.view.layoutCenter,
+              paused: f.view.layoutPaused,
+            });
+            for (let frame = 0; frame < 20; frame++) {
+              baseline.frames();
+              attachments.frames();
+              assert.deepEqual(state(attachments), state(baseline));
+            }
+            assert(
+              baseline.view.nodes.some((node, i) => node.x !== nodes[i].x || node.y !== nodes[i].y)
+            );
+          }
+        );
+      }
+    }
+  }
+}

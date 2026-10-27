@@ -11,6 +11,7 @@ const {
   NODE_MULTIPLIER_MAX,
   ZOOM_STEP_FACTOR,
   DEFAULT_DATA,
+  normalizeAttachmentExtensions,
   MIN_ZOOM,
   MAX_ZOOM,
   HOTKEY_COMMANDS,
@@ -432,6 +433,15 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       normalized.saved_positions[nodeId] = { x, y };
     }
     normalized.saved_layout_settings = Object.assign({}, savedLayoutSettings);
+    // Drop obsolete attachment controls from both live and rollback settings, without migration.
+    for (const key of [
+      'attachment_size_multiplier',
+      'attachment_link_distance_multiplier',
+      'attachments_on_orbits',
+    ]) {
+      delete normalized.settings[key];
+      delete normalized.saved_layout_settings[key];
+    }
     for (const [nodeId, position] of Object.entries(savedLayoutPins)) {
       if (!position || typeof position !== 'object') continue;
       const x = Number(position.x);
@@ -457,6 +467,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     }
 
     normalized.settings.grid_step = this.clampGridStep(normalized.settings.grid_step);
+    normalized.settings.grid_line_width = this.clampGridLineWidth(
+      normalized.settings.grid_line_width
+    );
     // Backward compatibility: old link strength stored as tiny float (e.g. 0.001 -> new scale 40).
     if (Number(normalized.settings.base_link_strength) < 1) {
       normalized.settings.base_link_strength =
@@ -477,13 +490,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.repel_strength = this.clampNumber(
       normalized.settings.repel_strength,
       0,
-      100,
+      200,
       DEFAULT_DATA.settings.repel_strength
     );
     normalized.settings.repel_radius = this.clampNumber(
       normalized.settings.repel_radius,
       20,
-      500,
+      1000,
       DEFAULT_DATA.settings.repel_radius
     );
     // Backward compatibility: old center strength (e.g. 0.0001 -> new scale 10).
@@ -510,6 +523,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     );
     if (!/^#[0-9a-f]{6}$/i.test(normalized.settings.node_color))
       normalized.settings.node_color = DEFAULT_DATA.settings.node_color;
+    for (const settings of [normalized.settings, normalized.saved_layout_settings]) {
+      if (!/^#[0-9a-f]{6}$/i.test(settings.attachment_node_color))
+        settings.attachment_node_color = null;
+    }
     normalized.settings.aura_brightness = this.clampNumber(
       normalized.settings.aura_brightness,
       0,
@@ -577,31 +594,17 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       100,
       DEFAULT_DATA.settings.orbit_distance
     );
-    normalized.settings.attachment_size_multiplier = this.clampNumber(
-      normalized.settings.attachment_size_multiplier,
-      0.1,
-      1,
-      DEFAULT_DATA.settings.attachment_size_multiplier
-    );
-    let attachmentLinkDistanceSetting = Number(
-      normalized.settings.attachment_link_distance_multiplier
-    );
-    if (
-      Number.isFinite(attachmentLinkDistanceSetting) &&
-      attachmentLinkDistanceSetting > 0 &&
-      attachmentLinkDistanceSetting < 1
-    ) {
-      attachmentLinkDistanceSetting *= normalized.settings.link_distance;
-    }
-    normalized.settings.attachment_link_distance_multiplier = this.clampNumber(
-      attachmentLinkDistanceSetting,
-      1,
-      100,
-      DEFAULT_DATA.settings.attachment_link_distance_multiplier
-    );
     normalized.settings.show_grid = !!normalized.settings.show_grid;
     normalized.settings.hide_orphans = !!normalized.settings.hide_orphans;
     normalized.settings.hide_attachments = !!normalized.settings.hide_attachments;
+    normalized.settings.excluded_attachment_extensions = normalizeAttachmentExtensions(
+      normalized.settings.excluded_attachment_extensions
+    );
+    normalized.saved_layout_settings.excluded_attachment_extensions = normalizeAttachmentExtensions(
+      normalized.saved_layout_settings.excluded_attachment_extensions
+    );
+    normalized.settings.include_unlinked_attachments =
+      !!normalized.settings.include_unlinked_attachments;
     normalized.settings.existing_files_only = !!normalized.settings.existing_files_only;
     normalized.settings.show_search_connections =
       normalized.settings.show_search_connections === true;
@@ -764,6 +767,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
   clampGridStep(value) {
     return this.clampNumber(value, 5, 50, DEFAULT_DATA.settings.grid_step);
+  }
+
+  clampGridLineWidth(value) {
+    return this.clampNumber(value, 0.1, 1, DEFAULT_DATA.settings.grid_line_width);
   }
 
   clampMultiplier(value) {
@@ -1719,10 +1726,24 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     return meta;
   }
 
+  getAttachmentExtensionInventory() {
+    const counts = new Map();
+    for (const file of this.app.vault.getFiles()) {
+      if (typeof file.extension !== 'string') continue;
+      const extension = file.extension.toLowerCase();
+      if (extension === 'md') continue;
+      counts.set(extension, (counts.get(extension) || 0) + 1);
+    }
+    return [...counts].sort(([a], [b]) => a.localeCompare(b));
+  }
+
   // Graph-data builder: assemble nodes/edges from markdown, links, and filter settings.
   collectGraphData() {
     const settings = this.getSettings();
     const includeAttachments = !settings.hide_attachments;
+    const excludedExtensions = new Set(
+      normalizeAttachmentExtensions(settings.excluded_attachment_extensions)
+    );
     const hideOrphans = !!settings.hide_orphans;
     const existingFilesOnly = !!settings.existing_files_only;
 
@@ -1750,6 +1771,14 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       });
     };
 
+    if (includeAttachments && settings.include_unlinked_attachments) {
+      for (const file of this.app.vault.getFiles()) {
+        if (file.extension.toLowerCase() === 'md') continue;
+        if (excludedExtensions.has(file.extension.toLowerCase())) continue;
+        addNodeIfMissing(file.path, file.basename, { isAttachment: true });
+      }
+    }
+
     const edgeSet = new Set();
     const edges = [];
     const touchedNodeIds = new Set();
@@ -1768,7 +1797,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
           targetExists && typeof targetAbs.extension === 'string'
             ? targetAbs.extension.toLowerCase()
             : '';
-        const isAttachmentExisting = targetExists && targetExt !== '' && targetExt !== 'md';
+        const isAttachmentExisting =
+          targetExists && typeof targetAbs.extension === 'string' && targetExt !== 'md';
 
         const unresolvedExtMatch = /(?:\.([^.\/]+))$/u.exec(targetPath);
         const unresolvedExt = unresolvedExtMatch ? unresolvedExtMatch[1].toLowerCase() : '';
@@ -1776,6 +1806,11 @@ module.exports = class GraphFrontierPlugin extends Plugin {
           !targetExists && unresolvedExt !== '' && unresolvedExt !== 'md';
 
         if (!includeAttachments && (isAttachmentExisting || isAttachmentUnresolved)) continue;
+        if (
+          (isAttachmentExisting || isAttachmentUnresolved) &&
+          excludedExtensions.has(targetExists ? targetExt : unresolvedExt)
+        )
+          continue;
         if (existingFilesOnly && !targetExists) continue;
 
         const targetIsMarkdown = targetExists ? targetExt === 'md' : !isAttachmentUnresolved;
