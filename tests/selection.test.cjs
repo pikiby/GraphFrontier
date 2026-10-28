@@ -136,3 +136,49 @@ test('node toggle and selected-node dragging still take precedence over Shift bo
   );
   assert.equal(kick.mock.callCount(), 1);
 });
+
+test('configured quick pick puts node name in search without opening or dragging', (t) => {
+  const { view, event } = selectionFixture(t);
+  view.nodes[0].label = 'Alpha';
+  view.searchInputValue = 'path:old';
+  view.searchInputEl = { value: 'path:old' };
+  t.mock.method(view, 'openNodeFile', () => assert.fail('Quick pick must not open a file'));
+  view.onMouseDown(event(10, 10, { altKey: true }));
+  view.onMouseUp(event(10, 10, { altKey: true }));
+  assert.equal(view.searchInputValue, 'name:Alpha');
+  assert.equal(view.searchInputEl.value, 'name:Alpha');
+  assert.equal(view.searchSelectedNodeId, 'a.md');
+  assert.equal(view.dragNodeId, null);
+});
+
+test('quick pick None leaves ordinary opening intact', (t) => {
+  const { view, event } = selectionFixture(t, { quick_pick_modifier: 'none' });
+  const opened = [];
+  t.mock.method(view, 'openNodeFile', (id) => opened.push(id));
+  view.onMouseDown(event(10, 10, { altKey: true }));
+  view.onMouseUp(event(10, 10, { altKey: true }));
+  assert.deepEqual(opened, ['a.md']);
+  assert.equal(view.searchInputValue, 'name:');
+});
+
+test('quick pick overrides preview on configured Ctrl and restarts Filter layout', (t) => {
+  const { view, event } = selectionFixture(t, { quick_pick_modifier: 'ctrl' });
+  view.searchMode = 'filter';
+  view.nodes[0].label = 'Alpha';
+  view.layoutPaused = true;
+  t.mock.method(view, 'toggleQuickPreview', () => assert.fail('Search has priority'));
+  view.onMouseDown(event(10, 10, { ctrlKey: true }));
+  assert.equal(view.searchInputValue, 'name:Alpha');
+  assert.equal(view.layoutPaused, false);
+});
+
+test('selection wins shared modifier; default Ctrl preview is unchanged', (t) => {
+  const { view, event } = selectionFixture(t, { selection_toggle_modifier: 'alt' });
+  view.onMouseDown(event(10, 10, { altKey: true }));
+  assert.deepEqual([...view.selectedNodeIds], ['a.md']);
+  assert.equal(view.searchInputValue, 'name:');
+  const previews = [];
+  t.mock.method(view, 'toggleQuickPreview', (id) => previews.push(id));
+  view.onMouseDown(event(40, 10, { ctrlKey: true }));
+  assert.deepEqual(previews, ['b.md']);
+});

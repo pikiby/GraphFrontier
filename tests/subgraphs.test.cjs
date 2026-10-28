@@ -971,3 +971,15 @@ for (const order of ['pending', 'restored', 'before-open', 'after-open']) {
     assert.equal(f.view.sidePanelOpen, true, 'main graph settings are unchanged');
   });
 }
+
+test('name filter retains duplicate centers and their edges with subgraphs present', (t) => {
+  const f = setup(t);
+  f.graph.nodes[0].label = 'Same';
+  f.graph.nodes[3].label = 'Same';
+  f.plugin.data.subgraphs = [group('unused', [])];
+  f.view.refreshFromVault({ keepCamera: true });
+  f.view.searchMode = 'filter';
+  f.view.commitSearchSelectionFromInput('name:Same');
+  const visible = f.view.getFilterVisibleNodeIds();
+  for (const id of ['a.md', 'b.md', 'c.md', 'd.md']) assert.ok(visible.has(id));
+});

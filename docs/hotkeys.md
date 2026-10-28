@@ -7,6 +7,7 @@ GraphFrontier commands are registered in Obsidian command palette and can be ass
 ## Command List
 
 - Open GraphFrontier
+- Open local GraphFrontier
 - Toggle pin under cursor (GraphFrontier)
 - Set force multiplier under cursor (GraphFrontier)
 - Clear force multiplier under cursor (GraphFrontier)

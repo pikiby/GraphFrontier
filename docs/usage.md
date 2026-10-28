@@ -113,7 +113,7 @@ it is not a subgraph editor and cannot open nested panes.
 The top search row supports two modes:
 
 - `find`: focus/highlight a target node and relations visually
-- `filter`: keep only target node and directly linked nodes visible
+- `filter`: keep the target and directly linked nodes visible; name filtering includes all same-name nodes and their connections
 
 Flow:
 

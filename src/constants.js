@@ -1,5 +1,6 @@
 // Core constants and defaults shared by the plugin runtime.
 const GRAPHFRONTIER_VIEW_TYPE = 'graphfrontier-view';
+const LOCAL_GRAPHFRONTIER_VIEW_TYPE = 'graphfrontier-local-view';
 const NODE_MULTIPLIER_MIN = 1;
 const NODE_MULTIPLIER_MAX = 10;
 const ZOOM_STEP_FACTOR = 1.12;
@@ -161,6 +162,7 @@ function normalizeAttachmentExtensions(value) {
 module.exports = {
   normalizeAttachmentExtensions,
   GRAPHFRONTIER_VIEW_TYPE,
+  LOCAL_GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
   NODE_MULTIPLIER_MAX,
   ZOOM_STEP_FACTOR,

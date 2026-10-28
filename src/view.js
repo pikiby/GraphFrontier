@@ -200,6 +200,13 @@ class GraphFrontierView extends ItemView {
     return GRAPHFRONTIER_VIEW_TYPE;
   }
 
+  getScopeLeaves() {
+    const leaves = this.app.workspace.getLeavesOfType(this.getViewType());
+    return this.plugin.isLocalGraphFrontier
+      ? leaves.filter((leaf) => leaf.view?.plugin === this.plugin)
+      : leaves;
+  }
+
   getDisplayText() {
     if (this.subgraphScope)
       return (
@@ -243,9 +250,9 @@ class GraphFrontierView extends ItemView {
 
   // View lifecycle: create canvas/UI on open and release resources on close.
   async onOpen() {
-    const alreadyOpen = this.app.workspace
-      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
-      .some((leaf) => leaf.view !== this && leaf.view?.isOpen);
+    const alreadyOpen = this.getScopeLeaves().some(
+      (leaf) => leaf.view !== this && leaf.view?.isOpen
+    );
     const loaded =
       !!this.subgraphScope ||
       alreadyOpen ||
@@ -291,7 +298,11 @@ class GraphFrontierView extends ItemView {
   }
 
   async onClose() {
-    if (this.subgraphScope || this.plugin.data.subgraphs?.length)
+    if (
+      this.plugin.isLocalGraphFrontier ||
+      this.subgraphScope ||
+      this.plugin.data.subgraphs?.length
+    )
       this.captureGraphPositions(this.plugin.data);
     this.isOpen = false;
     if (this.frameHandle) {
@@ -312,10 +323,9 @@ class GraphFrontierView extends ItemView {
       }
     } else if (
       !autosaveEnabled &&
+      !this.plugin.isLocalGraphFrontier &&
       !this.subgraphScope &&
-      !this.app.workspace
-        .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
-        .some((leaf) => leaf.view !== this && leaf.view?.isOpen)
+      !this.getScopeLeaves().some((leaf) => leaf.view !== this && leaf.view?.isOpen)
     ) {
       // Groups, rules, and display settings can change without a physics kick.
       await this.loadSavedLayout({ silent: true });
@@ -443,6 +453,10 @@ class GraphFrontierView extends ItemView {
         hint: 'Modifier key for toggling single-node selection on click',
       }
     );
+
+    this.addSideModifierSelect(selectionSection, 'Add to search', 'quick_pick_modifier', {
+      hint: 'Modifier key + node click adds its name to search. None disables this action. Selection takes priority; this action takes priority over quick preview.',
+    });
 
     const displaySection = this.createSidePanelSection(body, {
       id: 'display',
@@ -614,7 +628,7 @@ class GraphFrontierView extends ItemView {
       title: 'Layout',
       openByDefault: true,
     });
-    this.addLayoutFileSearchRow(layoutSection);
+    if (!this.plugin.isLocalGraphFrontier) this.addLayoutFileSearchRow(layoutSection);
     this.addSideSaveLayoutButton(layoutSection);
     this.syncSidePanelControls();
   }
@@ -2002,6 +2016,19 @@ class GraphFrontierView extends ItemView {
     return this.searchSelectedNodeId || null;
   }
 
+  getFilterNodeIds() {
+    const id = this.getFilterNodeId();
+    if (!id) return new Set();
+    const selected = this.nodes.find((node) => node.id === id);
+    if (!selected) return new Set();
+    const label = String(selected.label || '').toLowerCase();
+    return new Set(
+      this.nodes
+        .filter((node) => String(node.label || '').toLowerCase() === label)
+        .map((node) => node.id)
+    );
+  }
+
   getSearchSelectedFocusNodeId() {
     if (!this.searchSelectedNodeId) return null;
     return this.nodeById.has(this.searchSelectedNodeId) ? this.searchSelectedNodeId : null;
@@ -2103,11 +2130,11 @@ class GraphFrontierView extends ItemView {
     let search = null;
     if (this.searchMode === 'filter' && parsed.query) {
       if (parsed.source === 'name') {
-        const id = this.getFilterNodeId();
-        search = new Set(id ? [id] : []);
+        const centers = this.getFilterNodeIds();
+        search = new Set(centers);
         for (const edge of baseProjection.edges) {
-          if (edge.source === id) search.add(edge.target);
-          if (edge.target === id) search.add(edge.source);
+          if (centers.has(edge.source)) search.add(edge.target);
+          if (centers.has(edge.target)) search.add(edge.source);
         }
       } else search = this.searchMatchedNodeIds || new Set();
     }
@@ -2188,15 +2215,11 @@ class GraphFrontierView extends ItemView {
     }
 
     if (parsed.source === 'name') {
-      const filterNodeId = this.getFilterNodeId();
-      if (!filterNodeId) {
-        visibleNodeIds = new Set();
-      } else {
-        visibleNodeIds = new Set([filterNodeId]);
-      }
-      const neighbors = this.neighborsById.get(filterNodeId);
-      if (neighbors && visibleNodeIds) {
-        for (const nodeId of neighbors) visibleNodeIds.add(nodeId);
+      const centers = this.getFilterNodeIds();
+      visibleNodeIds = new Set(centers);
+      for (const id of centers) {
+        const neighbors = this.neighborsById.get(id);
+        if (neighbors) for (const nodeId of neighbors) visibleNodeIds.add(nodeId);
       }
     } else if (this.searchMatchedNodeIds instanceof Set) {
       visibleNodeIds = this.searchMatchedNodeIds;
@@ -3377,8 +3400,9 @@ class GraphFrontierView extends ItemView {
     this.canonicalGraphData = fullGraph;
     this.graphDataRef = this.plugin.data;
     const scope = this.subgraphScope;
-    const graphData =
-      scope && scope.layout !== this.plugin.getActiveLayoutFileName()
+    const graphData = this.plugin.isLocalGraphFrontier
+      ? this.localGraphData(fullGraph)
+      : scope && scope.layout !== this.plugin.getActiveLayoutFileName()
         ? { nodes: [], edges: [] }
         : projectSubgraphs(fullGraph, this.plugin.data.subgraphs, scope?.id);
     const { topologyChanged } = this.syncGraphRuntimeState(graphData, { forceSavedPositions });
@@ -3688,7 +3712,9 @@ class GraphFrontierView extends ItemView {
 
   // Keep first-open framing close to the user's current note when possible.
   centerCameraOnActiveFileNode() {
-    const activePath = this.app?.workspace?.getActiveFile?.()?.path;
+    const activePath = this.plugin.isLocalGraphFrontier
+      ? this.localPath
+      : this.app?.workspace?.getActiveFile?.()?.path;
     if (!activePath) return false;
     const activeNode = this.nodeById.get(activePath);
     if (!activeNode) return false;
@@ -3920,6 +3946,13 @@ class GraphFrontierView extends ItemView {
     if (node) {
       if (this.isModifierActive(event, selectionToggleModifier)) {
         this.toggleNodeSelection(node.id);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (this.isModifierActive(event, this.plugin.getSettings().quick_pick_modifier)) {
+        this.applySearchSelectionFromNode(node, { forceSource: 'name' });
+        if (this.searchMode === 'filter') this.kickLayoutSearch();
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -4519,9 +4552,7 @@ class GraphFrontierView extends ItemView {
   }
 
   captureGraphPositions(target) {
-    const views = this.app.workspace
-      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
-      .map((leaf) => leaf.view);
+    const views = this.getScopeLeaves().map((leaf) => leaf.view);
     if (!views.includes(this)) views.push(this);
     // IDs have exactly one parent space. Merge open spaces; retain all closed/filtered ones.
     for (const view of [...views.filter((view) => view !== this), this]) {
@@ -4589,9 +4620,7 @@ class GraphFrontierView extends ItemView {
   }
 
   subgraphsChanged(affectedScopes) {
-    const views = this.app.workspace
-      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
-      .map((leaf) => leaf.view);
+    const views = this.getScopeLeaves().map((leaf) => leaf.view);
     if (!views.includes(this)) views.push(this);
     for (const view of views) {
       const affected = affectedScopes.has(view.subgraphScope?.id || null);
@@ -6977,7 +7006,7 @@ class GraphFrontierView extends ItemView {
             node.vy = 0;
           }
           if (sourceData.subgraphs?.length) {
-            for (const leaf of this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)) {
+            for (const leaf of this.getScopeLeaves()) {
               leaf.view.layoutAutosaveDirty = false;
               leaf.view.layoutStillFrames = 0;
             }
@@ -6998,9 +7027,7 @@ class GraphFrontierView extends ItemView {
     snapshot.saved_layout_settings = Object.assign({}, snapshot.settings);
     snapshot.saved_layout_pins = Object.assign({}, snapshot.pins);
     snapshot.saved_layout_orbit_pins = Object.assign({}, snapshot.orbit_pins);
-    const views = this.app.workspace
-      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
-      .map((leaf) => leaf.view);
+    const views = this.getScopeLeaves().map((leaf) => leaf.view);
     const main = this.subgraphScope
       ? views.find((view) => !view.subgraphScope && view.isOpen)
       : this;
@@ -7070,9 +7097,7 @@ class GraphFrontierView extends ItemView {
       this.syncLayoutFileSelectionFromPlugin();
       return false;
     }
-    const views = this.app.workspace
-      .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
-      .map((leaf) => leaf.view);
+    const views = this.getScopeLeaves().map((leaf) => leaf.view);
     if (!views.includes(this)) views.push(this);
     for (const view of views) {
       view.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';

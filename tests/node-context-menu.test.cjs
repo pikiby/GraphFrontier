@@ -108,6 +108,7 @@ test('node menu follows requested sections and puts Delete last', (t) => {
     'Merge entire file with',
     'Add to search',
     'Show local graph',
+    'Open local GraphFrontier',
   ]);
   assert.equal(item(menu, 'Delete').warning, true);
 });
@@ -264,4 +265,49 @@ test('attachment same-tab opening uses native routing while default-app stays ex
   await item(open, 'Open in same tab').callback();
   assert.equal(calls.length, 3);
   assert.deepEqual(calls.at(-1), ['external', file.path]);
+});
+
+test('local GraphFrontier action passes the menu note, not the active note, to owner or plugin', async (t) => {
+  const { app, view, node, file, plugin } = setup(t);
+  const received = [];
+  app.workspace.getActiveFile = () => ({ path: 'other.md', extension: 'md' });
+  plugin.openLocalGraphFrontierView = (target) => received.push(['plugin', target]);
+  let other = item(buildNodeContextMenu(view, node, 10, 20), 'Other').submenu;
+  await item(other, 'Open local GraphFrontier').callback();
+  assert.deepEqual(received, [['plugin', file]]);
+
+  view.owner = { openLocalGraphFrontierView: (target) => received.push(['owner', target]) };
+  other = item(buildNodeContextMenu(view, node, 10, 20), 'Other').submenu;
+  await item(other, 'Open local GraphFrontier').callback();
+  assert.deepEqual(received, [
+    ['plugin', file],
+    ['owner', file],
+  ]);
+});
+
+test('local GraphFrontier action is absent for missing and non-Markdown files', (t) => {
+  const { app, view, node, file } = setup(t);
+  file.extension = 'pdf';
+  let other = item(buildNodeContextMenu(view, node, 10, 20), 'Other').submenu;
+  assert.equal(item(other, 'Open local GraphFrontier'), undefined);
+  assert.equal(item(other, 'Show local graph'), undefined);
+  app.vault.getAbstractFileByPath = () => null;
+  other = item(buildNodeContextMenu(view, node, 10, 20), 'Other').submenu;
+  assert.equal(item(other, 'Open local GraphFrontier'), undefined);
+  file.extension = 'MD';
+  app.vault.getAbstractFileByPath = () => file;
+  other = item(buildNodeContextMenu(view, node, 10, 20), 'Other').submenu;
+  assert.ok(item(other, 'Open local GraphFrontier'));
+});
+
+test('local GraphFrontier action keeps the snapshot guard on stale graph state', async (t) => {
+  const { view, node, plugin } = setup(t);
+  let calls = 0;
+  plugin.openLocalGraphFrontierView = () => {
+    calls++;
+  };
+  const other = item(buildNodeContextMenu(view, node, 10, 20), 'Other').submenu;
+  view.nodeById.delete(node.id);
+  await item(other, 'Open local GraphFrontier').callback();
+  assert.equal(calls, 0);
 });

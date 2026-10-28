@@ -312,9 +312,9 @@ function drawEdges(view, ctx) {
   const screenCenterY = view.viewHeight / 2;
   const visibleNodeIds = view.getFilterVisibleNodeIds();
   const hasFilter = visibleNodeIds instanceof Set;
-  const filterNodeId = hasFilter ? view.getFilterNodeId() : null;
+  const filterNodeIds = hasFilter ? view.getFilterNodeIds() : new Set();
   const isNameFilterMode =
-    hasFilter && view.getEffectiveSearchSource() === 'name' && !!filterNodeId;
+    hasFilter && view.getEffectiveSearchSource() === 'name' && filterNodeIds.size > 0;
   const focusNodeId = view.focusNodeId;
   const focusProgress = view.focusProgress;
   const hasFocus = !!focusNodeId && focusProgress > 0.001;
@@ -359,7 +359,7 @@ function drawEdges(view, ctx) {
     if (hasFilter) {
       if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) continue;
       if (isNameFilterMode) {
-        const isFilterEdge = edge.source === filterNodeId || edge.target === filterNodeId;
+        const isFilterEdge = filterNodeIds.has(edge.source) || filterNodeIds.has(edge.target);
         if (!isFilterEdge) continue;
       }
     }

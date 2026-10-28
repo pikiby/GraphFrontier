@@ -252,6 +252,7 @@ function fixture(t, data = {}) {
     metadataCache: { resolvedLinks: {}, on },
     workspace: {
       getLeavesOfType: () => leaves,
+      on,
       getActiveFile: () => null,
     },
   };

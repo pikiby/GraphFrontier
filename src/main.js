@@ -7,6 +7,7 @@ const { McpController, GraphFrontierMcpSettingTab } = require('./mcp-settings');
 
 const {
   GRAPHFRONTIER_VIEW_TYPE,
+  LOCAL_GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
   NODE_MULTIPLIER_MAX,
   ZOOM_STEP_FACTOR,
@@ -21,6 +22,7 @@ const {
 } = require('./constants');
 
 const { GraphFrontierView } = require('./view');
+const { LocalGraphFrontierView } = require('./local-view');
 
 // Register all Command Palette / hotkey actions in one place to keep plugin boot logic compact.
 function registerGraphFrontierCommands(plugin) {
@@ -28,6 +30,12 @@ function registerGraphFrontierCommands(plugin) {
     id: 'graphfrontier-open-view',
     name: 'Open GraphFrontier',
     callback: () => plugin.openOrRevealGraphFrontierView(),
+  });
+
+  plugin.addCommand({
+    id: 'graphfrontier-open-local-view',
+    name: 'Open local GraphFrontier',
+    callback: () => plugin.openLocalGraphFrontierView(),
   });
 
   // Cursor-targeted actions: resolve active GraphFrontier view first, then run the matching handler.
@@ -187,7 +195,14 @@ function registerGraphFrontierRefreshEvents(plugin) {
   plugin.registerEvent(plugin.app.vault.on('create', scheduleRefreshForVaultEvent));
   plugin.registerEvent(plugin.app.vault.on('modify', scheduleRefreshForVaultEvent));
   plugin.registerEvent(plugin.app.vault.on('delete', scheduleRefreshForVaultEvent));
-  plugin.registerEvent(plugin.app.vault.on('rename', scheduleRefreshForVaultEvent));
+  plugin.registerEvent(
+    plugin.app.vault.on('rename', (file, oldPath) => {
+      for (const leaf of plugin.app.workspace.getLeavesOfType(LOCAL_GRAPHFRONTIER_VIEW_TYPE)) {
+        if (leaf.view?.localPath === oldPath) leaf.view.followFile(file);
+      }
+      scheduleRefreshForVaultEvent(file);
+    })
+  );
 }
 
 // Convert any keyboard key string into one canonical non-modifier token.
@@ -287,6 +302,37 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
     // Register custom view type that renders the graph.
     this.registerView(GRAPHFRONTIER_VIEW_TYPE, (leaf) => new GraphFrontierView(leaf, this));
+    this.registerView(
+      LOCAL_GRAPHFRONTIER_VIEW_TYPE,
+      (leaf) => new LocalGraphFrontierView(leaf, this)
+    );
+    this.registerEvent(
+      this.app.workspace.on('file-open', (file) => this.followLocalGraphFile(file))
+    );
+    this.registerEvent(
+      this.app.workspace.on('active-leaf-change', (leaf) =>
+        this.followLocalGraphFile(leaf?.view?.file)
+      )
+    );
+
+    this.registerEvent(
+      this.app.workspace.on('file-menu', (menu, file, source, leaf) => {
+        if (
+          !leaf ||
+          source === 'graphfrontier' ||
+          source === 'sidebar-context-menu' ||
+          String(file?.extension || '').toLowerCase() !== 'md'
+        )
+          return;
+        menu.addItem((item) =>
+          item
+            .setSection('view.linked')
+            .setTitle('Open local GraphFrontier')
+            .setIcon('dot-network')
+            .onClick(() => this.openLocalGraphFrontierView(file))
+        );
+      })
+    );
 
     // Subscribe to vault/workspace changes and refresh all open GraphFrontier views.
     registerGraphFrontierRefreshEvents(this);
@@ -1383,6 +1429,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       const nextOptions = Object.assign({}, this._pendingRefreshOptions);
       this._pendingRefreshOptions = {};
       this.refreshAllViews(nextOptions);
+      this.refreshLocalViews(nextOptions);
     }, 300);
   }
 
@@ -1394,6 +1441,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       if (view && typeof view.refreshFromVault === 'function') {
         view.refreshFromVault(viewOptions);
       }
+    }
+  }
+
+  refreshLocalViews(options = {}) {
+    for (const leaf of this.app.workspace.getLeavesOfType(LOCAL_GRAPHFRONTIER_VIEW_TYPE)) {
+      leaf.view?.refreshFromVault({ keepCamera: true, ...options });
     }
   }
 
@@ -1861,11 +1914,43 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   // View control: get active GraphFrontier view or open one if missing.
   getActiveGraphFrontierView() {
     const activeLeaf = this.app.workspace.activeLeaf;
-    if (activeLeaf?.view?.getViewType?.() === GRAPHFRONTIER_VIEW_TYPE) {
+    if (
+      [GRAPHFRONTIER_VIEW_TYPE, LOCAL_GRAPHFRONTIER_VIEW_TYPE].includes(
+        activeLeaf?.view?.getViewType?.()
+      )
+    ) {
       return activeLeaf.view;
     }
     const leaf = this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)[0];
     return leaf?.view || null;
+  }
+
+  followLocalGraphFile(file) {
+    if (!file || String(file.extension || '').toLowerCase() !== 'md') return;
+    for (const leaf of this.app.workspace.getLeavesOfType(LOCAL_GRAPHFRONTIER_VIEW_TYPE)) {
+      leaf.view?.followFile(file);
+    }
+  }
+
+  async openLocalGraphFrontierView(file = this.app.workspace.getActiveFile()) {
+    if (!file || String(file.extension || '').toLowerCase() !== 'md') {
+      new Notice('Open a Markdown note first');
+      return;
+    }
+    const workspace = this.app.workspace;
+    let leaf = workspace.getLeavesOfType(LOCAL_GRAPHFRONTIER_VIEW_TYPE)[0];
+    if (!leaf) {
+      leaf = workspace.getLeaf('split');
+      this.pendingLocalFiles ||= new WeakMap();
+      this.pendingLocalFiles.set(leaf, file.path);
+      try {
+        await leaf.setViewState({ type: LOCAL_GRAPHFRONTIER_VIEW_TYPE, active: true });
+      } finally {
+        this.pendingLocalFiles.delete(leaf);
+      }
+    }
+    leaf.view?.followFile(file);
+    await workspace.revealLeaf(leaf);
   }
 
   async openOrRevealGraphFrontierView() {

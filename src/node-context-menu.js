@@ -267,6 +267,13 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
       () => view.openLocalGraphForNode(node.id),
       isFile && file.extension.toLowerCase() === 'md'
     );
+    add(
+      target,
+      'Open local GraphFrontier',
+      'orbit',
+      () => (view.owner || view.plugin).openLocalGraphFrontierView(file),
+      isFile && file.extension.toLowerCase() === 'md'
+    );
   });
   const canDelete = isFile && typeof app.fileManager?.promptForDeletion === 'function';
   if (canDelete) menu.addSeparator();

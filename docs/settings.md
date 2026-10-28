@@ -2,6 +2,13 @@
 
 GraphFrontier settings are mainly controlled in the right side panel inside the view.
 
+## Selection
+
+**Add to search** chooses the modifier for adding a clicked node name to the search
+field (default: **Alt**; **None** disables it). On conflicting shortcuts, node
+selection takes priority, followed by Add to search, then quick preview.
+Local GraphFrontier starts with its settings panel hidden; click **Show** to open it.
+
 ## Visibility Toggles
 
 - `Show grid`: show/hide background grid

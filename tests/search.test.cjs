@@ -225,3 +225,75 @@ test('Filter retains single-name focus', (t) => {
   assert.equal(view.hoverFocusNodeId, 'grafana');
   assert.equal(view.hoverFocusProgress, 1);
 });
+
+test('Filter keeps all same-name nodes and each direct neighborhood', (t) => {
+  const { view } = fixture(t);
+  view.searchMode = 'filter';
+  view.nodes = [
+    { id: 'one/Alpha.md', label: 'Alpha' },
+    { id: 'two/Alpha.md', label: 'Alpha' },
+    { id: 'three/alpha.md', label: 'alpha' },
+    { id: 'x.md', label: 'X' },
+    { id: 'y.md', label: 'Y' },
+    { id: 'z.md', label: 'Z' },
+  ];
+  view.nodeById = new Map(view.nodes.map((n) => [n.id, n]));
+  view.neighborsById = new Map([
+    ['one/Alpha.md', new Set(['x.md'])],
+    ['two/Alpha.md', new Set(['y.md'])],
+    ['x.md', new Set(['one/Alpha.md', 'z.md'])],
+  ]);
+  view.searchInputEl = { value: 'name:Alpha' };
+  view.commitSearchSelectionFromInput('name:Alpha');
+  assert.deepEqual(
+    [...view.getSearchModeVisibleNodeIds()].sort(),
+    ['one/Alpha.md', 'two/Alpha.md', 'three/alpha.md', 'x.md', 'y.md'].sort()
+  );
+  view.applySearchSelectionFromNode(view.nodes[1], { forceSource: 'name' });
+  assert.equal(view.getSearchModeVisibleNodeIds().has('one/Alpha.md'), true);
+  assert.equal(view.getSearchModeVisibleNodeIds().has('two/Alpha.md'), true);
+  view.commitSearchSelectionFromInput('name:absent');
+  assert.equal(view.getSearchModeVisibleNodeIds().size, 0);
+});
+
+test('Filter draws connections for every same-name center, not only the first', (t) => {
+  const { view } = fixture(t);
+  view.searchMode = 'filter';
+  view.viewWidth = 800;
+  view.viewHeight = 600;
+  view.nodes = ['a', 'b', 'x', 'y'].map((id, i) => ({
+    id,
+    label: i < 2 ? 'Same' : id,
+    x: i * 20,
+    y: 0,
+    degree: 0,
+    meta: {},
+  }));
+  view.nodeById = new Map(view.nodes.map((n) => [n.id, n]));
+  view.neighborsById = new Map([
+    ['a', new Set(['x'])],
+    ['b', new Set(['y'])],
+  ]);
+  view.edges = [
+    { source: 'a', target: 'x' },
+    { source: 'b', target: 'y' },
+    { source: 'x', target: 'y' },
+  ];
+  view.searchInputEl = { value: 'name:Same' };
+  view.markSearchVisibilityDirty();
+  const starts = [];
+  const ctx = new Proxy(
+    {
+      moveTo(x, y) {
+        starts.push([x, y]);
+      },
+    },
+    {
+      get(target, key) {
+        return key in target ? target[key] : () => {};
+      },
+    }
+  );
+  render.drawEdges(view, ctx);
+  assert.equal(starts.length, 2, 'both center edges, without the neighbor-to-neighbor edge');
+});

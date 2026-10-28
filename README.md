@@ -9,7 +9,7 @@ GraphFrontier is an interactive graph workspace for Obsidian, with its own rende
 Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, combine selections into named subgraphs, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
 Include attachments as ordinary graph nodes, filter them by file type, and apply
-selection actions to multiple nodes at once. See the [0.8.7 release notes](docs/releases/0.8.7.md).
+selection actions to multiple nodes at once. See the [0.8.8 release notes](docs/releases/0.8.8.md).
 
 Use it to:
 
@@ -22,6 +22,18 @@ Use it to:
 
 **Get started:** install GraphFrontier from Obsidian's Community plugins, then run
 **Open GraphFrontier**. [Installation and updates](docs/installation.md).
+
+## Local GraphFrontier
+
+Open **Local GraphFrontier** from the command palette, a note's **Open linked view**
+submenu, or a graph node's **Other** submenu. It follows the active note and shows
+its direct neighbors, with independent settings, pins and layout state. Settings
+start hidden; use **Show** to open them. Named layouts and subgraph containers
+remain available in the global graph.
+
+**Selection → Add to search** sets the modifier for adding a node name to search
+(default: **Alt + click**). Name filtering keeps all same-name nodes and their
+connections.
 
 ## Features
 
