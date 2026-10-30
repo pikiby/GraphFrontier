@@ -234,7 +234,7 @@ for (const file of ['main.js', 'manifest.json', 'styles.css', 'versions.json', '
       }
       assert.throws(
         () => checkRelease(root),
-        (error) => error.message.includes(`dist/${file}`)
+        (error) => error.message.replaceAll('\\', '/').includes(`dist/${file}`)
       );
     });
   }
@@ -286,5 +286,5 @@ test('CLI resolves the repository relative to the script and returns useful exit
   fs.unlinkSync(path.join(root, 'dist/main.js'));
   const missingAsset = run();
   assert.equal(missingAsset.status, 1);
-  assert.match(missingAsset.stderr, /Release check failed:.*dist\/main.js/);
+  assert.match(missingAsset.stderr.replaceAll('\\', '/'), /Release check failed:.*dist\/main.js/);
 });
