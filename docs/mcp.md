@@ -98,6 +98,35 @@ protocol support rather than assuming this 1.x example applies unchanged.
 
 ## Tools and Internal API
 
+### Node lists and group visuals
+
+`list_node_lists` returns the vault-wide lists. `node_lists` changes their
+membership without requiring an open graph or a layout context token:
+
+```json
+{
+  "name": "node_lists",
+  "arguments": {
+    "action": "add",
+    "listId": "problems",
+    "nodeIds": ["Nodes/Airflow/example.md"]
+  }
+}
+```
+
+Create a list in **Node lists...**, or use `action: "create"` with `name` and an
+optional `listId`. Other actions are `rename`, `delete`, `remove`, and `replace`.
+Add/remove are idempotent; replace accepts the complete current membership,
+including an empty array. Paths must be vault-relative; missing files are
+retained. Calls are persisted independently of layouts and never write notes.
+
+Use a group query `list:problems` to style its members. `edit_rules` group entries
+accept an optional `settings` object with existing visual keys such as
+`aura_radius`, `aura_brightness`, `node_size_scale` and `label_font_size`.
+Keep color in the existing `color` field. Passing `settings: {}` clears the
+group's additional overrides. These operations reuse the existing MCP endpoint
+and authentication; no additional HTTP service is introduced.
+
 Start with `list_views`. Use an explicit `viewId` from its result. Saved layouts
 are shared plugin state, not independent layouts per tab.
 
@@ -413,3 +442,7 @@ Build and check with `npm run format:check`, `npm run lint`, `npm test`,
 `npm run build`, and `npm run check:release`. The Community Plugins acceptance
 of optional desktop networking in a mobile-capable plugin remains a separate
 review question; this local implementation does not change the manifest.
+
+Group `settings` also accepts `edge_color` (hex color) and `strong_pull` (boolean).
+They follow group membership without writing individual node overrides. Changing
+Strong pull rules or membership in an active Strong pull group wakes the layout.

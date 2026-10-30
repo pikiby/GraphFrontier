@@ -413,3 +413,95 @@ test('attachment labels use the same zoom thresholds, text overrides and dimming
     }
   }
 });
+
+test('groups reuse the node visual menu, write group overrides and reset without changing nodes', (t) => {
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const { view, plugin } = fixture(t, {
+    groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
+  });
+  const row = { id: 'g', settings: {}, colorInput: { value: '#123456' } };
+  view.groupEditorRows = [row];
+  const menu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(menu, null, 0, 0, { ids: [] }, { group: row, basicOnly: true });
+  const nodeMenu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(nodeMenu, view.nodes[0], 0, 0, undefined, { basicOnly: true });
+  assert.deepEqual(
+    menu.items.map((item) => item.title),
+    nodeMenu.items.map((item) => item.title)
+  );
+  const before = structuredClone(plugin.data.node_visual_settings);
+  for (const spec of NODE_VISUAL_SETTINGS) {
+    const item = menu.items.find((item) => item.title === spec.label);
+    const controls = item.dom.children[0];
+    const nodeControls = nodeMenu.items.find((item) => item.title === spec.label).dom.children[0];
+    assert.deepEqual(
+      controls.children.map((el) => [el.tag, el.cls]),
+      nodeControls.children.map((el) => [el.tag, el.cls])
+    );
+    const input = controls.children[0];
+    input.value = String(spec.type === 'color' ? '#abcdef' : spec.max);
+    input.events.input();
+    if (spec.type === 'color') {
+      assert.equal(plugin.data.groups[0].color, '#abcdef');
+      assert.equal(row.colorInput.value, '#abcdef');
+    } else assert.equal(plugin.data.groups[0].settings[spec.key], spec.max);
+  }
+  assert.deepEqual(plugin.data.node_visual_settings, before);
+  const reset = menu.items.find((item) => item.title === 'Reset visual settings');
+  reset.callback();
+  assert.deepEqual(plugin.data.groups[0].settings, {});
+  assert.equal(plugin.data.groups[0].color, '#abcdef');
+  assert.deepEqual(row.settings, {});
+  assert.equal(reset.disabled, true);
+  const input = menu.items.find((item) => item.title === 'Color aura').dom.children[0].children[0];
+  view.groupEditorRows = [];
+  input.value = '2';
+  input.events.input();
+  assert.deepEqual(plugin.data.groups[0].settings, {});
+});
+
+test('group uses shared strong-pull and edge-color actions and preserves force on visual reset', async (t) => {
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const { view, plugin } = fixture(t, {
+    groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
+  });
+  const row = { id: 'g', settings: {}, colorInput: { value: '#123456' } };
+  view.groupEditorRows = [row];
+  const menu = () => {
+    const m = new obsidian.Menu();
+    view.addVisualSettingsToMenu(m, null, 0, 0, { ids: [] }, { group: row });
+    return m;
+  };
+  const action = (title) =>
+    menu()
+      .items.find((item) => item.title === title)
+      .callback();
+  await action('Strong pull');
+  assert.equal(plugin.data.groups[0].settings.strong_pull, true);
+  view.promptPickPaintedEdgeColor = async (id, x, y, target) => target.set('edge_color', '#abcdef');
+  await action('Paint edges');
+  assert.equal(plugin.data.groups[0].settings.edge_color, '#abcdef');
+  assert(!menu().items.some((item) => item.title === 'Clear painted edges'));
+  await action('Reset visual settings');
+  assert.deepEqual(plugin.data.groups[0].settings, { strong_pull: true });
+  await action('Clear strong pull');
+  assert.deepEqual(plugin.data.groups[0].settings, {});
+  assert.deepEqual(plugin.data.node_force_multipliers, {});
+  assert.deepEqual(plugin.data.painted_edge_colors, {});
+  const stale = menu().items.find((item) => item.title === 'Strong pull');
+  view.groupEditorRows = [];
+  await stale.callback();
+  assert.deepEqual(plugin.data.groups[0].settings, {});
+});
+
+test('node menu removes separate edge reset and general reset clears edge color', (t) => {
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const { view, plugin } = fixture(t);
+  const node = view.nodes[0];
+  plugin.setPaintedEdgeColor(node.id, '#abcdef');
+  const menu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(menu, node, 0, 0);
+  assert(!menu.items.some((item) => item.title === 'Clear painted edges'));
+  menu.items.find((item) => item.title === 'Reset visual settings').callback();
+  assert.equal(plugin.getPaintedEdgeColor(node.id), null);
+});

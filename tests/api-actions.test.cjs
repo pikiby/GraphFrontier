@@ -717,3 +717,13 @@ test('system path unavailability and rejected clipboard leave opt-in copy result
   );
   assert.equal(clipboard.mock.callCount(), 1);
 });
+
+test('external position API invalidates manual undo instead of recording or overwriting it', async (t) => {
+  const { historyFor, replayPositionAction } = loadSource('position-history.js');
+  const f = setup(t);
+  f.view.applyNodePinAction(f.view.captureNodeActionTargets(f.view.nodes[0]), 'exact');
+  assert.equal(historyFor(f.view).undo.length, 1);
+  await f.api.moveNodes({ ...f.ref(), positions: [{ id: 'alpha.md', x: 999, y: 888 }] });
+  assert.equal(replayPositionAction(f.view), 'empty');
+  assert.equal(f.view.nodeById.get('alpha.md').x, 999);
+});

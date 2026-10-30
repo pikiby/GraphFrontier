@@ -1,7 +1,15 @@
+const { BackupManager } = require('./backups');
 const { Plugin, Notice } = require('obsidian');
 const { normalizeDarkEnergy, darkEnergyNodes } = require('./dark-energy');
 const { normalizeSubgraphs, subgraphNodes, normalizeSubgraphSpaces } = require('./subgraphs');
-const { NODE_VISUAL_SETTINGS, normalizeNodeVisuals } = require('./node-visuals');
+const {
+  NODE_VISUAL_SETTINGS,
+  normalizeNodeVisuals,
+  normalizeGroupVisuals,
+} = require('./node-visuals');
+const { NodeListStore } = require('./node-lists');
+const { getGroupStyleMap } = require('./render');
+const EMPTY_NODE_LISTS = [];
 const { GraphFrontierApi } = require('./api');
 const { McpController, GraphFrontierMcpSettingTab } = require('./mcp-settings');
 
@@ -163,7 +171,15 @@ function registerGraphFrontierCommands(plugin) {
         }
         const handler = view[action.method];
         if (typeof handler !== 'function') return;
-        await handler.call(view);
+        if (
+          /^command(?:Pin|Unpin)/.test(action.method) ||
+          ['togglePinUnderCursor', 'alignPinsToGrid'].includes(action.method)
+        )
+          await view.runPositionAction(
+            view.nodes.map((node) => node.id),
+            () => handler.call(view)
+          );
+        else await handler.call(view);
       },
     });
   }
@@ -197,6 +213,9 @@ function registerGraphFrontierRefreshEvents(plugin) {
   plugin.registerEvent(plugin.app.vault.on('delete', scheduleRefreshForVaultEvent));
   plugin.registerEvent(
     plugin.app.vault.on('rename', (file, oldPath) => {
+      plugin.nodeListStore
+        ?.renamePath(oldPath, file.path)
+        .catch((error) => new Notice(error.message));
       for (const leaf of plugin.app.workspace.getLeavesOfType(LOCAL_GRAPHFRONTIER_VIEW_TYPE)) {
         if (leaf.view?.localPath === oldPath) leaf.view.followFile(file);
       }
@@ -293,6 +312,16 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this.metadataResolvedOnce =
       !!resolvedLinks && typeof resolvedLinks === 'object' && Object.keys(resolvedLinks).length > 0;
     await this.bootstrapActiveLayoutData();
+    this.nodeListStore = new NodeListStore(
+      this.app.vault.adapter,
+      `${this.app.vault.configDir}/plugins/${this.manifest.id}/node-lists.json`,
+      () => this.nodeListsChanged()
+    );
+    try {
+      await this.nodeListStore.load();
+    } catch (error) {
+      new Notice(`GraphFrontier node lists: ${error.message}`);
+    }
 
     // UI entry point: ribbon icon opens GraphFrontier view.
     this.addRibbonIcon('orbit', 'Open GraphFrontier', () => this.openOrRevealGraphFrontierView());
@@ -341,9 +370,19 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     await this.mcp.load();
     this.addSettingTab(new GraphFrontierMcpSettingTab(this.app, this));
     if (this.mcp.error) new Notice(this.mcp.error);
+    this.backups = new BackupManager(this, loadedData?.backups);
+    this.app.workspace.onLayoutReady(() => {
+      void this.backups
+        .initialize()
+        .then(async () => {
+          await this.persistPluginDataOnly();
+        })
+        .catch((error) => new Notice(error.message));
+    });
   }
 
   onunload() {
+    this.backups?.dispose();
     this.api?.close();
     void this.mcp?.stop();
     if (this._persistTimer) window.clearTimeout(this._persistTimer);
@@ -732,6 +771,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         query,
         color,
         enabled: rawGroup.enabled !== false,
+        settings: normalizeGroupVisuals(rawGroup.settings),
       });
     }
     for (const rawRule of rawBlacklist) {
@@ -1049,6 +1089,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       const contents = `${JSON.stringify(normalizedData, null, 2)}\n`;
       await this.ensureLayoutsFolder();
       await adapter.write(filePath, contents);
+      this.backups?.schedule();
       return true;
     } catch {
       return false;
@@ -1141,7 +1182,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   async persistPluginDataOnly() {
     const activeLayoutName = this.getActiveLayoutFileName();
     this.data.active_layout_name = activeLayoutName;
-    await this.saveData(this.data);
+    await this.saveData(
+      this.backups ? { ...this.data, backups: this.backups.preferences } : this.data
+    );
+    this.backups?.schedule();
   }
 
   async persistActiveLayoutFile(data = this.data, layoutName = this.getActiveLayoutFileName()) {
@@ -1205,7 +1249,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     nextData.active_layout_name = nextLayoutName;
     this.applySidePanelSectionsState(nextData);
     try {
-      await this.saveData(nextData);
+      await this.saveData(
+        this.backups ? { ...nextData, backups: this.backups.preferences } : nextData
+      );
     } catch {
       new Notice('Layout selected, but plugin preferences could not be saved');
     }
@@ -1214,6 +1260,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this.applySidePanelSectionsState(nextData);
     this.data = nextData;
     if (shouldLoadFromFile) this._layoutReadFailedName = null;
+    this.backups?.schedule();
     return true;
   }
 
@@ -1356,13 +1403,19 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   getNodeMultiplier(nodeId) {
-    const stored = this.data.node_force_multipliers[nodeId];
+    const stored =
+      this.data.node_force_multipliers[nodeId] ??
+      (this.getGroupVisualSettings(nodeId)?.strong_pull
+        ? this.clampStrongPullMultiplier(this.getSettings().strong_pull_multiplier)
+        : 1);
     const multiplier = this.clampMultiplier(stored);
     return multiplier > 1 ? multiplier : 1;
   }
 
   isStrongPullNode(nodeId) {
-    return !!this.data.strong_pull_nodes[nodeId];
+    if (this.data.node_force_multipliers[nodeId] != null || this.data.strong_pull_nodes[nodeId])
+      return !!this.data.strong_pull_nodes[nodeId];
+    return !!this.getGroupVisualSettings(nodeId)?.strong_pull;
   }
 
   setNodeMultiplier(nodeId, value, options = {}) {
@@ -1396,7 +1449,11 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   getPaintedEdgeColor(nodeId) {
-    const colorText = String(this.data.painted_edge_colors?.[nodeId] || '').trim();
+    const colorText = String(
+      this.data.painted_edge_colors?.[nodeId] ??
+        this.getGroupVisualSettings(nodeId)?.edge_color ??
+        ''
+    ).trim();
     if (!/^#([0-9a-f]{6})$/i.test(colorText)) return null;
     return colorText.toLowerCase();
   }
@@ -1471,7 +1528,60 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   // Grouping and suggestions: query parsing, metadata indexing, and suggestion output.
+  openBackupsModal() {
+    this.openDataSettings();
+  }
+
+  openDataSettings() {
+    this.app.setting.open();
+    this.app.setting.openTabById(this.manifest.id);
+  }
+
+  getNodeLists() {
+    return this.nodeListStore?.lists || EMPTY_NODE_LISTS;
+  }
+
+  async updateNodeList(args) {
+    if (!this.nodeListStore) throw new Error('Node lists are not available.');
+    return this.nodeListStore.update(args);
+  }
+
+  nodeListsChanged() {
+    this.backups?.schedule();
+    for (const type of [GRAPHFRONTIER_VIEW_TYPE, LOCAL_GRAPHFRONTIER_VIEW_TYPE]) {
+      for (const leaf of this.app.workspace.getLeavesOfType(type)) {
+        const view = leaf.view;
+        if (!view?.isOpen) continue;
+        view.markQueryRuleVisibilityDirty();
+        const query = view.searchInputEl?.value ?? view.searchInputValue;
+        if (view.parseSearchQuery(query).source === 'list') view.syncSearchMatchesLive();
+        if (
+          view.plugin.data.groups.some(
+            (group) => group.enabled !== false && group.settings?.strong_pull
+          )
+        )
+          view.kickLayoutSearch();
+        view.render();
+      }
+    }
+  }
+
+  getGroupVisualSettings(nodeId) {
+    const leaves = this.isLocalGraphFrontier
+      ? [{ view: this.getScopeView() }]
+      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE);
+    const view = leaves.find((leaf) => leaf.view?.nodeById?.has(nodeId))?.view;
+    return view ? getGroupStyleMap(view)?.get(nodeId) : null;
+  }
+
   updateGroups(nextGroups) {
+    const pullRules = (groups) =>
+      JSON.stringify(
+        groups
+          .filter((group) => group.settings?.strong_pull != null)
+          .map((group) => [group.query, group.enabled, group.settings.strong_pull])
+      );
+    const previousPull = pullRules(this.data.groups);
     const normalizedGroups = [];
     if (Array.isArray(nextGroups)) {
       for (const rawGroup of nextGroups) {
@@ -1484,10 +1594,17 @@ module.exports = class GraphFrontierPlugin extends Plugin {
           query,
           color,
           enabled: rawGroup.enabled !== false,
+          settings: normalizeGroupVisuals(rawGroup.settings),
         });
       }
     }
     this.data.groups = normalizedGroups;
+    if (previousPull !== pullRules(normalizedGroups)) {
+      const views = this.isLocalGraphFrontier
+        ? [this.getScopeView()]
+        : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
+      for (const view of views) view?.kickLayoutSearch();
+    }
     this.schedulePersist();
     this.renderAllViews();
   }
@@ -1523,7 +1640,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
   parseGroupQuery(query) {
     const text = String(query || '').trim();
-    const plainMatch = /^(name|tag|path|file|line|section)\s*:\s*(.*)$/i.exec(text);
+    const plainMatch = /^(name|tag|path|file|line|section|list)\s*:\s*(.*)$/i.exec(text);
     if (plainMatch) {
       return {
         type: plainMatch[1].toLowerCase(),
@@ -1556,7 +1673,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       if (!cleanPropertyKey) return '';
       return `[${cleanPropertyKey}]:${cleanValue}`;
     }
-    if (!['name', 'tag', 'path', 'file', 'line', 'section'].includes(cleanType)) return '';
+    if (!['name', 'tag', 'path', 'file', 'line', 'section', 'list'].includes(cleanType)) return '';
     return `${cleanType}:${cleanValue}`;
   }
 
@@ -1620,6 +1737,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   getGroupValueSuggestions(type, query = '', propertyKey = '', limit = 40) {
+    if (type === 'list')
+      return this.getNodeLists()
+        .filter((list) =>
+          `${list.id} ${list.name}`.toLowerCase().includes(String(query).toLowerCase())
+        )
+        .slice(0, limit)
+        .map((list) => list.id);
     const cleanType = String(type || '')
       .trim()
       .toLowerCase();

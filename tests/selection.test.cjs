@@ -182,3 +182,34 @@ test('selection wins shared modifier; default Ctrl preview is unchanged', (t) =>
   view.onMouseDown(event(40, 10, { ctrlKey: true }));
   assert.deepEqual(previews, ['b.md']);
 });
+
+test('dragging a selection records a single reversible mouse gesture, clicking records none', (t) => {
+  const { loadSource } = require('./helpers/obsidian.cjs');
+  const { historyFor, replayPositionAction } = loadSource('position-history.js');
+  const { view, event } = selectionFixture(t);
+  view.setNodeSelection(['a.md', 'b.md']);
+  view.onMouseDown(event(10, 10));
+  view.onMouseMove(event(20, 20));
+  view.onMouseMove(event(30, 40));
+  view.onMouseUp(event(30, 40));
+  assert.equal(historyFor(view).undo.length, 1);
+  assert.deepEqual(
+    view.nodes.slice(0, 2).map((n) => [n.x, n.y]),
+    [
+      [30, 40],
+      [60, 40],
+    ]
+  );
+  assert.equal(replayPositionAction(view), 'applied');
+  assert.deepEqual(
+    view.nodes.slice(0, 2).map((n) => [n.x, n.y]),
+    [
+      [10, 10],
+      [40, 10],
+    ]
+  );
+  view.onMouseDown(event(10, 10));
+  view.onMouseUp(event(10, 10), { suppressClick: true });
+  assert.equal(historyFor(view).undo.length, 0);
+  assert.equal(historyFor(view).redo.length, 1);
+});

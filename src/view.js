@@ -1,4 +1,11 @@
-const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Scope } = require('obsidian');
+const {
+  beginPositionAction,
+  finishPositionAction,
+  runPositionAction,
+  replayPositionAction,
+} = require('./position-history');
+const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Scope, setIcon } = require('obsidian');
+const { nodeListContains } = require('./node-lists');
 const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
 const { ExportModal } = require('./export-modal');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
@@ -298,6 +305,8 @@ class GraphFrontierView extends ItemView {
   }
 
   async onClose() {
+    finishPositionAction(this, this.positionDragAction);
+    this.positionDragAction = null;
     if (
       this.plugin.isLocalGraphFrontier ||
       this.subgraphScope ||
@@ -343,7 +352,13 @@ class GraphFrontierView extends ItemView {
     if (Scope) {
       this.scope = new Scope(this.app.scope);
       for (const modifier of ['Ctrl', 'Meta']) {
-        this.scope.register([modifier], null, (event) => this.onSelectedNodeCopyKeyDown(event));
+        this.scope.register([modifier], null, (event) => {
+          if (this.onPositionHistoryKeyDown(event) === false) return false;
+          return this.onSelectedNodeCopyKeyDown(event);
+        });
+        this.scope.register([modifier, 'Shift'], null, (event) =>
+          this.onPositionHistoryKeyDown(event)
+        );
       }
     }
     this.registerEvent(
@@ -1335,7 +1350,11 @@ class GraphFrontierView extends ItemView {
     const getSuggestionPack = () => {
       const rawQuery = String(searchInput.value || '');
       const prefix = this.getSearchInputPrefix(rawQuery);
-      if (!this.parseSearchQuery(rawQuery).query || searchInput.selectionStart < prefix.length) {
+      const parsed = this.parseSearchQuery(rawQuery);
+      if (
+        (!parsed.query && parsed.source !== 'list') ||
+        searchInput.selectionStart < prefix.length
+      ) {
         return {
           items: this.getQueryTypeSuggestions('', { allowName: true }),
           menuTitle: 'Search options',
@@ -1516,7 +1535,7 @@ class GraphFrontierView extends ItemView {
 
   getSearchInputPrefix(rawQueryText) {
     return (
-      /^(?:name|tag|path|file|line|section|\[[^\]]+\])\s*:\s*/i.exec(
+      /^(?:name|tag|path|file|line|section|list|\[[^\]]+\])\s*:\s*/i.exec(
         String(rawQueryText || '')
       )?.[0] || 'name:'
     );
@@ -1558,6 +1577,7 @@ class GraphFrontierView extends ItemView {
       { value: 'path:', description: 'match path of the file' },
       { value: 'file:', description: 'match file name' },
       { value: 'tag:', description: 'search for tags' },
+      { value: 'list:', description: 'match a node list' },
       { value: 'line:', description: 'search keywords on same line' },
       { value: 'section:', description: 'search keywords under same heading' },
       { value: '[property]:', description: 'match property' },
@@ -1614,6 +1634,19 @@ class GraphFrontierView extends ItemView {
 
   getQueryValueSuggestions(parsed, limit = 2000) {
     if (!parsed || !parsed.hasExplicitSource) return [];
+    if (parsed.source === 'list') {
+      const query = String(parsed.query || '').toLowerCase();
+      return (this.plugin.getNodeLists?.() || [])
+        .filter((list) => `${list.name} ${list.id}`.toLowerCase().includes(query))
+        .slice(0, limit)
+        .map((list) => ({
+          title: list.name,
+          value: `list:${list.id}`,
+          description: list.id,
+          kind: 'value',
+          selectable: true,
+        }));
+    }
     if (parsed.source === 'name') {
       return this.getVisibleNodeSuggestionsByName(parsed.query, limit).map((label) => ({
         title: label,
@@ -1781,8 +1814,11 @@ class GraphFrontierView extends ItemView {
     return this.nodeMetaById.get(node.id) || node.meta || null;
   }
 
-  nodeMatchesSearchParsed(meta, parsed) {
+  nodeMatchesSearchParsed(meta, parsed, nodeId = meta?.path) {
     if (!meta || !parsed) return false;
+    if (parsed.source === 'list') {
+      return nodeListContains(this.plugin.getNodeLists?.() || [], parsed.query, nodeId);
+    }
     const needle = String(parsed.query || '')
       .trim()
       .toLowerCase();
@@ -1844,7 +1880,7 @@ class GraphFrontierView extends ItemView {
     for (const node of this.nodes) {
       const meta = this.getNodeMetaForSearch(node);
       if (!meta) continue;
-      if (this.nodeMatchesSearchParsed(meta, parsed)) matches.add(node.id);
+      if (this.nodeMatchesSearchParsed(meta, parsed, node.id)) matches.add(node.id);
     }
     return matches;
   }
@@ -2148,7 +2184,8 @@ class GraphFrontierView extends ItemView {
       if (search && !search.has(node.id) && !search.has(projectedId)) {
         if (
           !node.meta?.darkEnergy &&
-          (parsed.source === 'name' || !this.nodeMatchesSearchParsed(node.meta || {}, parsed))
+          (parsed.source === 'name' ||
+            !this.nodeMatchesSearchParsed(node.meta || {}, parsed, node.id))
         )
           continue;
       }
@@ -2763,6 +2800,7 @@ class GraphFrontierView extends ItemView {
       id: group?.id || null,
       query: String(group?.query || ''),
       color: this.plugin.normalizeGroupColor(group?.color || '#7aa2f7'),
+      settings: { ...(group?.settings || {}) },
     };
   }
 
@@ -2782,10 +2820,10 @@ class GraphFrontierView extends ItemView {
   refreshGroupRowState(rowState) {
     const complete = this.isGroupRowComplete(rowState);
     const empty = this.isGroupRowEmpty(rowState);
-    rowState.removeBtn.style.visibility = empty ? 'hidden' : 'visible';
     rowState.dragHandle.style.visibility = complete ? 'visible' : 'hidden';
     rowState.colorInput.style.display = complete ? '' : 'none';
     rowState.colorInput.disabled = !complete;
+    rowState.settingsBtn.style.display = complete ? '' : 'none';
     rowState.row.draggable = complete;
     rowState.row.toggleClass('is-empty', empty);
     rowState.row.toggleClass('is-complete', complete);
@@ -2809,6 +2847,7 @@ class GraphFrontierView extends ItemView {
         query,
         color: this.plugin.normalizeGroupColor(rowState.colorInput.value),
         enabled: true,
+        ...(Object.keys(rowState.settings).length ? { settings: { ...rowState.settings } } : {}),
       });
     }
     this.plugin.updateGroups(nextGroups);
@@ -2840,15 +2879,19 @@ class GraphFrontierView extends ItemView {
     });
     colorInput.value = form.color;
 
-    const removeBtn = row.createEl('button', { cls: 'graphfrontier-group-remove', text: 'x' });
+    const settingsBtn = row.createEl('button', { cls: 'graphfrontier-group-settings' });
+    settingsBtn.setAttribute('aria-label', 'Group settings');
+    settingsBtn.setAttribute('title', 'Group settings');
+    setIcon(settingsBtn, 'settings-2');
 
     const rowState = {
       row,
       dragHandle,
       queryInput,
       colorInput,
-      removeBtn,
+      settingsBtn,
       id: form.id,
+      settings: form.settings,
     };
     this.groupEditorRows.push(rowState);
 
@@ -2930,11 +2973,41 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(colorInput, 'input', () => {
       this.persistGroupRows(sectionEl);
     });
-    this.registerDomEvent(removeBtn, 'click', () => {
-      const index = this.groupEditorRows.indexOf(rowState);
-      if (index >= 0) this.groupEditorRows.splice(index, 1);
-      row.remove();
-      this.persistGroupRows(sectionEl);
+    this.registerDomEvent(settingsBtn, 'click', (event) => {
+      event.preventDefault();
+      const sourceData = this.plugin.data;
+      const sourceLayout = this.plugin.getActiveLayoutFileName();
+      const menu = new Menu(this.app);
+      const rect = settingsBtn.getBoundingClientRect();
+      this.addVisualSettingsToMenu(
+        menu,
+        null,
+        rect.left,
+        rect.bottom,
+        { ids: [] },
+        {
+          group: rowState,
+        }
+      );
+      menu.addSeparator();
+      menu.addItem((item) =>
+        item
+          .setTitle('Delete group')
+          .setIcon('trash')
+          .onClick(() => {
+            if (
+              this.plugin.data !== sourceData ||
+              this.plugin.getActiveLayoutFileName() !== sourceLayout
+            )
+              return;
+            const index = this.groupEditorRows.indexOf(rowState);
+            if (index < 0) return;
+            this.groupEditorRows.splice(index, 1);
+            row.remove();
+            this.persistGroupRows(sectionEl);
+          })
+      );
+      this.showMenuAtPointer(menu, rect.left, rect.bottom, event);
     });
 
     this.registerDomEvent(row, 'dragstart', (event) => {
@@ -3965,6 +4038,7 @@ class GraphFrontierView extends ItemView {
       }
       const world = this.screenToWorld(screenX, screenY);
       const dragNodeIds = this.getDraggedNodeIds(node.id);
+      this.positionDragAction = beginPositionAction(this, dragNodeIds, true);
       const seed = dragNodeIds.length === 1 ? this.nodeById.get(dragNodeIds[0]) : node;
       this.dragNodeId = seed.id;
       if (dragNodeIds.length > 1) {
@@ -4077,6 +4151,8 @@ class GraphFrontierView extends ItemView {
     this.panDragMovedDistance = 0;
     this.canvasEl.removeClass('is-dragging');
 
+    finishPositionAction(this, this.positionDragAction, !didDragNodeMove);
+    this.positionDragAction = null;
     if (didDragNodeMove) this.kickLayoutSearch();
 
     const isBackgroundClick = !hadDraggedNode && hadPanDrag && panDragMovedDistance <= 3;
@@ -4301,6 +4377,8 @@ class GraphFrontierView extends ItemView {
 
     if (touchesCount === 1) {
       const point = this.getTouchScreenPoint(event.touches[0]);
+      finishPositionAction(this, this.positionDragAction);
+      this.positionDragAction = null;
       this.touchGesture = null;
       this.dragNodeId = null;
       this.dragStartScreen = null;
@@ -4341,6 +4419,7 @@ class GraphFrontierView extends ItemView {
     const node = this.getNodeAtScreen(point.x, point.y);
     if (node) {
       this.touchGesture.nodeId = node.id;
+      this.positionDragAction = beginPositionAction(this, [node.id], true);
       const world = this.screenToWorld(point.x, point.y);
       this.dragNodeId = node.id;
       this.dragNodeOffset = {
@@ -4378,6 +4457,8 @@ class GraphFrontierView extends ItemView {
     const dist = Math.max(1, Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y));
     const anchor = this.screenToWorldWithCamera(midX, midY, this.cameraTarget);
 
+    finishPositionAction(this, this.positionDragAction);
+    this.positionDragAction = null;
     this.dragNodeId = null;
     this.dragStartScreen = null;
     this.dragMovedDistance = 0;
@@ -4461,6 +4542,8 @@ class GraphFrontierView extends ItemView {
       if (this.touchGesture.moved || this.touchGesture.longPressTriggered) return;
       if (this.touchGesture.nodeId !== nodeId) return;
 
+      finishPositionAction(this, this.positionDragAction, true);
+      this.positionDragAction = null;
       this.touchGesture.longPressTriggered = true;
       this.dragNodeId = null;
       this.dragStartScreen = null;
@@ -4518,10 +4601,38 @@ class GraphFrontierView extends ItemView {
             this.editDarkEnergy(null, position);
           })
       );
+      menu.addItem((item) =>
+        item
+          .setTitle('Node lists...')
+          .setIcon('list')
+          .onClick(() => {
+            if (this.plugin?.data === sourceData) this.openNodeListsModal();
+          })
+      );
       this.showMenuAtPointer(menu, clientX, clientY, event);
       return;
     }
     this.showNodeContextMenu(node, clientX, clientY, event);
+  }
+
+  onPaneMenu(menu, source) {
+    super.onPaneMenu?.(menu, source);
+    menu.addItem((item) =>
+      item
+        .setTitle('Node lists...')
+        .setIcon('list')
+        .onClick(() => this.openNodeListsModal())
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle('Backups...')
+        .setIcon('archive')
+        .onClick(() => (this.owner || this.plugin).openBackupsModal())
+    );
+  }
+
+  openNodeListsModal() {
+    (this.owner || this.plugin).openDataSettings();
   }
 
   editSubgraph(node = null, snapshot = null) {
@@ -4781,6 +4892,47 @@ class GraphFrontierView extends ItemView {
     this.showMenuAtPointer(menu, clientX, clientY, sourceMouseEvent);
   }
 
+  groupVisualMenuTarget(rowState) {
+    const source = this.plugin.data;
+    const layout = this.plugin.getActiveLayoutFileName();
+    const current = () =>
+      source === this.plugin.data &&
+      layout === this.plugin.getActiveLayoutFileName() &&
+      this.groupEditorRows.includes(rowState) &&
+      this.plugin.data.groups.find((group) => group.id === rowState.id);
+    const update = (key, value) => {
+      const group = current();
+      if (!group) return;
+      const next = { ...group, settings: { ...(group.settings || {}) } };
+      if (key === 'node_color') {
+        next.color = value;
+        rowState.colorInput.value = value;
+      } else if (key === null) {
+        const strongPull = next.settings.strong_pull;
+        next.settings = strongPull == null ? {} : { strong_pull: strongPull };
+      } else if (value === null) delete next.settings[key];
+      else next.settings[key] = value;
+      rowState.settings = { ...next.settings };
+      if (!Object.keys(next.settings).length) delete next.settings;
+      this.plugin.updateGroups(
+        this.plugin.data.groups.map((entry) => (entry.id === rowState.id ? next : entry))
+      );
+    };
+    return {
+      current,
+      value: (key) =>
+        key === 'node_color'
+          ? current()?.color || rowState.colorInput.value
+          : (current()?.settings?.[key] ??
+            this.plugin.getSettings()[key] ??
+            DEFAULT_DATA.settings[key]),
+      inherited: (key) => key !== 'node_color' && current()?.settings?.[key] == null,
+      set: update,
+      reset: () => update(null, null),
+      canReset: () => Object.keys(current()?.settings || {}).some((key) => key !== 'strong_pull'),
+    };
+  }
+
   addVisualSettingsToMenu(
     menu,
     node,
@@ -4789,16 +4941,17 @@ class GraphFrontierView extends ItemView {
     snapshot = this.captureNodeActionTargets(node),
     options = {}
   ) {
+    const group = options.group ? this.groupVisualMenuTarget(options.group) : null;
     const displayNodes = snapshot.ids.map((id) => this.nodeById.get(id)).filter(Boolean);
     if (!displayNodes.length && node) displayNodes.push(node);
     const syncControls = [];
     for (const spec of options.advancedOnly ? [] : NODE_VISUAL_SETTINGS) {
       const eligible = (entry) => !spec.edges || !entry.meta?.darkEnergy;
       const nodes = displayNodes.filter(eligible);
-      if (!nodes.length) continue;
+      if (!nodes.length && !group) continue;
       menu.addItem((item) => {
         item
-          .setTitle(this.nodeActionLabel(spec.label, snapshot, nodes.length))
+          .setTitle(group ? spec.label : this.nodeActionLabel(spec.label, snapshot, nodes.length))
           .setIcon('sliders-horizontal');
         const controls = item.dom.createDiv({
           cls: 'graphfrontier-node-text-size graphfrontier-node-visual-control',
@@ -4813,29 +4966,40 @@ class GraphFrontierView extends ItemView {
         input.min = String(spec.min);
         input.max = String(spec.max);
         input.step = String(spec.step);
-        input.setAttribute('aria-label', `Node ${spec.label.toLowerCase()}`);
+        input.setAttribute('aria-label', `${group ? 'Group' : 'Node'} ${spec.label.toLowerCase()}`);
         const value =
           spec.type === 'color'
             ? null
             : controls.createSpan({ cls: 'graphfrontier-sidepanel-value' });
         const sync = () => {
           const current = this.resolveNodeActionTargets(snapshot).filter(eligible);
-          const values = (current.length ? current : nodes).map((entry) =>
-            getNodeVisualSetting(this.plugin, entry.id, spec.key)
-          );
+          const values = group
+            ? [group.value(spec.key)]
+            : (current.length ? current : nodes).map((entry) =>
+                getNodeVisualSetting(this.plugin, entry.id, spec.key)
+              );
           const mixed = values.some((entry) => entry !== values[0]);
-          const inherited = (current.length ? current : nodes).every(
-            (entry) => getNodeVisualOverride(this.plugin, entry.id, spec.key) === null
-          );
+          const inherited = group
+            ? group.inherited(spec.key)
+            : (current.length ? current : nodes).every(
+                (entry) => getNodeVisualOverride(this.plugin, entry.id, spec.key) === null
+              );
           input.value = String(values[0]);
           value?.setText(mixed ? 'Mixed' : this.formatSliderValue(Number(input.value), spec.step));
           input.setAttribute('aria-valuetext', mixed ? 'Mixed' : String(values[0]));
           input.setAttribute(
             'title',
-            mixed ? 'Mixed values' : inherited ? 'Global value' : 'Individual value'
+            mixed
+              ? 'Mixed values'
+              : inherited
+                ? 'Global value'
+                : group
+                  ? 'Group value'
+                  : 'Individual value'
           );
           item.setTitle(
-            this.nodeActionLabel(spec.label, snapshot, nodes.length) + (mixed ? ' (Mixed)' : '')
+            (group ? spec.label : this.nodeActionLabel(spec.label, snapshot, nodes.length)) +
+              (mixed ? ' (Mixed)' : '')
           );
         };
         syncControls.push(sync);
@@ -4844,6 +5008,7 @@ class GraphFrontierView extends ItemView {
           controls.addEventListener(eventName, (event) => event.stopPropagation());
         }
         input.addEventListener('input', () => {
+          if (group) group.set(spec.key, spec.type === 'color' ? input.value : Number(input.value));
           for (const entry of this.resolveNodeActionTargets(snapshot).filter(eligible)) {
             this.plugin.setNodeVisualSetting(
               entry.id,
@@ -4859,52 +5024,71 @@ class GraphFrontierView extends ItemView {
     if (!options.advancedOnly) {
       menu.addItem((item) => {
         item.setIcon('rotate-ccw').onClick(() => {
+          if (group) group.reset();
           for (const entry of this.getNodeVisualResetTargets(snapshot))
             this.plugin.resetNodeVisualSettings(entry.id);
           syncControls.forEach((sync) => sync());
         });
         const syncReset = () => {
-          const count = this.getNodeVisualResetTargets(snapshot).length;
-          item.setTitle(this.nodeActionLabel('Reset visual settings', snapshot, count));
+          const count = group
+            ? Number(group.canReset())
+            : this.getNodeVisualResetTargets(snapshot).length;
+          item.setTitle(
+            group
+              ? 'Reset visual settings'
+              : this.nodeActionLabel('Reset visual settings', snapshot, count)
+          );
           item.setDisabled(count === 0);
         };
         syncControls.push(syncReset);
         syncReset();
       });
     }
-    if (options.basicOnly || !node || node.meta?.darkEnergy) return;
+    if (options.basicOnly || (!group && (!node || node.meta?.darkEnergy))) return;
 
-    const isStrongPullNode = this.plugin.isStrongPullNode(node.id);
+    const isStrongPullNode = group
+      ? !!group.current()?.settings?.strong_pull
+      : this.plugin.isStrongPullNode(node.id);
     if (!isStrongPullNode) {
       menu.addItem((item) =>
         item
           .setTitle('Strong pull')
           .setIcon('zap')
           .onClick(async () => {
-            if (!this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id))
+            if (
+              group
+                ? !group.current()
+                : !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id)
+            )
               return;
             const strong = this.plugin.clampStrongPullMultiplier(
               this.plugin.getSettings().strong_pull_multiplier
             );
-            this.plugin.setNodeMultiplier(node.id, strong, { mode: 'strong-pull' });
+            if (group) group.set('strong_pull', true);
+            else this.plugin.setNodeMultiplier(node.id, strong, { mode: 'strong-pull' });
             this.kickLayoutSearch();
-            new Notice(`Strong pull: ${node.id} x${strong.toFixed(2)}`);
+            new Notice(`Strong pull: ${group ? 'group' : node.id} x${strong.toFixed(2)}`);
           })
       );
     }
 
-    const nodeMultiplier = this.plugin.getNodeMultiplier(node.id);
+    const nodeMultiplier = group ? 1 : this.plugin.getNodeMultiplier(node.id);
     if (nodeMultiplier > 1 || isStrongPullNode) {
       menu.addItem((item) =>
         item
           .setTitle('Clear strong pull')
           .setIcon('x')
           .onClick(async () => {
-            if (!this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id))
+            if (
+              group
+                ? !group.current()
+                : !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id)
+            )
               return;
-            this.plugin.clearNodeMultiplier(node.id);
+            if (group) group.set('strong_pull', null);
+            else this.plugin.clearNodeMultiplier(node.id);
             this.kickLayoutSearch();
-            new Notice(`Strong pull cleared: ${node.id}`);
+            new Notice(`Strong pull cleared: ${group ? 'group' : node.id}`);
           })
       );
     }
@@ -4913,25 +5097,15 @@ class GraphFrontierView extends ItemView {
         .setTitle('Paint edges')
         .setIcon('palette')
         .onClick(async () => {
-          if (!this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id))
+          if (
+            group
+              ? !group.current()
+              : !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id)
+          )
             return;
-          await this.promptPickPaintedEdgeColor(node.id, clientX, clientY);
+          await this.promptPickPaintedEdgeColor(node?.id, clientX, clientY, group);
         })
     );
-    if (this.plugin.getPaintedEdgeColor(node.id)) {
-      menu.addItem((item) =>
-        item
-          .setTitle('Clear painted edges')
-          .setIcon('x')
-          .onClick(async () => {
-            if (!this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id))
-              return;
-            this.plugin.clearPaintedEdgeColor(node.id);
-            this.plugin.renderAllViews();
-            new Notice(`Painted edges cleared: ${node.id}`);
-          })
-      );
-    }
   }
 
   addContextSubmenuItem(menu, options) {
@@ -5299,13 +5473,15 @@ class GraphFrontierView extends ItemView {
           labelMinimumSize: getLabelMinimumSizeRender(this, node.id),
           labelMinZoom: getLabelZoomThresholdRender(this, node.id),
           dimAlpha:
-            getNodeVisualOverride(this.plugin, node.id, 'hover_dim_strength') === null
+            getNodeVisualOverride(this.plugin, node.id, 'hover_dim_strength') === null &&
+            this.plugin.getGroupVisualSettings?.(node.id)?.hover_dim_strength == null
               ? null
               : getHoverDimAlpha(this.plugin, 1, node.id),
           labelFontSize:
-            this.plugin.getNodeLabelSize(node.id) === null
+            this.plugin.getNodeLabelSize(node.id) === null &&
+            this.plugin.getGroupVisualSettings?.(node.id)?.label_font_size == null
               ? null
-              : this.plugin.getNodeLabelSize(node.id) / 5,
+              : getNodeVisualSetting(this.plugin, node.id, 'label_font_size') / 5,
           x: Number(node.x) || 0,
           y: Number(node.y) || 0,
           degree: Number(node.degree) || 0,
@@ -6232,6 +6408,7 @@ class GraphFrontierView extends ItemView {
     const x = coords.x;
     const y = coords.y;
 
+    const action = beginPositionAction(this, [nodeId], true);
     const nextPos = { x, y };
     this.plugin.setPin(nodeId, nextPos, { mode: 'exact' });
     const currentNode = this.nodeById.get(nodeId);
@@ -6244,6 +6421,7 @@ class GraphFrontierView extends ItemView {
     this.markNodeSpatialIndexDirty();
     this.kickLayoutSearch();
     this.plugin.renderAllViews();
+    finishPositionAction(this, action);
     new Notice(`Pinned to coordinates: ${nodeId} (${x.toFixed(2)}, ${y.toFixed(2)})`);
   }
 
@@ -6272,10 +6450,12 @@ class GraphFrontierView extends ItemView {
     }
   }
 
-  async promptPickPaintedEdgeColor(nodeId, clientX = null, clientY = null) {
+  async promptPickPaintedEdgeColor(nodeId, clientX = null, clientY = null, group = null) {
     const snapshot = { ...this.captureNodeActionTargets(), ids: [nodeId] };
     const sourceData = this.plugin.data;
-    const initialColor = this.plugin.getPaintedEdgeColor(nodeId) || '#ef6f6c';
+    const initialColor =
+      (group ? group.current()?.settings?.edge_color : this.plugin.getPaintedEdgeColor(nodeId)) ||
+      '#ef6f6c';
     const hostDocument = this.contentEl.ownerDocument || document;
     const colorInput = hostDocument.createElement('input');
     colorInput.type = 'color';
@@ -6308,12 +6488,15 @@ class GraphFrontierView extends ItemView {
       if (disposed) return;
       if (
         this.plugin.data !== sourceData ||
-        !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === nodeId)
+        (group
+          ? !group.current()
+          : !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === nodeId))
       ) {
         cleanup();
         return;
       }
-      this.plugin.setPaintedEdgeColor(nodeId, colorInput.value);
+      if (group) group.set('edge_color', colorInput.value);
+      else this.plugin.setPaintedEdgeColor(nodeId, colorInput.value);
       this.plugin.renderAllViews();
     };
 
@@ -6735,6 +6918,10 @@ class GraphFrontierView extends ItemView {
   }
 
   applyNodePinAction(snapshot, mode) {
+    return this.runPositionAction(snapshot.ids, () => this.applyNodePinActionNow(snapshot, mode));
+  }
+
+  applyNodePinActionNow(snapshot, mode) {
     const nodes = this.getNodePinActionTargets(snapshot, mode);
     if (!nodes.length) return 0;
     const all = this.resolveNodeActionTargets(snapshot);
@@ -6796,6 +6983,41 @@ class GraphFrontierView extends ItemView {
     submenu(this.nodeActionLabel('Visual settings', snapshot), 'settings-2', (target) =>
       this.addVisualSettingsToMenu(target, null, clientX, clientY, snapshot, { basicOnly: true })
     );
+  }
+
+  runPositionAction(ids, action, move = false) {
+    return runPositionAction(this, ids, action, move);
+  }
+
+  onPositionHistoryKeyDown(event) {
+    if (
+      event.defaultPrevented ||
+      event.isComposing ||
+      event.altKey ||
+      !(event.ctrlKey || event.metaKey) ||
+      (event.ctrlKey && event.metaKey) ||
+      this.app.workspace.activeLeaf?.view !== this
+    )
+      return;
+    const key = event.code || String(event.key).toLowerCase();
+    const undo = (key === 'KeyZ' || key === 'z') && !event.shiftKey;
+    const redo =
+      ((key === 'KeyZ' || key === 'z') && event.shiftKey) ||
+      ((key === 'KeyY' || key === 'y') && !event.shiftKey);
+    if (!undo && !redo) return;
+    const doc = this.contentEl.ownerDocument;
+    const editable = (el) =>
+      el?.isContentEditable ||
+      el?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+    if (editable(event.target) || editable(doc.activeElement)) return;
+    if (event.target !== doc && event.target !== doc.body && !this.contentEl.contains(event.target))
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    const result = replayPositionAction(this, redo);
+    if (result === 'conflict')
+      new Notice('Graph changed outside this action. Undo history cleared.');
+    return false;
   }
 
   onSelectedNodeCopyKeyDown(event) {
@@ -7285,7 +7507,7 @@ class GraphFrontierView extends ItemView {
   }
 
   nodeMatchesParsedGroup(meta, parsed, node = null) {
-    return nodeMatchesParsedGroupRender(meta, parsed, node);
+    return nodeMatchesParsedGroupRender(meta, parsed, node, this.plugin.getNodeLists?.() || []);
   }
 
   // Hit testing and coordinate transforms between screen and world spaces.

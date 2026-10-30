@@ -9,11 +9,26 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-lint-check:
-    runs-on: ubuntu-latest
+    name: Check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
 
     steps:
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -32,8 +47,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Test backup creation and recovery
+        run: node --test tests/backups.test.cjs
+
       - name: Test
-        run: npm test
+        # Bash expands the file glob on all three operating systems.
+        run: node --test tests/*.test.cjs
 
       - name: Build
         run: npm run build

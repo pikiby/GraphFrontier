@@ -97,7 +97,13 @@ included in static HTML exports.
 
 ## Groups
 
-Group rows define color rules for nodes based on query expressions.
+Group rows define visual rules for nodes based on query expressions. By default,
+only color changes. The sliders icon beside each color opens the same visual settings
+menu used for individual nodes. **Reset visual settings** clears the additional
+visual overrides and keeps its rule color and Strong pull. The same menu also
+provides **Paint edges**, **Strong pull**, and
+**Clear strong pull**. These effects follow group membership; individual node
+settings take priority. Strong pull uses the existing global strength setting.
 
 Supported query patterns:
 
@@ -108,12 +114,30 @@ Supported query patterns:
 - `line:<value>`
 - `section:<value>`
 - `[property]:<value>`
+- `list:<id>` (exact node-list ID)
 
 Behavior:
 
-1. Higher row order has higher color priority.
-2. First matching enabled group provides node color.
+1. Individual node settings take priority over groups.
+2. For each setting, the first matching enabled group that defines it wins;
+   otherwise the global setting is used. Every group still defines its color.
 3. Group rows can be reordered by drag-and-drop.
+
+### Node lists
+
+Open **Settings → GraphFrontier → Node lists** to create, rename or delete lists and
+search all lists and edit their members. Open a list to see filenames and paths,
+remove members, or use **Add files...** to search the vault and select multiple files.
+Rename and delete are in the list's **...** menu; the API ID has a copy button. The node menu's
+**Add to list** also supports a multi-node selection. Use `list:` in a group's
+query to select a list by name; the stored query uses its stable ID.
+
+Lists only define membership, not appearance. They are stored separately in
+`node-lists.json` inside the plugin folder and shared across layouts and local
+graphs. Missing paths are retained and counted in the editor. File/folder renames
+inside Obsidian update membership. Lists do not force filtered nodes into view.
+Membership changes update visuals. Strong pull groups also wake physics when their
+membership changes.
 
 ## Save/Load Row
 
@@ -137,3 +161,24 @@ configuration is separate from layout data. See [setup and API reference](mcp.md
 
 - Usage: `usage.md`
 - Physics: `physics.md`
+
+## Backups
+
+Open **Settings → GraphFrontier → Backups**. Automatic backups are enabled by
+default and maintain one current file at
+`GraphFrontier backups/graphfrontier-backup.json`, outside the installed plugin
+folder. It includes all layouts, node lists and general preferences, not MCP
+tokens. Change the vault-relative folder or disable automatic backups here.
+**Back up now** works even when automatic backups are disabled.
+
+A copy from a previous installation is protected until you explicitly restore it
+or confirm replacement. **Not now**, closing the window, and restarting Obsidian
+do not remove that protection. The default folder is detected after reinstall;
+if you previously chose another folder, select it again in **Backups**.
+
+Restore shows the layout/list counts and asks for confirmation. It replaces matching
+layouts, all lists and current preferences; unrelated layouts are retained. The
+source backup remains intact during restoration. A failed write attempts rollback
+of working files; corrupted backups are never automatically overwritten.
+
+This protects against plugin reinstallation, not loss of the vault itself.

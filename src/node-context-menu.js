@@ -7,6 +7,54 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   const snapshot = options.snapshot || view.captureNodeActionTargets(node);
   const only = !!options.singleOnly;
   const singleSnapshot = { ...snapshot, ids: [node.id] };
+  const listSnapshot = only ? singleSnapshot : snapshot;
+  const filePaths = () =>
+    view
+      .resolveNodeActionTargets(listSnapshot)
+      .filter((entry) => !entry.meta?.darkEnergy && !entry.meta?.subgraph)
+      .map((entry) => app.vault.getAbstractFileByPath(entry.id))
+      .filter((entry) => entry && typeof entry.extension === 'string')
+      .map((entry) => entry.path);
+  const addToList = () => {
+    if (!filePaths().length) return;
+    view.addContextSubmenuItem(menu, {
+      title: 'Add to list',
+      icon: 'list-plus',
+      clientX,
+      clientY,
+      fillSubmenu: (target) => {
+        for (const list of plugin.getNodeLists?.() || []) {
+          target.addItem((item) =>
+            item.setTitle(list.name).onClick(async () => {
+              const nodeIds = filePaths();
+              if (
+                !nodeIds.length ||
+                !(plugin.getNodeLists?.() || []).some((entry) => entry.id === list.id)
+              )
+                return;
+              try {
+                await (view.owner || plugin).updateNodeList({
+                  action: 'add',
+                  listId: list.id,
+                  nodeIds,
+                });
+              } catch (error) {
+                new Notice(`Add to list: ${error.message}`);
+              }
+            })
+          );
+        }
+        target.addItem((item) =>
+          item
+            .setTitle('Manage lists...')
+            .setIcon('settings-2')
+            .onClick(() => {
+              if (view.isNodeActionSnapshotCurrent(listSnapshot)) view.openNodeListsModal();
+            })
+        );
+      },
+    });
+  };
   if (!only && snapshot.ids.length > 1) {
     view.addSelectionActionsToMenu(menu, snapshot, clientX, clientY);
     menu.addItem((item) =>
@@ -15,6 +63,7 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
         .setIcon('circle')
         .onClick(() => view.editSubgraph(null, snapshot))
     );
+    addToList();
     view.addContextSubmenuItem(menu, {
       title: `Only for ${view.getLinkedNodeDisplayName(node)}`,
       icon: 'file',
@@ -45,7 +94,11 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
         .onClick(async (event) => {
           try {
             if (!view.resolveNodeActionTargets(singleSnapshot).length) return;
-            await callback(event);
+            if (/^(Pin|Unpin)/.test(title))
+              await view.runPositionAction([node.id, ...view.getLinkedNodeIds(node.id)], () =>
+                callback(event)
+              );
+            else await callback(event);
           } catch (error) {
             new Notice(`${title}: ${error.message}`);
           }
@@ -253,6 +306,7 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
     hasLinked
   );
   nativeAction(menu, 'Bookmark', 'bookmark', /bookmark/i);
+  addToList();
   submenu('Other', 'ellipsis', (target) => {
     nativeAction(target, 'Move file to', 'folder-input', /move file to/i);
     nativeAction(target, 'Bookmark', 'bookmark', /bookmark/i);

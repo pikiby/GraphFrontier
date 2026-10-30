@@ -1,6 +1,8 @@
 const { DEFAULT_DATA, MAX_ZOOM, ZOOM_STEP_FACTOR } = require('./constants');
 const { DARK_THEME, getLabelAppearance } = require('./theme');
 const { getNodeVisualSetting, getEdgeVisualSetting, getNodeColor } = require('./node-visuals');
+const EMPTY_LISTS = [];
+const { nodeListContains } = require('./node-lists');
 
 // Focus dimming helper: computes alpha of non-focused graph elements.
 function getHoverDimAlpha(plugin, focusProgress, nodeId) {
@@ -148,7 +150,7 @@ function getLabelMinimumSize(view, nodeId) {
 
 function getLabelFontSize(view, nodeId) {
   const baseSize = view.plugin.clampNumber(
-    view.plugin.getNodeLabelSize(nodeId) ?? view.plugin.getSettings().label_font_size,
+    getNodeVisualSetting(view.plugin, nodeId, 'label_font_size'),
     5,
     20,
     DEFAULT_DATA.settings.label_font_size
@@ -157,29 +159,21 @@ function getLabelFontSize(view, nodeId) {
 }
 
 // Resolve group colors once per graph/groups version; drawing can then do cheap map lookups.
-function getGroupColorMap(view) {
+function getGroupStyleMap(view) {
   const groups = Array.isArray(view.plugin.data.groups) ? view.plugin.data.groups : [];
   if (groups.length === 0) return null;
-  const signature = groups
-    .map((group) => {
-      if (!group || typeof group !== 'object') return '';
-      const id = String(group.id || '');
-      const enabled = group.enabled !== false ? '1' : '0';
-      const query = String(group.query || '').trim();
-      const color = String(group.color || '').trim();
-      return `${id}|${enabled}|${query}|${color}`;
-    })
-    .join('||');
+  const lists = view.plugin.getNodeLists?.() || EMPTY_LISTS;
   const graphVersion = Number(view.visibilityGraphVersion || 0);
   const cache =
     view.groupColorCache && typeof view.groupColorCache === 'object' ? view.groupColorCache : null;
   if (
     cache &&
     cache.graphVersion === graphVersion &&
-    cache.groupsSignature === signature &&
-    cache.colorByNodeId instanceof Map
+    cache.groups === groups &&
+    cache.lists === lists &&
+    cache.styleByNodeId instanceof Map
   ) {
-    return cache.colorByNodeId;
+    return cache.styleByNodeId;
   }
 
   const parsedGroups = [];
@@ -190,25 +184,45 @@ function getGroupColorMap(view) {
     parsedGroups.push({
       parsed,
       color: view.plugin.normalizeGroupColor(group.color),
+      settings: group.settings || {},
+      members:
+        parsed.type === 'list'
+          ? new Set(lists.find((list) => list.id === parsed.value)?.nodeIds || [])
+          : null,
     });
   }
   const colorByNodeId = new Map();
+  const styleByNodeId = new Map();
   for (const candidateNode of view.nodes) {
     const meta = view.nodeMetaById.get(candidateNode.id) || candidateNode.meta || null;
     if (!meta) continue;
     for (const group of parsedGroups) {
-      if (nodeMatchesParsedGroup(meta, group.parsed, candidateNode)) {
-        colorByNodeId.set(candidateNode.id, group.color);
-        break;
+      if (
+        group.members
+          ? group.members.has(candidateNode.id)
+          : nodeMatchesParsedGroup(meta, group.parsed, candidateNode, lists)
+      ) {
+        if (!colorByNodeId.has(candidateNode.id)) colorByNodeId.set(candidateNode.id, group.color);
+        const style = styleByNodeId.get(candidateNode.id) || {};
+        for (const [key, value] of Object.entries({ ...group.settings, node_color: group.color })) {
+          if (style[key] === undefined) style[key] = value;
+        }
+        styleByNodeId.set(candidateNode.id, style);
       }
     }
   }
   view.groupColorCache = {
     graphVersion,
-    groupsSignature: signature,
+    groups,
     colorByNodeId,
+    styleByNodeId,
+    lists,
   };
-  return colorByNodeId;
+  return styleByNodeId;
+}
+
+function getGroupColorMap(view) {
+  return getGroupStyleMap(view) ? view.groupColorCache.colorByNodeId : null;
 }
 
 // Resolve first matching group color for a node, according to current row priority.
@@ -218,7 +232,10 @@ function getGroupColorForNode(view, node) {
 }
 
 // Match helper used by group-color rules (path/file/tag/line/section/property).
-function nodeMatchesParsedGroup(meta, parsed, node = null) {
+function nodeMatchesParsedGroup(meta, parsed, node = null, lists = []) {
+  if (parsed.type === 'list') {
+    return nodeListContains(lists, String(parsed.value || '').trim(), node?.id || meta?.path);
+  }
   const needle = String(parsed.value || '')
     .trim()
     .toLowerCase();
@@ -334,7 +351,6 @@ function drawEdges(view, ctx) {
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
   const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
   const normalEdgeAlpha = hasSearchHighlight ? searchDimAlpha : hasAnyFocus ? focusDimAlpha : 1;
-  const paintedEdgeColors = view.plugin.data?.painted_edge_colors || {};
   let hasNormalEdgeBatch = false;
   let normalEdgeBatchWidth;
 
@@ -380,8 +396,8 @@ function drawEdges(view, ctx) {
     const sourcePointY = (sourceNode.y - view.camera.y) * zoom + screenCenterY;
     const targetPointX = (targetNode.x - view.camera.x) * zoom + screenCenterX;
     const targetPointY = (targetNode.y - view.camera.y) * zoom + screenCenterY;
-    const sourcePaintColor = paintedEdgeColors[sourceNode.id] || null;
-    const targetPaintColor = paintedEdgeColors[targetNode.id] || null;
+    const sourcePaintColor = view.plugin.getPaintedEdgeColor(sourceNode.id);
+    const targetPaintColor = view.plugin.getPaintedEdgeColor(targetNode.id);
     const paintedColor = sourcePaintColor || targetPaintColor;
     const edgeScale = getEdgeVisualSetting(
       view.plugin,
@@ -686,6 +702,7 @@ module.exports = {
   getLabelFontSize,
   getLabelMinimumSize,
   getGroupColorForNode,
+  getGroupStyleMap,
   nodeMatchesParsedGroup,
   drawGrid,
   drawEdges,

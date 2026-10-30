@@ -1083,3 +1083,250 @@ input.graphfrontier-group-color-input::-webkit-color-swatch {
 .graphfrontier-sidepanel .graphfrontier-attachments-content > * + * {
   padding-top: 2px;
 }
+
+.graphfrontier-group-settings {
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  flex: none;
+}
+
+.graphfrontier-group-settings svg {
+  width: 14px;
+  height: 14px;
+}
+
+.graphfrontier-node-list {
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.graphfrontier-node-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.graphfrontier-node-list-actions input {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.graphfrontier-node-list-id,
+.graphfrontier-node-list-members {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.graphfrontier-node-list-members {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.graphfrontier-node-list-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin: 4px 0;
+}
+
+.graphfrontier-data-modal {
+  width: min(680px, 94vw);
+}
+.graphfrontier-data-search {
+  width: 100%;
+  margin: 10px 0;
+}
+.graphfrontier-data-results {
+  max-height: 52vh;
+  overflow-y: auto;
+  margin-top: 10px;
+}
+.graphfrontier-data-row,
+.graphfrontier-data-list-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+}
+.graphfrontier-data-list-button {
+  width: 100%;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  height: auto;
+  text-align: left;
+  white-space: normal;
+}
+.graphfrontier-data-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.graphfrontier-data-file-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.graphfrontier-data-path {
+  font-size: var(--font-smallest);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.graphfrontier-data-heading {
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-weight: var(--font-semibold);
+}
+.graphfrontier-data-count {
+  color: var(--text-muted);
+}
+.graphfrontier-backup-warning {
+  color: var(--text-warning);
+}
+@media (max-width: 480px) {
+  .graphfrontier-data-row {
+    flex-wrap: wrap;
+  }
+}
+
+/* Plugin settings follow Obsidian's native rows and theme controls. */
+.graphfrontier-settings .graphfrontier-settings-section + .graphfrontier-settings-section {
+  border-top: 2px solid var(--background-modifier-border-hover, var(--text-faint));
+  margin-top: 36px;
+  padding-top: 28px;
+}
+.graphfrontier-settings .graphfrontier-settings-section h3 {
+  margin: 0 0 8px;
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+.graphfrontier-settings .graphfrontier-settings-description {
+  margin: 0 0 16px;
+}
+.graphfrontier-settings .setting-item-control {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.graphfrontier-settings .setting-item-control input[type='text'] {
+  width: 200px;
+  max-width: 100%;
+}
+.graphfrontier-settings .graphfrontier-data-list-button {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  margin: 0;
+  padding: 12px 8px;
+}
+.graphfrontier-settings .graphfrontier-data-list-button:hover {
+  background: var(--background-modifier-hover);
+}
+.graphfrontier-settings .graphfrontier-data-list-button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+.graphfrontier-settings .graphfrontier-data-results {
+  max-height: 320px;
+}
+.graphfrontier-settings .graphfrontier-node-list-actions {
+  margin: 8px 0;
+}
+.graphfrontier-settings .graphfrontier-data-row {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.graphfrontier-settings .graphfrontier-mcp-config {
+  min-height: 100px;
+  padding: 10px;
+  font-size: var(--font-ui-smaller);
+}
+@media (max-width: 600px) {
+  .graphfrontier-settings .setting-item {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .graphfrontier-settings .setting-item-control {
+    max-width: 100%;
+  }
+}
+.graphfrontier-settings label.checkbox-container {
+  position: relative;
+  flex-shrink: 0;
+}
+.graphfrontier-settings label.checkbox-container input[type='checkbox'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.graphfrontier-settings label.checkbox-container:focus-within {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+.graphfrontier-settings .graphfrontier-list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.graphfrontier-settings .graphfrontier-list-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.graphfrontier-settings button.graphfrontier-list-icon {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  padding: 4px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  color: var(--text-muted);
+}
+.graphfrontier-settings button.graphfrontier-list-icon:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.graphfrontier-settings .graphfrontier-list-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.graphfrontier-settings .graphfrontier-data-file {
+  width: 100%;
+  cursor: pointer;
+}
+.graphfrontier-settings .graphfrontier-data-file-text > span:first-child {
+  font-size: var(--font-ui-small);
+}
+.graphfrontier-settings .graphfrontier-data-path {
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+}
+.graphfrontier-settings .graphfrontier-data-results {
+  margin-top: 0;
+}
+.graphfrontier-settings .graphfrontier-data-row {
+  padding: 8px 0;
+}
+@media (max-width: 480px) {
+  .graphfrontier-settings .graphfrontier-list-toolbar {
+    flex-wrap: wrap;
+  }
+  .graphfrontier-settings .graphfrontier-list-toolbar-actions {
+    order: 1;
+    flex-basis: 100%;
+  }
+}

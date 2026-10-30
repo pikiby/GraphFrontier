@@ -1,5 +1,8 @@
 const { PluginSettingTab, Setting, Notice, Platform } = require('obsidian');
 
+const { NodeListsPanel } = require('./node-lists-modal');
+const { BackupsPanel } = require('./backups-modal');
+
 const DEFAULT_MCP_SETTINGS = { enabled: false, port: 27125, token: '' };
 
 function normalizeMcpSettings(value) {
@@ -144,14 +147,55 @@ class McpController {
 }
 
 class GraphFrontierMcpSettingTab extends PluginSettingTab {
+  hide() {
+    this.listsPanel?.onClose();
+    this.backupsPanel?.onClose();
+  }
+
   display() {
+    this.hide();
     const { containerEl } = this;
-    const controller = this.plugin.mcp;
     containerEl.empty();
-    containerEl.createEl('h3', { text: 'Local MCP' });
-    containerEl.createEl('p', {
-      text: 'Connect Codex, Claude Code or OpenCode to the open graph. Access is local and requires a token. Layout files do not contain these settings.',
+    containerEl.addClass('graphfrontier-settings');
+    this.renderMcp(
+      this.section('Local MCP', 'Connect a local AI client to the graph. Access requires a token.')
+    );
+    const listsEl = this.section('Node lists', 'Files used by group filters and the API.');
+    this.listsPanel = new NodeListsPanel(
+      {
+        app: this.app,
+        plugin: this.plugin,
+        copyTextToClipboard: async (text) => {
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
+            new Notice('Could not copy list ID.');
+          }
+        },
+      },
+      listsEl
+    );
+    this.listsPanel.onOpen();
+    const backupsEl = this.section(
+      'Backups',
+      'One current copy of layouts, lists and preferences. Access tokens are excluded.'
+    );
+    this.backupsPanel = new BackupsPanel(this.plugin, backupsEl);
+    this.backupsPanel.onOpen();
+  }
+
+  section(title, description) {
+    const section = this.containerEl.createDiv({ cls: 'graphfrontier-settings-section' });
+    section.createEl('h3', { text: title });
+    section.createEl('p', {
+      text: description,
+      cls: 'setting-item-description graphfrontier-settings-description',
     });
+    return section.createDiv();
+  }
+
+  renderMcp(containerEl) {
+    const controller = this.plugin.mcp;
     if (!controller.desktop) {
       containerEl.createEl('p', {
         text: 'The MCP server is desktop-only. The graph remains available on mobile.',
@@ -188,7 +232,7 @@ class GraphFrontierMcpSettingTab extends PluginSettingTab {
       (controller.server
         ? `Listening on http://127.0.0.1:${controller.settings.port}/mcp`
         : 'MCP is off.');
-    containerEl.createEl('p', { text: status });
+    new Setting(containerEl).setName('Status').setDesc(status);
     new Setting(containerEl)
       .setName('Access token')
       .setDesc(
@@ -230,7 +274,7 @@ class GraphFrontierMcpSettingTab extends PluginSettingTab {
       attr: { 'aria-label': 'MCP client configuration', readonly: '' },
     });
     textarea.value = clientConfigs(controller.settings.port)[client];
-    textarea.rows = 14;
+    textarea.rows = 5;
   }
 }
 

@@ -54,16 +54,33 @@ function getNodeVisualOverride(plugin, id, key) {
 function getNodeVisualSetting(plugin, id, key) {
   return (
     getNodeVisualOverride(plugin, id, key) ??
+    plugin.getGroupVisualSettings?.(id)?.[key] ??
     plugin.getSettings()[key] ??
     DEFAULT_DATA.settings[key]
   );
 }
 
 function getEdgeVisualSetting(plugin, source, target, key) {
-  const a = getNodeVisualOverride(plugin, source, key);
-  const b = getNodeVisualOverride(plugin, target, key);
+  const a =
+    getNodeVisualOverride(plugin, source, key) ??
+    plugin.getGroupVisualSettings?.(source)?.[key] ??
+    null;
+  const b =
+    getNodeVisualOverride(plugin, target, key) ??
+    plugin.getGroupVisualSettings?.(target)?.[key] ??
+    null;
   if (a !== null && b !== null) return Math.max(a, b);
   return a ?? b ?? plugin.getSettings()[key] ?? DEFAULT_DATA.settings[key];
+}
+
+function normalizeGroupVisuals(raw) {
+  const normalized = normalizeNodeVisuals({ group: raw }).group || {};
+  delete normalized.node_color;
+  if (typeof raw?.label_font_size === 'number' && Number.isFinite(raw.label_font_size))
+    normalized.label_font_size = Math.max(5, Math.min(20, raw.label_font_size));
+  if (typeof raw?.strong_pull === 'boolean') normalized.strong_pull = raw.strong_pull;
+  if (/^#[0-9a-f]{6}$/i.test(raw?.edge_color)) normalized.edge_color = raw.edge_color.toLowerCase();
+  return normalized;
 }
 
 function getNodeColor(plugin, node, groupColor) {
@@ -79,6 +96,7 @@ module.exports = {
   getNodeColor,
   NODE_VISUAL_SETTINGS,
   normalizeNodeVisuals,
+  normalizeGroupVisuals,
   getNodeVisualOverride,
   getNodeVisualSetting,
   getEdgeVisualSetting,

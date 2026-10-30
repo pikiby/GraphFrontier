@@ -70,6 +70,8 @@ function touchHarness(t, node = null) {
   const menus = [],
     clicks = [];
   const view = Object.assign(Object.create(proto), {
+    plugin: { data: { pins: {}, orbit_pins: {}, subgraphs: [] } },
+    nodeById: new Map(node ? [[node.id, node]] : []),
     canvasEl: {
       getBoundingClientRect: () => ({ left: 0, top: 0 }),
       addClass() {},

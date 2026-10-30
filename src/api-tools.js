@@ -50,10 +50,36 @@ const rule = z
     query: z.string().min(1).max(4096).optional(),
     enabled: z.boolean().optional(),
     color: color.optional(),
+    settings: patch({
+      ...Object.fromEntries(Object.entries(visuals).filter(([key]) => key !== 'node_color')),
+      edge_color: color,
+      strong_pull: z.boolean(),
+    }).optional(),
   })
   .strict();
 const layoutName = z.string().min(1).max(180);
 const tools = [
+  [
+    'list_node_lists',
+    'Read vault-wide node lists, independent of layouts and open graphs.',
+    {},
+    'listNodeLists',
+    true,
+  ],
+  [
+    'node_lists',
+    'Create, rename or delete a vault-wide node list; add/remove/replace exact vault-relative paths. No note writes or physics changes. Unknown file paths are retained.',
+    {
+      action: z.enum(['create', 'rename', 'delete', 'add', 'remove', 'replace']),
+      listId: z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+        .optional(),
+      name: z.string().min(1).max(300).optional(),
+      nodeIds: z.array(id).max(100000).optional(),
+    },
+    'nodeLists',
+  ],
   [
     'get_configuration',
     'Read all settings, groups, blacklist/whitelist, gravity and subgraph definitions, hotkeys and UI state.',

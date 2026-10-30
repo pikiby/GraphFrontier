@@ -1,3 +1,4 @@
+const { invalidatePositionHistory } = require('./position-history');
 const { LayoutApi } = require('./api-layouts');
 const { GraphApiError, fail } = require('./api-errors');
 const { validate } = require('./api-tools');
@@ -8,7 +9,24 @@ const { HOTKEY_COMMANDS, normalizeAttachmentExtensions } = require('./constants'
 const copy = (value) => JSON.parse(JSON.stringify(value));
 
 class GraphFrontierActions extends LayoutApi {
+  listNodeLists(raw) {
+    this.input('listNodeLists', raw);
+    return { vault: this.plugin.app.vault.getName(), lists: copy(this.plugin.getNodeLists()) };
+  }
+
+  async nodeLists(raw) {
+    const args = this.input('nodeLists', raw);
+    this.assertMutationActive();
+    try {
+      const list = await this.plugin.updateNodeList(args);
+      return { vault: this.plugin.app.vault.getName(), list: copy(list ?? null) };
+    } catch (error) {
+      fail('INVALID_ARGUMENT', error.message);
+    }
+  }
   assertMutationActive() {
+    if (this.plugin.backups?.restoring)
+      fail('INVALID_ARGUMENT', 'Backup restoration is in progress.');
     if (this.closed) fail('API_CLOSED', 'GraphFrontier is unloaded.');
     if (this.mutationSignal?.aborted)
       fail('REQUEST_CANCELLED', 'Request cancelled before committing.');
@@ -328,6 +346,7 @@ class GraphFrontierActions extends LayoutApi {
   async moveNodes(raw) {
     const args = this.input('moveNodes', raw),
       view = this.resolve(args, true);
+    invalidatePositionHistory(view.plugin.data);
     this.nodesFor(
       view,
       args.positions.map((p) => p.id)
@@ -367,6 +386,7 @@ class GraphFrontierActions extends LayoutApi {
   async pinNodes(raw) {
     const args = this.input('pinNodes', raw),
       view = this.resolve(args, true);
+    invalidatePositionHistory(view.plugin.data);
     if (
       [args.nodeIds !== undefined, args.all === true, args.anchorId !== undefined].filter(Boolean)
         .length !== 1
@@ -402,6 +422,7 @@ class GraphFrontierActions extends LayoutApi {
   async subgraphNodes(raw) {
     const args = this.input('subgraphNodes', raw);
     const view = this.resolve(args, true);
+    invalidatePositionHistory(view.plugin.data);
     const existing = this.plugin.data.subgraphs.find((group) => group.id === args.id);
     if (args.action !== 'create' && !existing) fail('NODE_NOT_FOUND', 'Subgraph not found');
     if (args.action !== 'create' && args.memberIds !== undefined)
@@ -440,6 +461,7 @@ class GraphFrontierActions extends LayoutApi {
   gravityNodes(raw) {
     const args = this.input('gravityNodes', raw),
       view = this.resolve(args, true);
+    invalidatePositionHistory(view.plugin.data);
     const existing = args.id && this.plugin.data.dark_energy.find((n) => n.id === args.id);
     if (args.action !== 'create' && !existing) fail('NODE_NOT_FOUND', 'Gravity node not found.');
     if (args.action === 'create' && args.id)
@@ -533,7 +555,10 @@ class GraphFrontierActions extends LayoutApi {
     if (args.action === 'refresh') view.refreshFromVault({ keepCamera: true });
     if (args.action === 'pause') view.layoutPaused = true;
     if (args.action === 'resume') view.kickLayoutSearch();
-    if (args.action === 'align_grid') await view.alignPinsToGrid();
+    if (args.action === 'align_grid') {
+      invalidatePositionHistory(view.plugin.data);
+      await view.alignPinsToGrid();
+    }
     if (args.action === 'select_linked') {
       this.nodesFor(view, [args.nodeId]);
       view.selectLinkedNodes(args.nodeId);

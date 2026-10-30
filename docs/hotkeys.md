@@ -54,3 +54,18 @@ text/input copying.
 
 - Usage: `usage.md`
 - Physics: `physics.md`
+
+## Undo and redo in the graph
+
+- **Ctrl+Z** (macOS: **Cmd+Z**): undo a manual move or pin action.
+- **Ctrl+Y** or **Ctrl+Shift+Z** (macOS: **Cmd+Shift+Z**): redo.
+
+These shortcuts apply only to the active graph, not text fields. A multi-node drag
+or pin action is one step. History is shared by panes of the same layout and graph
+scope, kept in memory for up to 100 actions, and discarded when layout data is
+replaced or the plugin reloads. Local graphs have independent history.
+
+Physics and list updates are not recorded. External positioning/pinning API
+commands clear position history to avoid overwriting newer automation changes.
+Undo does not change colors, lists, selection, camera or other visual settings.
+Free nodes remain free and can move again under physics after undo.

@@ -121,6 +121,9 @@ class Menu {
 }
 
 const obsidian = {
+  setIcon(element, icon) {
+    element.icon = icon;
+  },
   Platform: { isMobile: false, isDesktop: true, isDesktopApp: true },
   PluginSettingTab: class {
     constructor(app, plugin) {
@@ -252,6 +255,7 @@ function fixture(t, data = {}) {
     metadataCache: { resolvedLinks: {}, on },
     workspace: {
       getLeavesOfType: () => leaves,
+      onLayoutReady() {},
       on,
       getActiveFile: () => null,
     },
