@@ -16,6 +16,9 @@ function backupFolder(value, configDir) {
           !p ||
           p.startsWith('.') ||
           /[\\<>:"|?*]/.test(p) ||
+          /^(con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)/i.test(
+            p
+          ) ||
           [...p].some((c) => c.charCodeAt(0) < 32) ||
           /[. ]$/.test(p)
       ) ||
@@ -66,7 +69,25 @@ class BackupManager {
   }
 
   async read() {
-    const file = this.vault.getAbstractFileByPath(this.path);
+    let primaryError;
+    try {
+      const primary = await this.readFile(this.path);
+      if (primary) return primary;
+    } catch (error) {
+      primaryError = error;
+    }
+    const recovery = await this.readFile(this.recoveryPath);
+    if (recovery) return { ...recovery, recovered: true };
+    if (primaryError) throw primaryError;
+    return null;
+  }
+
+  get recoveryPath() {
+    return `${this.path}.recovery`;
+  }
+
+  async readFile(path) {
+    const file = this.vault.getAbstractFileByPath(path);
     if (!file) return null;
     if (!(file instanceof TFile)) throw new Error('Backup path is not a file.');
     const raw = await this.vault.read(file);
@@ -115,9 +136,12 @@ class BackupManager {
   async initialize() {
     try {
       const existing = await this.read();
-      this.blocked = !!existing && existing.bundle.owner !== this.preferences.owner;
+      this.blocked =
+        !!existing && (existing.recovered || existing.bundle.owner !== this.preferences.owner);
       this.lastSuccess = existing?.bundle.createdAt || null;
-      this.error = '';
+      this.error = existing?.recovered
+        ? 'The last backup write was interrupted. A verified recovery copy is available. Restore it before resuming backups.'
+        : '';
     } catch (error) {
       this.blocked = true;
       this.error = error.message;
@@ -226,6 +250,10 @@ class BackupManager {
     this.busy = true;
     try {
       const previous = await this.read();
+      if (previous?.recovered && !replace) {
+        this.blocked = true;
+        throw new Error('Interrupted backup is protected. Restore the recovery copy first.');
+      }
       if (replace && previous?.raw !== expectedRaw)
         throw new Error('Backup changed. Review it again before replacing.');
       if (!replace && previous && previous.bundle.owner !== this.preferences.owner) {
@@ -236,15 +264,50 @@ class BackupManager {
       const text = JSON.stringify(bundle, null, 2);
       await this.ensureFolder();
       const file = this.vault.getAbstractFileByPath(this.path);
+      const original = file instanceof TFile ? await this.vault.read(file) : null;
+      if (!previous?.recovered && original !== (previous?.raw ?? null))
+        throw new Error('Backup changed during save.');
+      if (previous) {
+        // Never touch the current file until a full recovery copy has been verified.
+        const recovery = this.vault.getAbstractFileByPath(this.recoveryPath);
+        if (recovery) {
+          if (!(recovery instanceof TFile)) throw new Error('Recovery path is not a file.');
+          if (previous.recovered) {
+            if ((await this.vault.read(recovery)) !== previous.raw)
+              throw new Error('Recovery copy changed during save.');
+          } else {
+            if ((await this.vault.read(file)) !== previous.raw)
+              throw new Error('Backup changed during save.');
+            await this.vault.delete(recovery);
+          }
+        }
+        if (!this.vault.getAbstractFileByPath(this.recoveryPath))
+          await this.vault.create(this.recoveryPath, previous.raw);
+        if ((await this.readFile(this.recoveryPath))?.raw !== previous.raw)
+          throw new Error('Recovery verification failed. Current backup left untouched.');
+      }
       if (file instanceof TFile) {
         await this.vault.process(file, (current) => {
-          if (current !== previous?.raw) throw new Error('Backup changed during save.');
+          if (current !== original) throw new Error('Backup changed during save.');
           return text;
         });
-      } else if (!file) await this.vault.create(this.path, text);
-      else throw new Error('Backup path is not a file.');
-      const verified = await this.read();
+      } else if (!file) {
+        // A failed first write must not leave a truncated file at the final path.
+        const pendingPath = `${this.path}.${Date.now()}-${Math.random().toString(36).slice(2)}.pending`;
+        try {
+          const pending = await this.vault.create(pendingPath, text);
+          if ((await this.readFile(pendingPath))?.raw !== text)
+            throw new Error('Backup verification failed.');
+          await this.vault.rename(pending, this.path);
+        } finally {
+          const pending = this.vault.getAbstractFileByPath(pendingPath);
+          if (pending instanceof TFile) await this.vault.delete(pending);
+        }
+      } else throw new Error('Backup path is not a file.');
+      const verified = await this.readFile(this.path);
       if (verified?.raw !== text) throw new Error('Backup verification failed.');
+      const recovery = this.vault.getAbstractFileByPath(this.recoveryPath);
+      if (recovery instanceof TFile) await this.vault.delete(recovery);
       this.blocked = false;
       this.error = '';
       this.lastSuccess = bundle.createdAt;
@@ -274,6 +337,8 @@ class BackupManager {
       if (!found || found.raw !== expectedRaw)
         throw new Error('Backup changed. Review it again before restoring.');
       const bundle = found.bundle;
+      const damaged = found.recovered ? this.vault.getAbstractFileByPath(this.path) : null;
+      const damagedRaw = damaged instanceof TFile ? await this.vault.read(damaged) : null;
       const restoration = p.nodeListStore.queue.then(() =>
         p.runLayoutFileOperation(async () => {
           const adapter = this.vault.adapter;
@@ -310,6 +375,20 @@ class BackupManager {
       );
       p.nodeListStore.queue = restoration.catch(() => {});
       await restoration;
+      if (found.recovered) {
+        // Repair only after an explicit restore; retain recovery on any storage failure.
+        if (damaged instanceof TFile) {
+          await this.vault.process(damaged, (current) => {
+            if (current !== damagedRaw) throw new Error('Backup changed during restore.');
+            return found.raw;
+          });
+        } else if (!damaged) await this.vault.create(this.path, found.raw);
+        else throw new Error('Backup path is not a file.');
+        if ((await this.readFile(this.path))?.raw !== found.raw)
+          throw new Error('Restored backup verification failed. Recovery copy kept.');
+        const recovery = this.vault.getAbstractFileByPath(this.recoveryPath);
+        if (recovery instanceof TFile) await this.vault.delete(recovery);
+      }
       // Keep the source copy intact; subsequent saves are allowed for this installation.
       this.preferences.owner = bundle.owner;
       this.blocked = false;

@@ -12,6 +12,19 @@ async function setup(t, prefs = {}) {
   f.app.vault.process = async (file, fn) => {
     m.contents.set(file.path, fn(m.contents.get(file.path)));
   };
+  f.app.vault.delete = async (entry) => {
+    m.contents.delete(entry.path);
+    m.entries.delete(entry.path);
+  };
+  f.app.vault.rename = async (entry, path) => {
+    assert(!m.entries.has(path));
+    const raw = m.contents.get(entry.path);
+    m.contents.delete(entry.path);
+    m.entries.delete(entry.path);
+    entry.path = path;
+    m.entries.set(path, entry);
+    m.contents.set(path, raw);
+  };
   f.adapter.exists = async (path) =>
     f.files.has(path) || [...f.files.keys()].some((p) => p.startsWith(path + '/'));
   f.adapter.list = async (path) => ({
@@ -166,4 +179,88 @@ test('leaving protected Backups settings does not authorize replacement and menu
   f.view.onPaneMenu(menu);
   assert(menu.items.some((i) => i.title === 'Node lists...'));
   assert(menu.items.some((i) => i.title === 'Backups...'));
+});
+
+test('partial overwrite keeps a verified recovery copy across restart and explicit restore', async (t) => {
+  const f = await setup(t);
+  await f.manager.write();
+  const raw = f.contents.get(f.manager.path),
+    last = f.manager.lastSuccess;
+  const process = f.app.vault.process;
+  f.app.vault.process = async (file, fn) => {
+    f.contents.set(file.path, fn(f.contents.get(file.path)).slice(0, 25));
+    throw new Error('ENOSPC');
+  };
+  await assert.rejects(f.manager.write(), /ENOSPC/);
+  assert.equal(f.contents.get(f.manager.recoveryPath), raw);
+  assert.equal(f.manager.lastSuccess, last);
+  const restart = new BackupManager(f.plugin, f.manager.preferences);
+  f.plugin.backups = restart;
+  await restart.initialize();
+  assert(restart.blocked);
+  assert.equal((await restart.read()).raw, raw);
+  assert((await restart.read()).recovered);
+  await assert.rejects(restart.write(), /protected/);
+  f.app.vault.process = process;
+  await restart.restore(raw);
+  assert.equal(f.contents.get(restart.path), raw);
+  assert(!f.contents.has(restart.recoveryPath));
+  await restart.write();
+  assert.equal(restart.blocked, false);
+});
+test('failed recovery copy never touches the last complete backup', async (t) => {
+  const f = await setup(t);
+  await f.manager.write();
+  const raw = f.contents.get(f.manager.path);
+  const create = f.app.vault.create;
+  f.app.vault.create = async (path, text) => {
+    if (path === f.manager.recoveryPath) {
+      f.file(path, text.slice(0, 20));
+      throw new Error('ENOSPC');
+    }
+    return create(path, text);
+  };
+  await assert.rejects(f.manager.write(), /ENOSPC/);
+  assert.equal(f.contents.get(f.manager.path), raw);
+  f.app.vault.create = create;
+  await f.manager.write();
+  assert(!f.contents.has(f.manager.recoveryPath));
+});
+test('failed first write leaves no corrupted final backup', async (t) => {
+  const f = await setup(t);
+  f.app.vault.create = async (path, text) => {
+    f.file(path, text.slice(0, 20));
+    throw new Error('ENOSPC');
+  };
+  await assert.rejects(f.manager.write(), /ENOSPC/);
+  assert(!f.contents.has(f.manager.path));
+  assert.equal(f.contents.size, 0);
+});
+test('backup verifies content before deleting the recovery copy', async (t) => {
+  const f = await setup(t);
+  await f.manager.write();
+  const raw = f.contents.get(f.manager.path);
+  f.app.vault.process = async (file, fn) => {
+    fn(raw);
+    f.contents.set(file.path, '{broken');
+  };
+  await assert.rejects(f.manager.write());
+  assert.equal(f.contents.get(f.manager.recoveryPath), raw);
+});
+test('Windows reserved folder names are rejected on every platform', () => {
+  for (const name of [
+    'CON',
+    'NUL',
+    'PRN',
+    'AUX',
+    'COM1',
+    'LPT9',
+    'con.txt',
+    'Backup/NUL',
+    'com\u00b9',
+    'lpt\u00b2.log',
+  ])
+    assert.throws(() => backupFolder(name, '.obsidian'), undefined, name);
+  for (const name of ['Console', 'Company', 'COM10', 'Резерв/Копия'])
+    assert.equal(backupFolder(name, '.obsidian'), name);
 });

@@ -172,7 +172,7 @@ tokens. Change the vault-relative folder or disable automatic backups here.
 **Back up now** works even when automatic backups are disabled.
 
 A copy from a previous installation is protected until you explicitly restore it
-or confirm replacement. **Not now**, closing the window, and restarting Obsidian
+or confirm replacement. Leaving settings and restarting Obsidian
 do not remove that protection. The default folder is detected after reinstall;
 if you previously chose another folder, select it again in **Backups**.
 
@@ -180,5 +180,12 @@ Restore shows the layout/list counts and asks for confirmation. It replaces matc
 layouts, all lists and current preferences; unrelated layouts are retained. The
 source backup remains intact during restoration. A failed write attempts rollback
 of working files; corrupted backups are never automatically overwritten.
+
+Before updating a backup, GraphFrontier verifies a temporary `.recovery` copy.
+It is removed only after the new backup has been read back successfully. If a
+write is interrupted, the recovery copy is protected and available through
+**Restore**; it is not a rolling backup history. The first backup is verified
+in a temporary file before being moved to its final path. Windows reserved
+folder names are rejected on all platforms.
 
 This protects against plugin reinstallation, not loss of the vault itself.
