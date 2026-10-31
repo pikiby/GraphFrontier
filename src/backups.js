@@ -155,6 +155,7 @@ class BackupManager {
   }
 
   schedule() {
+    if (this.restoring) return;
     if (!this.ready || this.disposed || this.blocked || !this.preferences.enabled) return;
     if (this.busy) {
       this.pending = true;
@@ -196,7 +197,7 @@ class BackupManager {
       throw new Error('Working data has a read error. Backup left untouched.');
     await this.plugin.nodeListStore?.queue;
     const revision = this.plugin._persistRevision;
-    const data = cleanData(this.plugin, this.plugin.data);
+    let data = cleanData(this.plugin, this.plugin.data);
     const layouts = [];
     // Do not use the tolerant layout-list helper: a listing failure must not erase a backup.
     const adapter = this.vault.adapter;
@@ -215,8 +216,11 @@ class BackupManager {
     }
     const active = this.plugin.getActiveLayoutFileName();
     const activeLayout = layouts.find((layout) => layout.name === active);
-    if (activeLayout) activeLayout.data = copy(data);
-    else layouts.push({ name: active, data: copy(data) });
+    // Unsaved canvas edits must not replace the last saved layout in the backup.
+    if (activeLayout) {
+      data = copy(activeLayout.data);
+      data.active_layout_name = active;
+    } else layouts.push({ name: active, data: copy(data) });
     if (revision !== this.plugin._persistRevision)
       throw new Error('Settings changed while preparing backup. Retry.');
     return {
@@ -261,6 +265,15 @@ class BackupManager {
         throw new Error('Existing backup belongs to a previous installation.');
       }
       const bundle = await this.snapshot();
+      if (
+        !replace &&
+        previous &&
+        JSON.stringify([bundle.data, bundle.layouts, bundle.lists]) ===
+          JSON.stringify([previous.bundle.data, previous.bundle.layouts, previous.bundle.lists])
+      ) {
+        this.error = '';
+        return previous.bundle;
+      }
       const text = JSON.stringify(bundle, null, 2);
       await this.ensureFolder();
       const file = this.vault.getAbstractFileByPath(this.path);
@@ -325,6 +338,7 @@ class BackupManager {
     if (!this.ready || this.busy) throw new Error('Backups are not ready.');
     this.busy = true;
     this.restoring = true;
+    this.pending = false;
     const p = this.plugin;
     if (p._persistTimer) {
       window.clearTimeout(p._persistTimer);
@@ -393,14 +407,15 @@ class BackupManager {
       this.preferences.owner = bundle.owner;
       this.blocked = false;
       await p.persistPluginDataOnly();
-      const view = p.app.workspace
-        .getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)
-        .find((leaf) => !leaf.view?.subgraphScope)?.view;
+      // Invalidate list filters before reloading, so their physics kick cannot
+      // move the freshly restored layout. Subgraph-only workspaces reload too.
+      p.nodeListsChanged();
+      const leaves = p.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE);
+      const view = (leaves.find((leaf) => !leaf.view?.subgraphScope) || leaves[0])?.view;
       if (view) {
-        if (!(await view.loadSavedLayout({ silent: true })))
+        if (!(await view.loadSavedLayout({ silent: true, resetRuntime: true })))
           throw new Error('Data restored, but the active graph could not reload.');
       } else p.refreshAllViews({ keepCamera: true, forceSavedPositions: true });
-      p.nodeListsChanged();
       this.error = '';
       return bundle;
     } catch (error) {

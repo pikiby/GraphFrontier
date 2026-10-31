@@ -142,6 +142,114 @@ test('partial restore failure rolls working files back and protects backup', asy
   assert.equal(f.contents.get(f.manager.path), raw);
   assert(f.manager.blocked);
 });
+
+test('restore never schedules a delayed overwrite of its source backup', async (t) => {
+  const f = await setup(t);
+  await f.manager.write();
+  const raw = f.contents.get(f.manager.path);
+  let writes = 0;
+  const write = f.manager.write.bind(f.manager);
+  f.manager.write = async (...args) => {
+    writes++;
+    return write(...args);
+  };
+  f.manager.pending = true;
+  const load = f.view.loadSavedLayout.bind(f.view);
+  f.view.loadSavedLayout = async (options) => {
+    f.plugin.schedulePersist();
+    return load(options);
+  };
+  await f.manager.restore(raw);
+  assert.equal(f.manager.timer, null);
+  assert.equal(f.manager.pending, false);
+  f.flushTimers();
+  await new Promise((resolve) => setImmediate(resolve));
+  f.flushTimers();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(writes, 0);
+  assert.equal(f.contents.get(f.manager.path), raw);
+  f.plugin.schedulePersist();
+  f.flushTimers();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(f.manager.timer, null);
+});
+
+test('restore replaces live settings and runtime state without restarting group physics', async (t) => {
+  const f = await setup(t);
+  f.plugin.data.settings.node_size_scale = 1.2;
+  f.plugin.data.groups = [
+    { id: 'error', query: 'list:ERROR', color: '#ff0000', settings: { strong_pull: true } },
+  ];
+  f.plugin.data.saved_positions = {};
+  f.plugin.data.view_state.camera_saved = false;
+  f.putLayout(f.plugin.data);
+  await f.manager.write();
+  const raw = f.contents.get(f.manager.path);
+  f.plugin.data.settings.node_size_scale = 2;
+  f.view.nodeById.get('alpha.md').x = 99999;
+  f.view.camera = { x: 9000, y: 9000, zoom: 4 };
+  f.view.cameraTarget = { ...f.view.camera };
+  f.view.selectedNodeIds.add('alpha.md');
+  f.view.hoverNodeId = 'alpha.md';
+  await f.manager.restore(raw);
+  assert.equal(f.plugin.data.settings.node_size_scale, 1.2);
+  assert.notEqual(f.view.nodeById.get('alpha.md').x, 99999);
+  assert.deepEqual(f.view.camera, { x: 0, y: 0, zoom: 1 });
+  assert.equal(f.view.selectedNodeIds.size, 0);
+  assert.equal(f.view.hoverNodeId, null);
+  assert.equal(f.view.layoutPaused, true);
+  assert.equal(f.view.layoutAutosaveDirty, false);
+});
+
+test('unsaved node moves cannot replace the saved layout backup', async (t) => {
+  const f = await setup(t);
+  f.plugin.data.saved_positions = { 'alpha.md': { x: 10, y: 20 } };
+  f.plugin.data.pins = { 'alpha.md': { x: 10, y: 20, mode: 'exact' } };
+  f.putLayout(f.plugin.data);
+  await f.manager.write();
+  const raw = f.contents.get(f.manager.path);
+  f.plugin.data.pins['alpha.md'] = { x: 900, y: 800, mode: 'exact' };
+  f.plugin.data.saved_positions['alpha.md'] = { x: 900, y: 800 };
+  Object.assign(f.view.nodeById.get('alpha.md'), { x: 900, y: 800 });
+  await f.manager.write();
+  assert.equal(f.contents.get(f.manager.path), raw);
+  await f.manager.restore(raw);
+  assert.equal(f.view.nodeById.get('alpha.md').x, 10);
+  assert.equal(f.view.nodeById.get('alpha.md').y, 20);
+  assert.equal(f.contents.get(f.manager.path), raw);
+  f.plugin.data.pins['alpha.md'] = { x: 30, y: 40, mode: 'exact' };
+  f.putLayout(f.plugin.data);
+  await f.manager.write();
+  assert.equal(JSON.parse(f.contents.get(f.manager.path)).data.pins['alpha.md'].x, 30);
+});
+
+test('restore refreshes a workspace with only a subgraph open', async (t) => {
+  const f = await setup(t);
+  await f.manager.write();
+  const raw = f.contents.get(f.manager.path);
+  f.view.subgraphScope = { id: 'missing', layout: 'data.json' };
+  let restored = false;
+  const load = f.view.loadSavedLayout.bind(f.view);
+  f.view.loadSavedLayout = async (options) => {
+    restored = options.resetRuntime;
+    return load(options);
+  };
+  await f.manager.restore(raw);
+  assert.equal(restored, true);
+  assert.equal(f.view.layoutPaused, true);
+});
+
+test('restoration prevents old canvas state from being saved over restored files', async (t) => {
+  const f = await setup(t);
+  f.manager.restoring = true;
+  const before = JSON.stringify(f.plugin.data);
+  f.view.cameraTarget = { x: 999, y: 999, zoom: 4 };
+  f.view.persistCameraState();
+  assert.equal(JSON.stringify(f.plugin.data), before);
+  assert.equal(await f.view.saveCurrentLayout({ silent: true }), false);
+  assert.equal(JSON.stringify(f.plugin.data), before);
+  f.manager.restoring = false;
+});
 test('folder validation rejects outside/config/hidden paths', () => {
   for (const path of ['/tmp', '../x', '.obsidian/x', 'C:/x', 'a//b', 'settings/x'])
     assert.throws(() => backupFolder(path, 'settings'));
@@ -151,6 +259,7 @@ test('folder validation rejects outside/config/hidden paths', () => {
 test('failed backup write preserves the previous file and does not advance success', async (t) => {
   const f = await setup(t);
   await f.manager.write();
+  await f.plugin.updateNodeList({ action: 'add', listId: 'ERROR', nodeIds: ['changed.md'] });
   const raw = f.contents.get(f.manager.path),
     time = f.manager.lastSuccess;
   f.app.vault.process = async () => {
@@ -184,6 +293,7 @@ test('leaving protected Backups settings does not authorize replacement and menu
 test('partial overwrite keeps a verified recovery copy across restart and explicit restore', async (t) => {
   const f = await setup(t);
   await f.manager.write();
+  await f.plugin.updateNodeList({ action: 'add', listId: 'ERROR', nodeIds: ['changed.md'] });
   const raw = f.contents.get(f.manager.path),
     last = f.manager.lastSuccess;
   const process = f.app.vault.process;
@@ -211,6 +321,7 @@ test('partial overwrite keeps a verified recovery copy across restart and explic
 test('failed recovery copy never touches the last complete backup', async (t) => {
   const f = await setup(t);
   await f.manager.write();
+  await f.plugin.updateNodeList({ action: 'add', listId: 'ERROR', nodeIds: ['changed.md'] });
   const raw = f.contents.get(f.manager.path);
   const create = f.app.vault.create;
   f.app.vault.create = async (path, text) => {
@@ -239,6 +350,7 @@ test('failed first write leaves no corrupted final backup', async (t) => {
 test('backup verifies content before deleting the recovery copy', async (t) => {
   const f = await setup(t);
   await f.manager.write();
+  await f.plugin.updateNodeList({ action: 'add', listId: 'ERROR', nodeIds: ['changed.md'] });
   const raw = f.contents.get(f.manager.path);
   f.app.vault.process = async (file, fn) => {
     fn(raw);

@@ -985,6 +985,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   schedulePersist(delayMs = 250) {
+    if (this.backups?.restoring) return;
     this._persistRevision = (this._persistRevision || 0) + 1;
     if (this._persistTimer) window.clearTimeout(this._persistTimer);
     const safeDelayMs = this.clampNumber(delayMs, 100, 5000, 250);

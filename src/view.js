@@ -3829,6 +3829,7 @@ class GraphFrontierView extends ItemView {
   }
 
   stepSimulation() {
+    if (this.plugin.backups?.restoring) return;
     return stepSimulationPhysics(this);
   }
 
@@ -7167,6 +7168,7 @@ class GraphFrontierView extends ItemView {
 
   // Layout persistence: save/load full graph layout including settings and pin modes.
   async saveCurrentLayout(options = {}) {
+    if (this.plugin.backups?.restoring) return false;
     const silent = !!options.silent;
     if (this.subgraphScope && !this.hasValidSubgraphScope()) return false;
     if (!options.allowSearch && this.isSearchFilled()) {
@@ -7178,6 +7180,7 @@ class GraphFrontierView extends ItemView {
       options.layoutFileName || this.plugin.getActiveLayoutFileName()
     );
     return this.plugin.runLayoutFileOperation(async () => {
+      if (this.plugin.backups?.restoring) return false;
       // A queued save belongs to the layout on which it was requested.
       if (this.plugin.data !== sourceData || (!options.allowSearch && this.isSearchFilled()))
         return false;
@@ -7322,6 +7325,23 @@ class GraphFrontierView extends ItemView {
     const views = this.getScopeLeaves().map((leaf) => leaf.view);
     if (!views.includes(this)) views.push(this);
     for (const view of views) {
+      if (options.resetRuntime) {
+        // A backup replaces the live state, including nodes without saved positions.
+        view.nodeById = new Map();
+        view.selectedNodeIds.clear();
+        view.dragNodeId = null;
+        view.dragSelectionOffsets = null;
+        view.panDrag = null;
+        view.hoverNodeId = null;
+        view.hoverFocusNodeId = null;
+        view.hoverFocusProgress = 0;
+        view.hoverFadeNodeId = null;
+        view.hoverFadeProgress = 0;
+        view.focusNodeId = null;
+        view.focusProgress = 0;
+        view.camera = { x: 0, y: 0, zoom: 1 };
+        view.cameraTarget = { ...view.camera };
+      }
       view.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
       view.restoreLayoutViewState();
       view.sidePanelSectionState = this.plugin.getSidePanelSectionsState();
@@ -7444,6 +7464,7 @@ class GraphFrontierView extends ItemView {
   }
 
   persistCameraState() {
+    if (this.plugin.backups?.restoring) return;
     if (this.subgraphScope) {
       if (this.hasValidSubgraphScope()) {
         this.plugin.data.subgraph_cameras[this.subgraphScope.id] = { ...this.cameraTarget };
