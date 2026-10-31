@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/graphfrontier-banner-coral.svg" alt="GraphFrontier animated logo with connected nodes" width="1200">
+  <img src="docs/media/graphfrontier-banner.svg" alt="GraphFrontier animated logo with connected nodes" width="1200">
 </p>
 
 # GraphFrontier
