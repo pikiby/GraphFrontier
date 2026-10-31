@@ -9,7 +9,7 @@ GraphFrontier is an interactive graph workspace for Obsidian, with its own rende
 Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, combine selections into named subgraphs, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
 Include attachments as ordinary graph nodes, filter them by file type, and apply
-selection actions to multiple nodes at once. See the [0.8.8 release notes](docs/releases/0.8.8.md).
+selection actions to multiple nodes at once. See the [0.8.9 release notes](docs/releases/0.8.9.md).
 
 Use it to:
 
@@ -181,6 +181,29 @@ Select several nodes to pin, unpin, change compatible visual settings, or copy
 names and paths together. Context-menu counts show how many nodes an action will
 affect; actions that require a single node remain separate.
 
+## Groups And Node Lists
+
+Style matching nodes with group rules. Groups change color by default; the sliders
+icon opens additional controls for size, aura, labels, edge color and Strong pull.
+Individual node settings take priority over group settings.
+
+Create and edit node lists in **Settings -> GraphFrontier -> Node lists**, or use
+**Add to list** on selected nodes. Use `list:<id>` as a group filter. Lists define
+membership; groups define appearance. External scripts can update membership
+through the API/MCP without editing your notes.
+
+## Undo And Backups
+
+Undo manual moves and pin actions with **Ctrl/Cmd+Z**. Redo with **Ctrl+Y** or
+**Ctrl/Cmd+Shift+Z**. Physics movement, colors and other settings are not part of
+this history. See [undo and redo](docs/hotkeys.md#undo-and-redo-in-the-graph).
+
+Automatic backups keep one current copy of layouts, lists and preferences outside
+the plugin folder. Configure the location, disable automatic backups or restore a
+copy in **Settings -> GraphFrontier -> Backups**. Access tokens are excluded.
+Existing copies are protected after reinstallation, and a temporary recovery copy
+protects against interrupted writes. This does not replace backing up your vault.
+
 ## API And AI-Agent Control
 
 GraphFrontier's built-in MCP lets an external AI agent search and work with the
@@ -209,7 +232,8 @@ An MCP-capable agent can:
 - Search and filter notes, and work with groups, blacklists and whitelists.
 - Arrange and pin nodes, tune physics, and create or position gravity centers.
 - Create and rename subgraphs, open their panes, or ungroup their members.
-- Change global or individual visual settings, including colors, sizes and auras.
+- Change global, group or individual visual settings, including colors, sizes and auras.
+- Create node lists and update membership to drive group styles.
 - Create and switch layouts, make backups, and export interactive HTML graphs.
 
 ### Connect A Client
@@ -242,7 +266,7 @@ No separate Node.js installation is needed. For updates, use **Check for updates
 Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/pikiby/GraphFrontier/releases/latest) into `<vault>/.obsidian/plugins/graphfrontier/`, then enable GraphFrontier in `Settings -> Community plugins`.
 
 When updating, replace the plugin files, not the entire folder: keep your
-`data.json`, `layouts/` and optional `mcp.json`. Reload the plugin afterward.
+`data.json`, `layouts/`, `node-lists.json` and optional `mcp.json`. Reload the plugin afterward.
 
 See the [installation guide](docs/installation.md) for source builds and troubleshooting.
 
@@ -258,7 +282,7 @@ See the [installation guide](docs/installation.md) for source builds and trouble
 
 - **Getting started:** [Installation](docs/installation.md), [Usage](docs/usage.md), [Settings](docs/settings.md).
 - **Advanced:** [Hotkeys and commands](docs/hotkeys.md), [Physics model](docs/physics.md), [Local API and embedded MCP](docs/mcp.md), [Development and project structure](docs/development.md).
-- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.7](docs/releases/0.8.7.md), [release history](docs/releases/).
+- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.9](docs/releases/0.8.9.md), [release history](docs/releases/).
 
 ## Support
 

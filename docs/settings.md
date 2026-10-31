@@ -128,7 +128,7 @@ Behavior:
 Open **Settings → GraphFrontier → Node lists** to create, rename or delete lists and
 search all lists and edit their members. Open a list to see filenames and paths,
 remove members, or use **Add files...** to search the vault and select multiple files.
-Rename and delete are in the list's **...** menu; the API ID has a copy button. The node menu's
+Rename, delete and **Copy list ID** are in the list's **...** menu. The node menu's
 **Add to list** also supports a multi-node selection. Use `list:` in a group's
 query to select a list by name; the stored query uses its stable ID.
 
