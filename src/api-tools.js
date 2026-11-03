@@ -43,6 +43,7 @@ Object.assign(settings, visuals, {
   strong_pull_multiplier: number(1, 10),
   orbit_distance: number(1, 100),
   search_mode: z.enum(['find', 'filter']),
+  group_hide_mode: z.enum(['hide', 'exclude']),
 });
 for (const key of ['quick_pick_modifier', 'selection_box_modifier', 'selection_toggle_modifier'])
   settings[key] = z.enum(['alt', 'ctrl', 'meta', 'shift', 'none']);

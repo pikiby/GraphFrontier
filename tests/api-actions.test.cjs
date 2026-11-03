@@ -810,6 +810,66 @@ test('hidden group nodes are frozen out of physics and the flag survives normali
   assert.equal('hidden' in normalized.groups[1], false);
 });
 
+test('hide mode keeps hidden groups in physics but out of drawing and interaction', (t) => {
+  const f = setup(t);
+  assert.equal(f.plugin.getSettings().group_hide_mode, 'exclude', 'exclude stays the default');
+  f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#112233', hidden: true }]);
+  const alpha = f.view.nodeById.get('alpha.md');
+
+  f.plugin.setGroupHideMode('hide');
+  assert.equal(f.plugin.getSettings().group_hide_mode, 'hide');
+  assert.ok(!f.view.getFilterVisibleNodeIds().has('alpha.md'), 'not drawn');
+  const physics = f.view.getPhysicsVisibleNodeIds();
+  assert.ok(!(physics instanceof Set) || physics.has('alpha.md'), 'still simulated');
+
+  // The hidden node is pulled by its link and pushed by neighbours.
+  alpha.x = 400;
+  alpha.y = 300;
+  const before = { x: alpha.x, y: alpha.y };
+  f.view.kickLayoutSearch();
+  for (let i = 0; i < 20; i++) f.view.stepSimulation();
+  assert.notDeepEqual({ x: alpha.x, y: alpha.y }, before, 'moves with physics');
+
+  // Interaction, search results, API and export do not see it.
+  const point = f.view.worldToScreen(alpha.x, alpha.y);
+  assert.notEqual(f.view.getNodeAtScreen(point.x, point.y)?.id, 'alpha.md');
+  const rect = { startX: -1e5, startY: -1e5, currentX: 1e5, currentY: 1e5 };
+  assert.ok(!f.view.getNodeIdsInScreenRect(rect).includes('alpha.md'), 'no box selection');
+  assert.ok(!f.api.getGraph(f.ref()).items.some((n) => n.id === 'alpha.md'));
+
+  // Switching back to Exclude freezes it again, like blacklist rules.
+  f.plugin.setGroupHideMode('exclude');
+  const frozen = { x: alpha.x, y: alpha.y };
+  for (let i = 0; i < 10; i++) f.view.stepSimulation();
+  assert.deepEqual({ x: alpha.x, y: alpha.y }, frozen);
+  assert.equal(alpha.vx, 0);
+  assert.equal(f.view.getPhysicsVisibleNodeIds(), f.view.getFilterVisibleNodeIds());
+
+  // Without hidden groups both modes share one visibility set.
+  f.plugin.setGroupHideMode('hide');
+  f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#112233' }]);
+  assert.equal(f.view.getPhysicsVisibleNodeIds(), f.view.getFilterVisibleNodeIds());
+});
+
+test('group hide mode is normalized, layout-owned and settable through the API', (t) => {
+  const f = setup(t);
+  const normalized = f.plugin.normalizeData({
+    settings: { group_hide_mode: 'bogus' },
+    saved_layout_settings: { group_hide_mode: 'hide' },
+  });
+  assert.equal(normalized.settings.group_hide_mode, 'exclude');
+  assert.equal(normalized.saved_layout_settings.group_hide_mode, 'hide');
+  assert.equal(
+    f.plugin.normalizeData({ settings: { group_hide_mode: 'hide' } }).settings.group_hide_mode,
+    'hide'
+  );
+  const result = f.api.updateSettings({ ...f.ref(), settings: { group_hide_mode: 'hide' } });
+  assert.equal(result.settings.group_hide_mode, 'hide');
+  assert.throws(() =>
+    f.api.updateSettings({ ...f.ref(), settings: { group_hide_mode: 'replace' } })
+  );
+});
+
 test('grid cells held by hidden pinned nodes are reported, not silently taken', async (t) => {
   const f = setup(t);
   const { notices } = require('./helpers/obsidian.cjs');
@@ -892,4 +952,57 @@ test('grid cells held by hidden pinned nodes are reported, not silently taken', 
   assert.deepEqual(f.view.getDragHiddenGridHolders(), [], 'only grid pins snap');
   f.view.dragNodeId = null;
   assert.deepEqual(f.view.getDragHiddenGridHolders(), []);
+});
+
+test('changing the physics subset wakes a settled layout once', (t) => {
+  const f = setup(t);
+  const { wakeOnPhysicsVisibilityChange } = require('../src/physics');
+  for (let i = 0; i < 5000 && !f.view.layoutPaused; i++) f.view.stepSimulation();
+  assert.equal(f.view.layoutPaused, true, 'settled');
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), false, 'first call only records');
+  const settle = () => {
+    for (let i = 0; i < 5000 && !f.view.layoutPaused; i++) f.view.stepSimulation();
+    wakeOnPhysicsVisibilityChange(f.view);
+    f.view.layoutPaused = true;
+  };
+
+  // Eye in Exclude mode removes the node from physics: wake.
+  f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#112233', hidden: true }]);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true, 'eye in exclude wakes');
+  assert.equal(f.view.layoutPaused, false);
+  settle();
+
+  // Switching to Hide returns hidden nodes to physics: wake.
+  f.plugin.setGroupHideMode('hide');
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true, 'mode switch wakes');
+  settle();
+
+  // In Hide mode the eye does not change the physics subset: no wake.
+  f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#112233' }]);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), false, 'eye in hide keeps physics');
+
+  // Blacklist changes the subset: wake.
+  f.plugin.setGroupHideMode('exclude');
+  wakeOnPhysicsVisibilityChange(f.view);
+  f.view.layoutPaused = true;
+  f.plugin.updateBlacklist([{ query: 'name:beta', enabled: true }]);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true, 'blacklist wakes');
+  settle();
+
+  // Purely visual edits keep the layout asleep.
+  f.plugin.data.settings.edge_color = '#ff0000';
+  f.plugin.data.settings.edge_opacity = 0.5;
+  f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#445566' }]);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), false, 'visual edits do not wake');
+  assert.equal(f.view.layoutPaused, true);
+});
+
+test('force multiplier edits wake physics', (t) => {
+  const f = setup(t);
+  f.view.layoutPaused = true;
+  f.plugin.setNodeMultiplier('alpha.md', 4, { mode: 'manual' });
+  assert.equal(f.view.layoutPaused, false);
+  f.view.layoutPaused = true;
+  f.plugin.clearNodeMultiplier('alpha.md');
+  assert.equal(f.view.layoutPaused, false);
 });
