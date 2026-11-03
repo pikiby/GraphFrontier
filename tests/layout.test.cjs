@@ -14,6 +14,434 @@ function holdWrite(t, adapter) {
   return { entered: entered.promise, release: release.resolve };
 }
 
+function asymmetricStar(t, settle = true) {
+  const f = fixture(t);
+  let seed = 3;
+  const random = () => {
+    seed = (Math.imul(1664525, seed) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const ids = ['hub.md', ...Array.from({ length: 6 }, (_, i) => `neighbor-${i}.md`)];
+  f.graph.nodes = ids.map((id) => ({ id, label: id }));
+  f.graph.edges = ids.slice(1).map((target) => ({ source: ids[0], target }));
+  f.plugin.data.saved_positions = Object.fromEntries(
+    ids.map((id, i) => {
+      const angle = (i * Math.PI) / 3 + (random() - 0.5) * 0.8;
+      const radius = 25 + random() * 180;
+      return [id, { x: 33 + radius * Math.cos(angle), y: -17 + radius * Math.sin(angle) }];
+    })
+  );
+  f.view.nodeById = new Map();
+  f.view.refreshFromVault({ keepCamera: true, forceSavedPositions: true });
+  if (settle) {
+    for (let i = 0; i < 5000 && !f.view.layoutPaused; i++) f.view.stepSimulation();
+    assert.equal(f.view.layoutPaused, true, 'asymmetric six-neighbor star settles');
+  }
+  return f;
+}
+
+function positions(view) {
+  return view.nodes.map(({ id, x, y }) => ({ id, x, y }));
+}
+
+function frameLoop(view) {
+  const frames = [];
+  view.contentEl.win.requestAnimationFrame = (callback) => {
+    frames.push(callback);
+    return frames.length;
+  };
+  view.runFrame = loadSource('view.js').GraphFrontierView.prototype.runFrame;
+  return frames;
+}
+
+for (const [cost, expected] of [
+  [0, 3],
+  [2.5, 3],
+  [3, 2],
+  [8, 1],
+  [10, 1],
+]) {
+  test(`frame batches ${expected} steps with ${cost}ms steps and renders/smooths once`, (t) => {
+    const { view } = fixture(t);
+    const frames = frameLoop(view);
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    const step = t.mock.method(view, 'stepSimulation', () => {
+      now += cost;
+    });
+    const camera = t.mock.method(view, 'stepCameraSmoothing', () => {});
+    const focus = t.mock.method(view, 'stepFocusSmoothing', () => {});
+    const render = t.mock.method(view, 'render', () => {});
+    view.runFrame();
+    assert.equal(step.mock.callCount(), expected);
+    assert.equal(camera.mock.callCount(), 1);
+    assert.equal(focus.mock.callCount(), 1);
+    assert.equal(render.mock.callCount(), 1);
+    assert.equal(frames.length, 1);
+    assert.equal(view.layoutAutosaveBatch, null);
+  });
+}
+
+for (const drag of ['node', 'selection']) {
+  test(`${drag} drag allows only one physics step per frame`, (t) => {
+    const { view } = fixture(t);
+    frameLoop(view);
+    t.mock.method(performance, 'now', () => 0);
+    if (drag === 'node') view.dragNodeId = 'alpha.md';
+    else view.dragSelectionOffsets = new Map([['alpha.md', { x: 0, y: 0 }]]);
+    const step = t.mock.method(view, 'stepSimulation', () => {});
+    view.runFrame();
+    assert.equal(step.mock.callCount(), 1);
+  });
+}
+
+test('batch stops as soon as physics pauses and does not repeat paused steps next frame', (t) => {
+  const { view } = fixture(t);
+  frameLoop(view);
+  t.mock.method(performance, 'now', () => 0);
+  let calls = 0;
+  t.mock.method(view, 'stepSimulation', () => {
+    if (++calls === 2) view.layoutPaused = true;
+  });
+  view.runFrame();
+  assert.equal(calls, 2);
+  view.runFrame();
+  assert.equal(calls, 2);
+});
+
+for (const guard of ['closed', 'metadata', 'backups']) {
+  test(`frame ${guard} guard prevents all physics/autosave work`, (t) => {
+    const { view, plugin } = fixture(t, { settings: { layout_autosave: true } });
+    const frames = frameLoop(view);
+    view.layoutAutosaveDirty = true;
+    view.layoutStillFrames = 5;
+    if (guard === 'closed') view.isOpen = false;
+    if (guard === 'metadata') view.waitingForMetadata = true;
+    if (guard === 'backups') plugin.backups = { restoring: true };
+    const step = t.mock.method(view, 'stepSimulation', () =>
+      assert.fail('No physics through guard')
+    );
+    const render = t.mock.method(view, 'render', () => {});
+    view.runFrame();
+    assert.equal(step.mock.callCount(), 0);
+    assert.equal(view.layoutStillFrames, 5);
+    assert.equal(render.mock.callCount(), guard === 'closed' ? 0 : 1);
+    assert.equal(frames.length, guard === 'closed' ? 0 : 1);
+  });
+}
+
+test('a guard activated inside a batch stops further steps and its autosave flush', (t) => {
+  const { view, plugin } = fixture(t, { settings: { layout_autosave: true } });
+  frameLoop(view);
+  t.mock.method(performance, 'now', () => 0);
+  view.layoutAutosaveDirty = true;
+  view.layoutStillFrames = 5;
+  const step = t.mock.method(view, 'stepSimulation', () => {
+    plugin.backups = { restoring: true };
+  });
+  view.runFrame();
+  assert.equal(step.mock.callCount(), 1);
+  assert.equal(view.layoutStillFrames, 5);
+  assert.equal(view.layoutAutosaveBatch, null);
+});
+
+test('physics steps stay single-step and three-step frames have identical per-node trajectories', (t) => {
+  const batched = asymmetricStar(t, false);
+  const snapshot = batched.view.captureLayoutSnapshot('data.json');
+  const single = fixture(t, snapshot);
+  single.graph.nodes = batched.graph.nodes.map((node) => ({ ...node }));
+  single.graph.edges = batched.graph.edges.map((edge) => ({ ...edge }));
+  single.view.nodeById = new Map();
+  single.view.refreshFromVault({ keepCamera: true, forceSavedPositions: true });
+  batched.view.stepSimulation();
+  single.view.stepSimulation();
+  const state = (view) => view.nodes.map(({ id, x, y, vx, vy }) => ({ id, x, y, vx, vy }));
+  assert.deepEqual(state(batched.view), state(single.view), 'public API remains a single step');
+  frameLoop(batched.view);
+  t.mock.method(performance, 'now', () => 0);
+  for (let frame = 0; frame < 300; frame++) {
+    for (let i = 0; i < 3 && !single.view.layoutPaused; i++) single.view.stepSimulation();
+    batched.view.runFrame();
+    assert.deepEqual(state(batched.view), state(single.view), `frame=${frame}`);
+    assert.equal(batched.view.layoutPaused, single.view.layoutPaused);
+  }
+});
+
+test('a frame containing any moving substep resets idle debounce instead of counting later quiet substeps', (t) => {
+  const { view, writes } = fixture(t, { settings: { layout_autosave: true } });
+  const { stepLayoutAutosave } = loadSource('physics.js');
+  frameLoop(view);
+  t.mock.method(performance, 'now', () => 0);
+  view.layoutAutosaveDirty = true;
+  view.layoutStillFrames = 5;
+  let calls = 0;
+  t.mock.method(view, 'stepSimulation', () => stepLayoutAutosave(view, calls++ === 0));
+  view.runFrame();
+  assert.equal(calls, 3);
+  assert.equal(view.layoutStillFrames, 0);
+  view.runFrame();
+  assert.equal(view.layoutStillFrames, 1, 'quiet batch counts as one idle animation frame');
+  assert.equal(writes.length, 0);
+});
+
+for (const mode of ['settling', 'paused', 'empty']) {
+  test(`${mode} frame autosave still requires eight idle animation frames and writes only once`, async (t) => {
+    const { view, plugin, graph, writes } = fixture(t, {
+      settings: {
+        layout_autosave: true,
+        repel_strength: 0,
+        center_strength: 0,
+        base_link_strength: 0,
+      },
+      saved_positions: { 'alpha.md': { x: 0, y: 0 } },
+    });
+    if (mode === 'empty') graph.nodes = [];
+    view.refreshFromVault({ keepCamera: true, forceSavedPositions: true });
+    if (mode === 'paused') view.layoutPaused = true;
+    view.layoutAutosaveDirty = true;
+    frameLoop(view);
+    t.mock.method(performance, 'now', () => 0);
+    const step = t.mock.method(view, 'stepSimulation');
+    const save = t.mock.method(view, 'saveCurrentLayout');
+    for (let frame = 1; frame <= 7; frame++) {
+      view.runFrame();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(view.layoutStillFrames, frame);
+      assert.equal(writes.length, 0);
+    }
+    if (mode !== 'settling') assert.equal(step.mock.callCount(), 0);
+    else
+      assert.equal(step.mock.callCount(), 8, 'stop exactly when the eighth physical step pauses');
+    view.runFrame();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(writes.length, 1);
+    assert.equal(save.mock.callCount(), 1);
+    assert.equal(view.layoutAutosaveDirty, false);
+    assert.equal(view.layoutStillFrames, 0);
+    if (mode === 'settling') assert(plugin.data.saved_layout_sleep['']);
+    for (let frame = 0; frame < 10; frame++) view.runFrame();
+    assert.equal(save.mock.callCount(), 1);
+  });
+}
+
+test('proven settled sleep round-trips and survives topology-neutral passive refreshes', async (t) => {
+  const { view, plugin, writes, putLayout } = asymmetricStar(t);
+  const settled = positions(view);
+  assert.equal(await view.saveCurrentLayout({ silent: true }), true);
+  const saved = JSON.parse(writes.at(-1).contents);
+  assert.equal(saved.saved_layout_sleep[''].nodes.length, 7);
+  assert.deepEqual(plugin.normalizeData(saved).saved_layout_sleep, saved.saved_layout_sleep);
+  await view.onOpen();
+  assert.deepEqual(positions(view), settled);
+  for (let i = 0; i < 600; i++) view.stepSimulation();
+  assert.deepEqual(positions(view), settled);
+  view.refreshFromVault({ keepCamera: true, passive: true, metadataResolved: true });
+  view.layoutPaused = false;
+  view.stepSimulation();
+  assert.deepEqual(positions(view), settled, 'unchanged rebuild preserves WeakMap sleep');
+
+  // With momentum-conserving forces the settled star is a true equilibrium, so a fresh
+  // resume need not move it on its first step: check that physics resumes and settles.
+  delete saved.saved_layout_sleep;
+  putLayout(saved);
+  await view.onOpen();
+  assert.equal(view.layoutPaused, false, 'legacy layout without sleep data resumes physics');
+  for (let i = 0; i < 5000 && !view.layoutPaused; i++) view.stepSimulation();
+  assert.equal(view.layoutPaused, true, 'legacy layout remains compatible and settles normally');
+});
+
+test('first real autosave after settling includes sleep before fresh resume', async (t) => {
+  const { view, plugin, writes } = asymmetricStar(t, false);
+  plugin.data.settings.layout_autosave = true;
+  for (let i = 0; i < 5000 && !view.layoutPaused; i++) view.stepSimulation();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(writes.length, 1);
+  assert.equal(JSON.parse(writes[0].contents).saved_layout_sleep[''].nodes.length, 7);
+  const settled = positions(view);
+  await view.onOpen();
+  for (let i = 0; i < 600; i++) view.stepSimulation();
+  assert.deepEqual(positions(view), settled);
+});
+
+test('moving explicit snapshot is not marked sleeping even after save zeros velocities', async (t) => {
+  const { view, writes } = asymmetricStar(t, false);
+  view.stepSimulation();
+  assert(view.nodes.some((node) => Math.hypot(node.vx, node.vy) > 0));
+  assert.equal(await view.saveCurrentLayout({ silent: true }), true);
+  assert(view.nodes.every((node) => node.vx === 0 && node.vy === 0));
+  assert.deepEqual(JSON.parse(writes.at(-1).contents).saved_layout_sleep, {});
+  const moving = positions(view);
+  await view.onOpen();
+  view.stepSimulation();
+  assert.notDeepEqual(positions(view), moving);
+});
+
+test('partial metadata cannot simulate or autosave before complete startup links, then resumes sleep once', async (t) => {
+  const { view, plugin, graph, app, writes } = asymmetricStar(t);
+  await view.saveCurrentLayout({ silent: true });
+  const settled = positions(view);
+  const edges = graph.edges.slice();
+  plugin.metadataResolvedOnce = false;
+  app.workspace.layoutReady = false;
+  graph.edges = edges.slice(0, 3);
+  await view.onOpen();
+  plugin.data.settings.layout_autosave = true;
+  const writeCount = writes.length;
+  assert.equal(view.waitingForMetadata, true);
+  for (let i = 0; i < 120; i++) view.stepSimulation();
+  view.refreshFromVault({ keepCamera: true, passive: true });
+  assert.deepEqual(positions(view), settled);
+  assert.equal(writes.length, writeCount);
+
+  graph.edges = edges;
+  plugin.metadataResolvedOnce = true;
+  view.refreshFromVault({ keepCamera: true, metadataResolved: true, passive: true });
+  assert.equal(view.waitingForMetadata, false);
+  for (let i = 0; i < 600; i++) view.stepSimulation();
+  assert.deepEqual(positions(view), settled);
+  graph.edges.push({ source: 'neighbor-0.md', target: 'neighbor-3.md' });
+  view.refreshFromVault({ keepCamera: true, metadataResolved: true, passive: true });
+  assert.equal(view.layoutPaused, false);
+  view.stepSimulation();
+  assert.notDeepEqual(positions(view), settled, 'later genuine topology changes wake normally');
+});
+
+for (const change of ['forces', 'position', 'pin', 'multiplier', 'topology', 'filter']) {
+  test(`saved sleep is rejected after changed ${change}`, async (t) => {
+    const { view, graph, files, layoutPath, putLayout } = asymmetricStar(t);
+    await view.saveCurrentLayout({ silent: true });
+    const saved = JSON.parse(files.get(layoutPath()));
+    if (change === 'forces') saved.settings.center_strength = 100;
+    if (change === 'position') saved.saved_positions['hub.md'].x += 50;
+    if (change === 'pin') saved.pins['hub.md'] = { x: 70, y: 80, mode: 'exact' };
+    if (change === 'multiplier') saved.node_force_multipliers['hub.md'] = 10;
+    if (change === 'topology') graph.edges.pop();
+    if (change === 'filter') saved.view_state.node_filter = ['hub.md', 'neighbor-0.md'];
+    putLayout(saved);
+    await view.onOpen();
+    const restored = positions(view);
+    view.stepSimulation();
+    assert.notDeepEqual(positions(view), restored);
+  });
+}
+
+for (const action of ['drag', 'new node']) {
+  test(`${action} wakes a resumed settled layout`, async (t) => {
+    const { view, graph } = asymmetricStar(t);
+    await view.saveCurrentLayout({ silent: true });
+    await view.onOpen();
+    view.stepSimulation();
+    assert.equal(view.layoutPaused, true);
+    if (action === 'drag') {
+      view.nodeById.get('hub.md').x += 50;
+      view.dragNodeId = 'hub.md';
+      view.dragMovedDistance = 10;
+      view.onMouseUp();
+    } else {
+      graph.nodes.push({ id: 'new.md', label: 'new' });
+      view.refreshFromVault({ keepCamera: true, passive: true, metadataResolved: true });
+    }
+    assert.equal(view.layoutPaused, false);
+    assert.equal(view.layoutAutosaveDirty, true);
+  });
+}
+
+test('new graph waits for metadata then starts ordinary initial settling', async (t) => {
+  const { view, plugin, app, putLayout } = fixture(t);
+  plugin.metadataResolvedOnce = false;
+  app.workspace.layoutReady = false;
+  putLayout({ settings: { center_strength: 100 } });
+  await view.onOpen();
+  const initial = positions(view);
+  view.stepSimulation();
+  assert.deepEqual(positions(view), initial);
+  plugin.metadataResolvedOnce = true;
+  view.refreshFromVault({ keepCamera: true, passive: true, metadataResolved: true });
+  view.stepSimulation();
+  assert.notDeepEqual(positions(view), initial);
+  assert.equal(view.layoutPaused, false);
+});
+
+test('metadata readiness handles linkless notes, absent maps and incomplete cached targets', (t) => {
+  const { plugin, app } = fixture(t);
+  plugin.metadataResolvedOnce = false;
+  const files = [{ path: 'a.md' }, { path: 'b.md' }, { path: 'c.md' }];
+  app.vault.getMarkdownFiles = () => files;
+  app.metadataCache.getFileCache = () => ({});
+  delete app.metadataCache.resolvedLinks;
+  assert.equal(plugin.isGraphMetadataReady(), true, 'linkless notes need no own map keys');
+  app.metadataCache.getFileCache = () => null;
+  assert.equal(plugin.isGraphMetadataReady(), false);
+  app.metadataCache.getFileCache = (file) =>
+    file.path === 'a.md'
+      ? {
+          links: [{ link: 'b#heading' }],
+          embeds: [{ link: 'b' }],
+          frontmatterLinks: [{ link: 'c' }],
+        }
+      : {};
+  app.metadataCache.getFirstLinkpathDest = (link) =>
+    files.find((file) => file.path === `${link}.md`);
+  app.metadataCache.resolvedLinks = { 'a.md': { 'b.md': 1 } };
+  assert.equal(plugin.isGraphMetadataReady(), false, 'nonempty partial map is not ready');
+  app.metadataCache.resolvedLinks['a.md'] = { 'b.md': 2, 'c.md': 1 };
+  assert.equal(plugin.isGraphMetadataReady(), true);
+  app.metadataCache.resolvedLinks['a.md'] = { 'b.md': 2, 'old.md': 1 };
+  assert.equal(plugin.isGraphMetadataReady(), false, 'same count but stale target is not ready');
+});
+
+test('resolved during loadData is retained without an early refresh or lost timer', async (t) => {
+  const { plugin, events, flushTimers } = fixture(t);
+  const entered = deferred();
+  const release = deferred();
+  plugin.loadData = async () => {
+    entered.resolve();
+    await release.promise;
+    return {};
+  };
+  const refresh = t.mock.method(plugin, 'refreshAllViews', () => assert(plugin._graphRefreshReady));
+  const loading = plugin.onload();
+  await entered.promise;
+  events.resolved();
+  flushTimers();
+  assert.equal(refresh.mock.callCount(), 0);
+  assert.equal(plugin._refreshTimer, null);
+  release.resolve();
+  await loading;
+  flushTimers();
+  assert.equal(refresh.mock.callCount(), 1);
+  assert.equal(plugin.isGraphMetadataReady(), true);
+});
+
+test('sleep normalization accepts legacy absence and rejects malformed or unknown versions', (t) => {
+  const { plugin } = fixture(t);
+  for (const value of [
+    undefined,
+    null,
+    [],
+    { '': { version: 2, signature: 'old', nodes: [] } },
+    { '': { version: 1, signature: 'bad', nodes: null } },
+  ]) {
+    assert.deepEqual(plugin.normalizeData({ saved_layout_sleep: value }).saved_layout_sleep, {});
+  }
+});
+
+test('a debounced resolved refresh cannot release startup after a newer metadata change', async (t) => {
+  const { view, plugin, app, putLayout } = fixture(t);
+  app.workspace.layoutReady = false;
+  putLayout({ saved_positions: { 'alpha.md': { x: 300, y: 200 } } });
+  await view.onOpen();
+  plugin.metadataResolvedOnce = true;
+  plugin.metadataResolutionPending = true;
+  view.refreshFromVault({ keepCamera: true, passive: true, metadataResolved: true });
+  view.stepSimulation();
+  assert.equal(view.waitingForMetadata, true);
+  assert.equal(view.nodeById.get('alpha.md').x, 300);
+  plugin.metadataResolutionPending = false;
+  view.refreshFromVault({ keepCamera: true, passive: true, metadataResolved: true });
+  assert.equal(view.waitingForMetadata, false);
+});
+
 test('attachment extensions filter linked and unlinked files exactly, without dangling edges', (t) => {
   const { plugin, app } = fixture(t);
   const files = ['alpha.md', 'photo.PNG', 'scan.png2', 'LICENSE', 'free.PDF', 'upper.MD'].map(

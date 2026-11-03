@@ -351,36 +351,51 @@ class GraphFrontierActions extends LayoutApi {
       view,
       args.positions.map((p) => p.id)
     );
-    for (const p of args.positions) {
-      const node = view.nodeById.get(p.id),
-        mode = args.pin || 'keep';
-      if (mode === 'grid' || (mode === 'keep' && this.plugin.getPinMode(p.id) === 'grid'))
-        await view.pinNodeToGrid(p.id, p);
-      else if (mode === 'exact' || (mode === 'keep' && this.plugin.isPinned(p.id)))
-        await view.pinNodeExact(p.id, p);
-      else {
-        node.x = p.x;
-        node.y = p.y;
-        node.vx = 0;
-        node.vy = 0;
-        if (mode === 'none') {
-          this.plugin.removePin(p.id);
-          this.plugin.removeOrbitPin(p.id);
-        } else {
-          const orbit = this.plugin.getOrbitPin(p.id),
-            anchor = orbit && view.nodeById.get(orbit.anchor_id);
-          if (anchor)
-            this.plugin.setOrbitPin(p.id, {
-              ...orbit,
-              radius: Math.max(1, Math.hypot(p.x - anchor.x, p.y - anchor.y)),
-              angle: Math.atan2(p.y - anchor.y, p.x - anchor.x),
-            });
+    const gridWarnings = await view.collectGridWarnings(async () => {
+      for (const p of args.positions) {
+        const node = view.nodeById.get(p.id),
+          mode = args.pin || 'keep';
+        if (mode === 'grid' || (mode === 'keep' && this.plugin.getPinMode(p.id) === 'grid'))
+          await view.pinNodeToGrid(p.id, p);
+        else if (mode === 'exact' || (mode === 'keep' && this.plugin.isPinned(p.id)))
+          await view.pinNodeExact(p.id, p);
+        else {
+          node.x = p.x;
+          node.y = p.y;
+          node.vx = 0;
+          node.vy = 0;
+          if (mode === 'none') {
+            this.plugin.removePin(p.id);
+            this.plugin.removeOrbitPin(p.id);
+          } else {
+            const orbit = this.plugin.getOrbitPin(p.id),
+              anchor = orbit && view.nodeById.get(orbit.anchor_id);
+            if (anchor)
+              this.plugin.setOrbitPin(p.id, {
+                ...orbit,
+                radius: Math.max(1, Math.hypot(p.x - anchor.x, p.y - anchor.y)),
+                angle: Math.atan2(p.y - anchor.y, p.x - anchor.x),
+              });
+          }
         }
       }
-    }
+    });
     view.markNodeSpatialIndexDirty();
     this.changed({ kick: true, scopeView: view });
-    return this.state(view);
+    return this.withGridWarnings(this.state(view), gridWarnings);
+  }
+
+  // Grid placements pushed aside by hidden pinned nodes are reported, not silently moved.
+  withGridWarnings(result, warnings) {
+    if (!warnings.length) return result;
+    return {
+      ...result,
+      warnings: warnings.map((entry) => ({
+        code: 'GRID_CELL_HELD_BY_HIDDEN_NODE',
+        heldBy: entry.heldBy,
+        placedAt: entry.placedAt,
+      })),
+    };
   }
 
   async pinNodes(raw) {
@@ -394,29 +409,31 @@ class GraphFrontierActions extends LayoutApi {
       fail('INVALID_ARGUMENT', 'Choose nodeIds, all=true, or anchorId.');
     if (args.mode === 'orbit' && !args.anchorId)
       fail('INVALID_ARGUMENT', 'Orbit requires anchorId.');
-    if (args.anchorId) {
-      this.nodesFor(view, [args.anchorId]);
-      await view[
-        {
-          exact: 'pinLinkedNodes',
-          grid: 'pinLinkedNodesToGrid',
-          orbit: 'pinLinkedNodesToOrbit',
-          none: 'unpinLinkedNodes',
-        }[args.mode]
-      ](args.anchorId, { targetKind: args.targetKind || 'all' });
-    } else if (args.all && args.mode === 'none') {
-      await view.commandUnpinAllNodes();
-    } else {
-      const nodes = args.all ? view.nodes : this.nodesFor(view, args.nodeIds);
-      for (const node of nodes) {
-        if (args.mode === 'none') {
-          this.plugin.removePin(node.id);
-          this.plugin.removeOrbitPin(node.id);
-        } else await view[args.mode === 'grid' ? 'pinNodeToGrid' : 'pinNodeExact'](node.id, node);
+    const gridWarnings = await view.collectGridWarnings(async () => {
+      if (args.anchorId) {
+        this.nodesFor(view, [args.anchorId]);
+        await view[
+          {
+            exact: 'pinLinkedNodes',
+            grid: 'pinLinkedNodesToGrid',
+            orbit: 'pinLinkedNodesToOrbit',
+            none: 'unpinLinkedNodes',
+          }[args.mode]
+        ](args.anchorId, { targetKind: args.targetKind || 'all' });
+      } else if (args.all && args.mode === 'none') {
+        await view.commandUnpinAllNodes();
+      } else {
+        const nodes = args.all ? view.nodes : this.nodesFor(view, args.nodeIds);
+        for (const node of nodes) {
+          if (args.mode === 'none') {
+            this.plugin.removePin(node.id);
+            this.plugin.removeOrbitPin(node.id);
+          } else await view[args.mode === 'grid' ? 'pinNodeToGrid' : 'pinNodeExact'](node.id, node);
+        }
       }
-    }
+    });
     this.changed({ kick: true, scopeView: view });
-    return this.state(view);
+    return this.withGridWarnings(this.state(view), gridWarnings);
   }
 
   async subgraphNodes(raw) {

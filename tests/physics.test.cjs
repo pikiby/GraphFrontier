@@ -2,6 +2,154 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { DEFAULT_DATA } = require('../src/constants');
 const { kickLayoutSearch, stepSimulation } = require('../src/physics');
+const { loadReferencePhysics } = require('./helpers/repulsion-reference.cjs');
+const referencePhysics = loadReferencePhysics();
+
+for (const scenario of ['mixed', 'filtered', 'drag', 'sparse']) {
+  test(`numeric repulsion matches every baseline coordinate and velocity throughout ${scenario} trajectories`, (t) => {
+    let seed = 3127;
+    const random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const nodes = Array.from({ length: 64 }, (_, i) => ({
+      id: `node-${i}`,
+      x: (random() - 0.5) * 700,
+      y: (random() - 0.5) * 700,
+      vx: (random() - 0.5) * 0.2,
+      vy: (random() - 0.5) * 0.2,
+    }));
+    nodes[5].x = nodes[6].x;
+    nodes[5].y = nodes[6].y;
+    if (scenario === 'sparse') {
+      nodes[0].x = -1e12;
+      nodes[63].y = 1e12;
+    }
+    const connected = nodes.filter((_, i) => i % 7 !== 0);
+    const edges = connected.flatMap((node, i) => [
+      { source: node.id, target: connected[(i + 1) % connected.length].id },
+      { source: node.id, target: connected[(i + 7) % connected.length].id },
+    ]);
+    const pins = Object.fromEntries(
+      nodes
+        .filter((_, i) => i % 11 === 0)
+        .map((node, i) => [
+          node.id,
+          {
+            x: node.x,
+            y: node.y,
+            mode: i % 2 ? 'grid' : 'exact',
+          },
+        ])
+    );
+    const orbitPins = {
+      'node-7': { anchor_id: 'node-0', radius: 44, angle: 0.75 },
+      'node-13': { anchor_id: 'node-1', radius: 80, angle: -0.8 },
+    };
+    const multipliers = { 'node-2': 4, 'node-4': 7 };
+    const visibleIds =
+      scenario === 'filtered'
+        ? new Set(nodes.filter((_, i) => i % 3).map((node) => node.id))
+        : null;
+    const options = {
+      nodes,
+      edges,
+      pins,
+      orbitPins,
+      multipliers,
+      visibleIds,
+      settings: {
+        repel_strength: 1500,
+        repel_radius: 200,
+        base_link_strength: 46,
+        center_strength: 52,
+        layout_autosave: false,
+      },
+    };
+    const optimized = fixture(t, options).view;
+    const reference = fixture(t, options).view;
+    if (scenario === 'drag') {
+      optimized.dragNodeId = reference.dragNodeId = 'node-1';
+      optimized.dragSelectionOffsets = reference.dragSelectionOffsets = new Map([['node-2', {}]]);
+    }
+    for (let frame = 0; frame < 1800; frame++) {
+      if (frame === 300) multipliers['node-2'] = 9;
+      if (frame === 450 && visibleIds) visibleIds.add('node-0');
+      stepSimulation(optimized);
+      referencePhysics.stepSimulation(reference);
+      for (let i = 0; i < nodes.length; i++) {
+        for (const key of ['x', 'y', 'vx', 'vy']) {
+          assert.equal(
+            optimized.nodes[i][key],
+            reference.nodes[i][key],
+            `${scenario} frame=${frame} node=${i} ${key}`
+          );
+        }
+      }
+      assert.equal(optimized.layoutPaused, reference.layoutPaused);
+      assert.equal(optimized.layoutStillFrames, reference.layoutStillFrames);
+      assert.equal(optimized.layoutAutosaveDirty, reference.layoutAutosaveDirty);
+    }
+  });
+}
+
+test('multipliers are read once per linked node per frame and refreshed next frame', (t) => {
+  const nodes = Array.from({ length: 7 }, (_, i) => ({ id: String(i), x: i * 55, y: i * 17 }));
+  const edges = nodes.slice(1).map((node) => ({ source: '0', target: node.id }));
+  const multipliers = { 0: 3 };
+  const f = fixture(t, {
+    nodes,
+    edges,
+    multipliers,
+    settings: { base_link_strength: 46, layout_autosave: false },
+  });
+  const read = t.mock.method(f.view.plugin, 'getNodeMultiplier');
+  f.frames(1);
+  assert.equal(read.mock.callCount(), 7);
+  assert.equal(read.mock.calls[0].result, 3);
+  multipliers[0] = 8;
+  f.frames(1);
+  assert.equal(read.mock.callCount(), 14);
+  assert.equal(read.mock.calls[7].result, 8);
+});
+
+test('group multiplier context shares leaves only within a frame and respects later groups/leaves', (t) => {
+  const { fixture: viewFixture } = require('./helpers/obsidian.cjs');
+  const { view, plugin, app, graph } = viewFixture(t);
+  graph.nodes = ['a.md', 'b.md', 'c.md'].map((id) => ({
+    id,
+    label: id,
+    meta: { path: id, fileName: id, tags: [], properties: new Map() },
+  }));
+  graph.edges = [
+    { source: 'a.md', target: 'b.md' },
+    { source: 'b.md', target: 'c.md' },
+    { source: 'a.md', target: 'c.md' },
+  ];
+  plugin.data.groups = [
+    { id: 'g', query: 'name:.md', enabled: true, settings: { strong_pull: true } },
+  ];
+  plugin.data.settings.strong_pull_multiplier = 7;
+  view.refreshFromVault({ keepCamera: true });
+  let leaves = [{ view }];
+  const lookup = t.mock.method(app.workspace, 'getLeavesOfType', () => leaves);
+  const multiplier = t.mock.method(plugin, 'getNodeMultiplier');
+  for (const [present, strongPull, expected] of [
+    [true, true, 7],
+    [false, true, 1],
+    [true, true, 7],
+    [true, false, 1],
+  ]) {
+    leaves = present ? [{ view }] : [];
+    plugin.data.groups = [{ ...plugin.data.groups[0], settings: { strong_pull: strongPull } }];
+    view.stepSimulation();
+    assert.equal(lookup.mock.callCount(), 1);
+    assert.equal(multiplier.mock.callCount(), 3);
+    assert(multiplier.mock.calls.every((call) => call.result === expected));
+    lookup.mock.resetCalls();
+    multiplier.mock.resetCalls();
+  }
+});
 
 function deferred() {
   let resolve;
@@ -761,3 +909,298 @@ for (const legacyIsolation of [undefined, false, true]) {
     }
   }
 }
+
+// Sleeping-source cache: exact for moving nodes, consistent for sleepers, invalidated by changes.
+const { setSleepForceProbe, captureLayoutSleep, restoreLayoutSleep } = require('../src/physics');
+
+function lockstep(t, options, events = () => {}, frames = 1500) {
+  const optimized = fixture(t, options).view;
+  const reference = fixture(t, options).view;
+  for (let frame = 0; frame < frames; frame++) {
+    events(frame, optimized, reference);
+    stepSimulation(optimized);
+    referencePhysics.stepSimulation(reference);
+    for (let i = 0; i < optimized.nodes.length; i++) {
+      for (const key of ['x', 'y', 'vx', 'vy']) {
+        assert.equal(
+          optimized.nodes[i][key],
+          reference.nodes[i][key],
+          `frame=${frame} node=${i} ${key}`
+        );
+      }
+    }
+    assert.equal(optimized.layoutPaused, reference.layoutPaused, `frame=${frame} paused`);
+  }
+  return { optimized, reference };
+}
+
+function randomGraph(count, seed = 7) {
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const nodes = Array.from({ length: count }, (_, i) => ({
+    id: `n${i}`,
+    x: (random() - 0.5) * 900,
+    y: (random() - 0.5) * 900,
+  }));
+  const edges = [];
+  for (let i = 0; i < count; i++) {
+    if (i % 5 === 0) continue;
+    edges.push({ source: nodes[i].id, target: nodes[Math.floor(random() * count)].id });
+  }
+  return { nodes, edges: edges.filter((edge) => edge.source !== edge.target) };
+}
+
+test('cached sleeper accelerations equal full sums through sleep, wake, kick, pins, drag and multipliers', (t) => {
+  const { nodes, edges } = randomGraph(90);
+  const pins = { n3: { x: nodes[3].x, y: nodes[3].y, mode: 'exact' } };
+  const multipliers = { n1: 3 };
+  let samples = 0;
+  let worst = 0;
+  t.after(() => setSleepForceProbe(null));
+  setSleepForceProbe(({ sleepers }) => {
+    for (const { cached, full } of sleepers) {
+      for (let axis = 0; axis < 2; axis++) {
+        const error = Math.abs(cached[axis] - full[axis]);
+        worst = Math.max(worst, error / Math.max(Math.abs(full[axis]), 1e-3));
+      }
+      samples += 1;
+    }
+  });
+  const phases = new Map();
+  let phase = 'settle';
+  lockstep(
+    t,
+    {
+      nodes,
+      edges,
+      pins,
+      multipliers,
+      settings: {
+        repel_strength: 900,
+        repel_radius: 180,
+        base_link_strength: 30,
+        center_strength: 40,
+        layout_autosave: false,
+      },
+    },
+    (frame, optimized, reference) => {
+      const views = [optimized, reference];
+      if (frame === 500) {
+        phase = 'kick';
+        kickLayoutSearch(optimized);
+        referencePhysics.kickLayoutSearch(reference);
+      }
+      if (frame === 900) {
+        phase = 'pin';
+        pins.n10 = { x: nodes[10].x + 40, y: nodes[10].y, mode: 'exact' };
+      }
+      if (frame === 1100) {
+        phase = 'unpin';
+        delete pins.n3;
+      }
+      if (frame === 1300) {
+        phase = 'drag';
+        for (const view of views) view.dragNodeId = 'n20';
+      }
+      if (frame > 1300 && frame < 1340) for (const view of views) view.nodeById.get('n20').x += 3;
+      if (frame === 1340) {
+        phase = 'release';
+        for (const view of views) view.dragNodeId = null;
+      }
+      if (frame === 1500) {
+        phase = 'multiplier';
+        multipliers.n1 = 8;
+      }
+      if (!phases.has(phase)) phases.set(phase, samples);
+    },
+    1900
+  );
+  assert(samples > 10000, `sleepers were probed (${samples})`);
+  // Every event phase starts with sleepers still being probed afterwards.
+  const order = ['settle', 'kick', 'pin', 'unpin', 'drag', 'release', 'multiplier'];
+  for (let i = 1; i < order.length; i++) {
+    const next = phases.get(order[i + 1]) ?? samples;
+    assert(next > phases.get(order[i]), `sleepers were probed after ${order[i]}`);
+  }
+  assert(worst <= 1e-9, `relative cache error ${worst}`);
+});
+
+test('a sleeping node wakes when an awake neighbour approaches', (t) => {
+  const { optimized } = lockstep(
+    t,
+    {
+      nodes: [
+        { id: 'a', x: 0 },
+        { id: 'b', x: 280 },
+        { id: 'keep-running', x: -100000 },
+      ],
+      settings: { repel_strength: 5000, repel_radius: 200, layout_autosave: false },
+    },
+    (frame, ...views) => {
+      for (const view of views) {
+        if (frame === 0) view.dragNodeId = 'keep-running';
+        if (frame === 40) view.nodeById.get('b').vx = -25;
+      }
+    },
+    200
+  );
+  const a = optimized.nodeById.get('a');
+  assert(a.x < 0, 'the sleeping node was pushed away');
+  assert(optimized.nodeById.get('b').x < 250, 'the neighbour entered the repulsion radius');
+});
+
+for (const change of ['moved', 'unpinned']) {
+  test(`a sleeping node wakes when its pinned neighbour is ${change}`, (t) => {
+    const pins = { p: { x: 0, y: 0, mode: 'exact' } };
+    let settledX = null;
+    const { optimized } = lockstep(
+      t,
+      {
+        nodes: [
+          { id: 'a', x: 90 },
+          { id: 'p', x: 0 },
+          { id: 'keep-running', x: -100000 },
+        ],
+        pins,
+        settings: {
+          repel_strength: 2500,
+          repel_radius: 400,
+          center_strength: 100,
+          layout_autosave: false,
+        },
+      },
+      (frame, ...views) => {
+        if (frame === 0) for (const view of views) view.dragNodeId = 'keep-running';
+        if (frame === 600) {
+          settledX = views[0].nodeById.get('a').x;
+          if (change === 'moved') pins.p = { x: -3000, y: 0, mode: 'exact' };
+          else delete pins.p;
+        }
+      },
+      900
+    );
+    assert.notEqual(settledX, null);
+    assert(optimized.nodeById.get('a').x < settledX - 1, 'the released node moved');
+  });
+}
+
+test('random graphs settle on the same frame and coordinates as the uncached baseline', (t) => {
+  const { nodes, edges } = randomGraph(150, 11);
+  let paused = -1;
+  const { optimized } = lockstep(
+    t,
+    {
+      nodes,
+      edges,
+      pins: { n0: { x: nodes[0].x, y: nodes[0].y, mode: 'exact' } },
+      // Repulsion at the cutoff stays below the sleep threshold, so this graph settles.
+      settings: {
+        repel_strength: 300,
+        repel_radius: 400,
+        base_link_strength: 25,
+        center_strength: 10,
+        layout_autosave: false,
+      },
+    },
+    (frame, view) => {
+      if (paused < 0 && view.layoutPaused) paused = frame;
+    },
+    7000
+  );
+  assert(paused > 0 && optimized.layoutPaused, 'the graph settled');
+});
+
+test('sleep signatures keep the localeCompare ordering of saved layouts', (t) => {
+  const ids = ['b', 'B', 'a', 'é', 'Z', '_x', '10', '9', 'ä', 'A'];
+  const options = {
+    nodes: ids.map((id, i) => ({ id, x: i * 400, y: (i % 3) * 400 })),
+    edges: [
+      { source: 'b', target: 'B' },
+      { source: 'é', target: 'a' },
+      { source: '10', target: '9' },
+      { source: 'A', target: 'ä' },
+    ],
+    settings: { center_strength: 30, layout_autosave: false },
+  };
+  const reference = fixture(t, options).view;
+  for (let i = 0; i < 6000 && !reference.layoutPaused; i++)
+    referencePhysics.stepSimulation(reference);
+  const saved = referencePhysics.captureLayoutSleep(reference);
+  assert(saved, 'the baseline captured its sleep state');
+  const restored = fixture(t, {
+    ...options,
+    nodes: reference.nodes.map(({ id, x, y }) => ({ id, x, y })),
+  }).view;
+  assert.equal(restoreLayoutSleep(restored, saved), true);
+  restored.layoutPaused = true;
+  assert.deepEqual(captureLayoutSleep(restored)?.nodes, saved.nodes);
+});
+
+// Degree-based tree: hubs among the first few nodes, so link masses differ widely.
+function asymmetricTree(seed, count = 25) {
+  let state = seed;
+  const random = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  const nodes = Array.from({ length: count }, (_, i) => ({
+    id: `n${i}`,
+    x: (random() - 0.5) * 300,
+    y: (random() - 0.5) * 300,
+  }));
+  const edges = nodes.slice(1).map((node, i) => ({
+    source: `n${Math.floor(random() * Math.min(i + 1, 4))}`,
+    target: node.id,
+  }));
+  return { nodes, edges };
+}
+
+const freeClusterSettings = {
+  repel_strength: 200,
+  repel_radius: 535,
+  center_strength: 0,
+  base_link_strength: 17,
+  link_distance: 33,
+  damping: 0.01,
+  layout_autosave: false,
+};
+
+const centroid = (nodes) => [
+  nodes.reduce((sum, node) => sum + node.x, 0) / nodes.length,
+  nodes.reduce((sum, node) => sum + node.y, 0) / nodes.length,
+];
+
+for (const seed of [1, 2, 3, 4, 5, 6]) {
+  test(`an isolated asymmetric tree settles in place without self-propulsion (seed ${seed})`, (t) => {
+    const { view } = fixture(t, { ...asymmetricTree(seed), settings: freeClusterSettings });
+    const [startX, startY] = centroid(view.nodes);
+    for (let i = 0; i < 20000 && !view.layoutPaused; i++) stepSimulation(view);
+    assert.equal(view.layoutPaused, true, 'the free cluster comes to rest');
+    const [endX, endY] = centroid(view.nodes);
+    assert(Math.hypot(endX - startX, endY - startY) < 100, 'the cluster does not travel');
+  });
+}
+
+test('without pins or center the summed momentum of a free cluster stays zero', (t) => {
+  const { view } = fixture(t, { ...asymmetricTree(4), settings: freeClusterSettings });
+  const mass = (node) => 1 + Math.max(0, node.degree - 1) * 0.25;
+  // Until the settle rule first zeroes a slow node, pair forces alone change velocities.
+  let frame = 0;
+  for (; frame < 1000; frame++) {
+    stepSimulation(view);
+    if (view.nodes.some((node) => node.vx === 0 && node.vy === 0)) break;
+    let px = 0;
+    let py = 0;
+    let scale = 0;
+    for (const node of view.nodes) {
+      px += mass(node) * node.vx;
+      py += mass(node) * node.vy;
+      scale += mass(node) * Math.hypot(node.vx, node.vy);
+    }
+    assert(scale > 0, `frame=${frame} cluster is moving`);
+    assert(Math.hypot(px, py) <= 1e-9 * scale, `frame=${frame} momentum ${Math.hypot(px, py)}`);
+  }
+  assert(frame >= 60, `momentum checked over ${frame} frames`);
+});

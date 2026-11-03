@@ -95,7 +95,6 @@ test('node menu follows requested sections and puts Delete last', (t) => {
     'Color aura',
     'Aura brightness',
     'Edge width',
-    'Painted edge width',
     'Text zoom',
     'Text size',
     'Hover dimming',

@@ -121,6 +121,12 @@ class Menu {
 }
 
 const obsidian = {
+  parseLinktext(link) {
+    const index = link.indexOf('#');
+    return index < 0
+      ? { path: link, subpath: '' }
+      : { path: link.slice(0, index), subpath: link.slice(index) };
+  },
   setIcon(element, icon) {
     element.icon = icon;
   },
@@ -251,9 +257,10 @@ function fixture(t, data = {}) {
   };
   const leaves = [];
   const app = {
-    vault: { adapter, configDir: '.test-config', on },
+    vault: { adapter, configDir: '.test-config', on, getMarkdownFiles: () => [] },
     metadataCache: { resolvedLinks: {}, on },
     workspace: {
+      layoutReady: true,
       getLeavesOfType: () => leaves,
       onLayoutReady() {},
       on,
@@ -263,6 +270,9 @@ function fixture(t, data = {}) {
   const GraphFrontierPlugin = loadSource('main.js');
   const { GraphFrontierView } = loadSource('view.js');
   const plugin = new GraphFrontierPlugin(app);
+  // Fixtures describe current-model data unless a test opts into legacy migration.
+  if (!('render_model' in data) && !('legacy_render_settings' in data))
+    data = { render_model: 2, ...data };
   plugin.data = plugin.normalizeData(data);
   plugin.loadData = async () => structuredClone(data);
   plugin.saveData = async (next) => preferences.push(structuredClone(next));

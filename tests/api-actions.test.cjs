@@ -727,3 +727,169 @@ test('external position API invalidates manual undo instead of recording or over
   assert.equal(replayPositionAction(f.view), 'empty');
   assert.equal(f.view.nodeById.get('alpha.md').x, 999);
 });
+
+test('hidden groups remove their nodes like blacklist and combine with rules and search', (t) => {
+  const f = setup(t);
+  const ids = () => f.api.getGraph(f.ref()).items.map((n) => n.id);
+  const r = f.api.editRules({
+    ...f.ref(),
+    list: 'groups',
+    action: 'add',
+    rules: [
+      { query: 'name:alpha', color: '#112233', hidden: true },
+      { query: 'tag:keep', color: '#445566' },
+    ],
+  });
+  assert.equal(r.rules[0].hidden, true);
+  assert.equal('hidden' in r.rules[1], false, 'visible groups keep the compact shape');
+  assert.deepEqual(ids(), ['beta.md', 'gamma.md']);
+  assert.equal(f.view.getGroupColorForNode(f.view.nodeById.get('beta.md')), '#445566');
+
+  // A node in a visible and a hidden group is hidden when any matching group is hidden.
+  f.api.editRules({
+    ...f.ref(),
+    list: 'groups',
+    action: 'update',
+    rules: [
+      { ...r.rules[0], hidden: false },
+      { ...r.rules[1], hidden: true },
+    ],
+  });
+  assert.deepEqual(ids(), ['gamma.md']);
+
+  f.api.editRules({
+    ...f.ref(),
+    list: 'groups',
+    action: 'update',
+    rules: [
+      { ...r.rules[0], hidden: true },
+      { ...r.rules[1], hidden: false },
+    ],
+  });
+  f.api.editRules({
+    ...f.ref(),
+    list: 'blacklist',
+    action: 'add',
+    rules: [{ query: 'name:gamma' }],
+  });
+  assert.deepEqual(ids(), ['beta.md']);
+  f.api.editRules({ ...f.ref(), list: 'blacklist', action: 'clear' });
+  f.api.editRules({
+    ...f.ref(),
+    list: 'whitelist',
+    action: 'replace',
+    rules: [{ query: 'tag:keep' }],
+  });
+  assert.deepEqual(ids(), ['beta.md'], 'whitelist applies after hidden groups');
+  f.api.editRules({ ...f.ref(), list: 'whitelist', action: 'clear' });
+
+  f.api.setSearch({ ...f.ref(), query: 'tag:keep', mode: 'filter' });
+  assert.deepEqual([...f.view.getFilterVisibleNodeIds()].sort(), ['beta.md']);
+  f.api.setSearch({ ...f.ref(), query: '', mode: 'find' });
+});
+
+test('hidden group nodes are frozen out of physics and the flag survives normalization', (t) => {
+  const f = setup(t);
+  f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#112233', hidden: true }]);
+  const alpha = f.view.nodeById.get('alpha.md');
+  alpha.vx = 5;
+  const before = { x: alpha.x, y: alpha.y };
+  f.view.kickLayoutSearch();
+  for (let i = 0; i < 20; i++) f.view.stepSimulation();
+  assert.deepEqual({ x: alpha.x, y: alpha.y }, before);
+  assert.equal(alpha.vx, 0);
+  assert.ok(!f.view.getFilterVisibleNodeIds().has('alpha.md'));
+
+  const normalized = f.plugin.normalizeData({
+    groups: [
+      { id: 'a', query: 'name:alpha', color: '#112233', hidden: true },
+      { id: 'b', query: 'name:beta', color: '#112233', hidden: 'yes' },
+    ],
+  });
+  assert.equal(normalized.groups[0].hidden, true);
+  assert.equal('hidden' in normalized.groups[1], false);
+});
+
+test('grid cells held by hidden pinned nodes are reported, not silently taken', async (t) => {
+  const f = setup(t);
+  const { notices } = require('./helpers/obsidian.cjs');
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const step = f.plugin.clampGridStep(f.plugin.getSettings().grid_step);
+  f.plugin.setPin('alpha.md', { x: 0, y: 0 }, { mode: 'grid' });
+  f.api.editRules({
+    ...f.ref(),
+    list: 'blacklist',
+    action: 'add',
+    rules: [{ query: 'name:alpha' }],
+  });
+  assert.equal(f.view.getFilterVisibleNodeIds().has('alpha.md'), false);
+
+  // Hidden holder: the node lands elsewhere and one notice names the holder.
+  notices.length = 0;
+  await f.view.pinNodeToGrid('beta.md', { x: 0, y: 0 });
+  await flush();
+  assert.notDeepEqual(f.plugin.getPin('beta.md'), { x: 0, y: 0, mode: 'grid' });
+  assert.deepEqual(notices, [
+    'Grid cell is held by hidden node “alpha” — placed in the nearest free cell',
+  ]);
+
+  // Free cell and a cell held by a visible node produce no notice.
+  notices.length = 0;
+  await f.view.pinNodeToGrid('gamma.md', { x: step * 10, y: 0 });
+  await f.view.pinNodeToGrid('beta.md', { x: step * 10, y: 0 });
+  await flush();
+  assert.deepEqual(notices, []);
+
+  // Several displacements in one action collapse into one summary.
+  f.plugin.setPin('beta.md', { x: step * 20, y: 0 }, { mode: 'grid' });
+  f.api.editRules({
+    ...f.ref(),
+    list: 'blacklist',
+    action: 'add',
+    rules: [{ query: 'name:beta' }],
+  });
+  notices.length = 0;
+  f.view.noteGridDisplacement(0, 0, step, { gx: 1, gy: 0, x: step, y: 0 }, 'gamma.md');
+  f.view.noteGridDisplacement(
+    step * 20,
+    0,
+    step,
+    { gx: 21, gy: 0, x: step * 21, y: 0 },
+    'gamma.md'
+  );
+  await flush();
+  assert.deepEqual(notices, [
+    '2 nodes placed in nearby free cells: their grid cells are held by hidden nodes',
+  ]);
+
+  // API calls get warnings in the result instead of notices.
+  notices.length = 0;
+  const result = await f.api.pinNodes({ ...f.ref(), nodeIds: ['gamma.md'], mode: 'grid' });
+  await f.api.moveNodes({ ...f.ref(), positions: [{ id: 'gamma.md', x: 0, y: 0 }], pin: 'grid' });
+  const moved = await f.api.moveNodes({
+    ...f.ref(),
+    positions: [{ id: 'gamma.md', x: 0, y: 0 }],
+    pin: 'grid',
+  });
+  await flush();
+  assert.equal(result.warnings, undefined, 'own cell is not a displacement');
+  assert.equal(moved.warnings[0].code, 'GRID_CELL_HELD_BY_HIDDEN_NODE');
+  assert.equal(moved.warnings[0].heldBy, 'alpha.md');
+  assert.deepEqual(notices, []);
+
+  // Dragging a grid-pinned node over the hidden holder's cell reports that holder.
+  f.view.dragNodeId = 'gamma.md';
+  f.plugin.setPin('gamma.md', { x: step * 5, y: 0 }, { mode: 'grid' });
+  Object.assign(f.view.nodeById.get('gamma.md'), { x: 0.4 * step, y: 0 });
+  assert.deepEqual(
+    f.view.getDragHiddenGridHolders().map((holder) => holder.nodeId),
+    ['alpha.md']
+  );
+  Object.assign(f.view.nodeById.get('gamma.md'), { x: step * 40, y: 0 });
+  assert.deepEqual(f.view.getDragHiddenGridHolders(), []);
+  f.plugin.setPin('gamma.md', { x: 0, y: 0 }, { mode: 'exact' });
+  Object.assign(f.view.nodeById.get('gamma.md'), { x: 0, y: 0 });
+  assert.deepEqual(f.view.getDragHiddenGridHolders(), [], 'only grid pins snap');
+  f.view.dragNodeId = null;
+  assert.deepEqual(f.view.getDragHiddenGridHolders(), []);
+});

@@ -9,6 +9,16 @@ const { nodeListContains } = require('./node-lists');
 const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
 const { ExportModal } = require('./export-modal');
 const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
+const {
+  getNodeScreenRadius,
+  getNodeWorldRadius,
+  getEdgeCssWidth,
+  setCrispStroke,
+  getCrispCoordinate,
+  quantizeFocusProgress,
+  getFocusEdgeWidth,
+  getFocusEdgeColor,
+} = require('./render-metrics');
 const { buildNodeContextMenu } = require('./node-context-menu');
 const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
 const { DarkEnergyModal } = require('./dark-energy-modal');
@@ -43,6 +53,9 @@ const {
 } = require('./constants');
 
 const {
+  captureLayoutSleep,
+  restoreLayoutSleep,
+  copyLayoutSleepState,
   kickLayoutSearch: kickLayoutSearchPhysics,
   updateLayoutCenter: updateLayoutCenterPhysics,
   getOrbitRadiusBySpacing,
@@ -50,6 +63,7 @@ const {
   recomputeOrbitRadii: recomputeOrbitRadiiPhysics,
   stepCameraSmoothing: stepCameraSmoothingPhysics,
   stepSimulation: stepSimulationPhysics,
+  stepLayoutAutosave: stepLayoutAutosavePhysics,
 } = require('./physics');
 
 const {
@@ -59,6 +73,7 @@ const {
   hexToRgba,
   getNodeLabelText,
   getNodeRadius: getNodeRadiusRender,
+  getEdgeAppearance: getEdgeAppearanceRender,
   getLabelZoomThreshold: getLabelZoomThresholdRender,
   getLabelFontSize: getLabelFontSizeRender,
   getLabelMinimumSize: getLabelMinimumSizeRender,
@@ -68,6 +83,18 @@ const {
   drawEdges: drawEdgesRender,
   drawNodes: drawNodesRender,
 } = require('./render');
+
+// Black or white icon, whichever reads better over a #rrggbb fill.
+function getContrastIconColor(hexColor) {
+  const match = /^#([0-9a-f]{6})$/i.exec(String(hexColor || ''));
+  if (!match) return '#ffffff';
+  const channel = (offset) => {
+    const value = Number.parseInt(match[1].slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  return luminance > 0.179 ? '#000000' : '#ffffff';
+}
 
 class GraphFrontierView extends ItemView {
   constructor(leaf, plugin) {
@@ -285,6 +312,7 @@ class GraphFrontierView extends ItemView {
 
     // Saved coordinates seed normal settling; only duplicate roots/read failures stay paused.
     const skipLayoutKick = !this.subgraphScope && (alreadyOpen || !loaded);
+    this.waitingForMetadata = !skipLayoutKick && !this.plugin.isGraphMetadataReady();
     this.refreshFromVault({
       keepCamera: this.subgraphScope
         ? !!this.plugin.data.subgraph_cameras?.[this.subgraphScope.id]
@@ -299,6 +327,9 @@ class GraphFrontierView extends ItemView {
         this.layoutAutosaveDirty = false;
       }
     }
+
+    this.pendingLayoutSleepRestore = loaded && !alreadyOpen ? this.plugin.data : null;
+    if (!this.waitingForMetadata) this.restoreSavedLayoutSleep();
 
     this.isOpen = true;
     this.runFrame();
@@ -478,23 +509,28 @@ class GraphFrontierView extends ItemView {
       title: 'Display',
       openByDefault: true,
     });
-    this.addSideToggle(displaySection, 'Show grid', 'show_grid', 'render', {
-      hint: 'Show or hide background grid in graph area',
-    });
-    this.addSideToggle(displaySection, 'Existing files only', 'existing_files_only', 'data', {
+    // Display rows are grouped without titles: general, nodes, text, edges, grid.
+    const generalGroup = this.createSidePanelGroup(displaySection);
+    this.addSideToggle(generalGroup, 'Existing files only', 'existing_files_only', 'data', {
       hint: 'Show only files that currently exist in vault',
     });
-    this.addSideToggle(displaySection, 'Show orphans', 'hide_orphans', 'data', {
+    this.addSideToggle(generalGroup, 'Show orphans', 'hide_orphans', 'data', {
       inverted: true,
       hint: 'Show nodes without links (orphans)',
     });
-    this.addSideSlider(displaySection, 'Grid step', 'grid_step', 5, 50, 5, 'render', {
-      hint: 'Grid cell size in world coordinates',
+    this.addSideSlider(generalGroup, 'Hover dimming', 'hover_dim_strength', 0, 100, 1, 'render', {
+      hint: 'How strongly non-focused nodes/edges are dimmed',
     });
-    this.addSideSlider(displaySection, 'Grid thickness', 'grid_line_width', 0.1, 1, 0.1, 'render', {
-      hint: 'Grid line thickness in CSS pixels, independent of zoom',
+    this.addSideOptionalColorControl(generalGroup, {
+      key: 'hover_highlight_color',
+      label: 'Hover color',
+      hint: 'Color of highlighted edges and the hover ring; theme colors until picked',
+      fallback: () => this.canvasTheme?.selection,
+      defaultColor: DARK_THEME.selection,
     });
-    const colorRow = displaySection.createDiv({ cls: 'graphfrontier-sidepanel-row' });
+
+    const nodeGroup = this.createSidePanelGroup(displaySection);
+    const colorRow = nodeGroup.createDiv({ cls: 'graphfrontier-sidepanel-row' });
     colorRow.createSpan({ text: 'Node color', cls: 'graphfrontier-sidepanel-label' });
     const colorInput = colorRow.createEl('input', { type: 'color' });
     colorInput.setAttribute('aria-label', 'Node color');
@@ -508,32 +544,36 @@ class GraphFrontierView extends ItemView {
         attachmentColor.input.value = colorInput.value;
       this.plugin.persistNodeVisualSettings();
     });
-    this.addSideSlider(displaySection, 'Node size', 'node_size_scale', 0.1, 4, 0.01, 'render', {
-      hint: 'Visual node radius scale',
+    this.addSideSlider(nodeGroup, 'Node size', 'node_size_scale', 0.1, 2, 0.005, 'render', {
+      hint: 'Visual node radius scale; on screen nodes follow the square root of zoom',
     });
-    this.addSideSlider(displaySection, 'Edge width', 'edge_width_scale', 0.01, 1, 0.01, 'render', {
-      hint: 'Visual thickness of regular edges',
-    });
-    this.addSideSlider(
-      displaySection,
-      'Painted edge width',
-      'painted_edge_width',
-      0.01,
-      1,
-      0.01,
-      'render',
-      {
-        hint: 'Visual thickness for painted edges only',
-      }
-    );
-    this.addSideSlider(displaySection, 'Text zoom', 'label_zoom_steps', 1, 40, 1, 'render', {
+
+    const textGroup = this.createSidePanelGroup(displaySection);
+    this.addSideSlider(textGroup, 'Text zoom', 'label_zoom_steps', 1, 40, 1, 'render', {
       hint: 'How far labels stay visible when zooming out',
     });
-    this.addSideSlider(displaySection, 'Text size', 'label_font_size', 5, 20, 1, 'render', {
+    this.addSideSlider(textGroup, 'Text size', 'label_font_size', 5, 20, 1, 'render', {
       hint: 'Base font size for node labels',
     });
-    this.addSideSlider(displaySection, 'Hover dimming', 'hover_dim_strength', 0, 100, 1, 'render', {
-      hint: 'How strongly non-focused nodes/edges are dimmed',
+
+    const edgeGroup = this.createSidePanelGroup(displaySection);
+    this.addSideEdgeColorControl(edgeGroup);
+    this.addSideSlider(edgeGroup, 'Edge opacity', 'edge_opacity', 0, 1, 0.01, 'render', {
+      hint: 'Opacity of all edges, including painted and highlighted ones',
+    });
+    this.addSideSlider(edgeGroup, 'Edge width', 'edge_width_scale', 0.1, 5, 0.01, 'render', {
+      hint: 'Edge thickness in physical screen pixels, independent of zoom',
+    });
+
+    const gridGroup = this.createSidePanelGroup(displaySection);
+    this.addSideToggle(gridGroup, 'Show grid', 'show_grid', 'render', {
+      hint: 'Show or hide background grid in graph area',
+    });
+    this.addSideSlider(gridGroup, 'Grid step', 'grid_step', 5, 50, 5, 'render', {
+      hint: 'Grid cell size in world coordinates',
+    });
+    this.addSideSlider(gridGroup, 'Grid thickness', 'grid_line_width', 0.1, 1, 0.1, 'render', {
+      hint: 'Grid line thickness in CSS pixels, independent of zoom',
     });
 
     const attachmentsSection = this.createSidePanelSection(body, {
@@ -869,6 +909,43 @@ class GraphFrontierView extends ItemView {
       input.focus();
     });
     showSummary();
+  }
+
+  // Untitled visual group inside a side-panel section.
+  createSidePanelGroup(parentEl) {
+    return parentEl.createDiv({ cls: 'graphfrontier-sidepanel-group' });
+  }
+
+  // Edge color: theme muted text until a custom color is picked.
+  addSideEdgeColorControl(parentEl) {
+    this.addSideOptionalColorControl(parentEl, {
+      key: 'edge_color',
+      label: 'Edge color',
+      hint: 'Color of regular edges; painted and group edge colors take priority',
+      fallback: () => this.canvasTheme?.mutedText,
+      defaultColor: DARK_THEME.mutedText,
+    });
+  }
+
+  // Nullable color setting: shows the theme fallback until a custom color is picked.
+  addSideOptionalColorControl(parentEl, { key, label, hint, fallback, defaultColor }) {
+    const row = parentEl.createDiv({ cls: 'graphfrontier-sidepanel-row' });
+    row.setAttr('title', hint);
+    row.createSpan({ text: label, cls: 'graphfrontier-sidepanel-label' });
+    const input = row.createEl('input', { type: 'color' });
+    input.setAttribute('aria-label', label);
+    input.addClass('graphfrontier-group-color-input');
+    const themeColor = () => {
+      const color = String(fallback() || '').trim();
+      return /^#[0-9a-f]{6}$/i.test(color) ? color : defaultColor;
+    };
+    const currentColor = () => this.plugin.getSettings()[key] ?? themeColor();
+    input.value = currentColor();
+    this.sideControls.set(key, { type: 'color', input, getValue: currentColor });
+    this.registerDomEvent(input, 'input', () => {
+      this.plugin.data.settings[key] = input.value.toLowerCase();
+      this.plugin.persistNodeVisualSettings();
+    });
   }
 
   addSideToggle(parentEl, label, key, refreshMode, options = {}) {
@@ -2037,7 +2114,8 @@ class GraphFrontierView extends ItemView {
     };
     const blacklistRules = this.plugin?.data?.blacklist;
     const whitelistRules = this.plugin?.data?.whitelist;
-    return `b:${serializeRules(blacklistRules)}##w:${serializeRules(whitelistRules)}`;
+    const hiddenGroups = (this.plugin?.data?.groups || []).filter((group) => group?.hidden);
+    return `b:${serializeRules(blacklistRules)}##w:${serializeRules(whitelistRules)}##h:${serializeRules(hiddenGroups)}`;
   }
 
   getFilterNodeId() {
@@ -2127,7 +2205,7 @@ class GraphFrontierView extends ItemView {
     const parents = hierarchy(groups);
     const raw = this.canonicalGraphData || { nodes: [], edges: [] };
     const nodes = new Map([...raw.nodes, ...subgraphNodes(groups)].map((node) => [node.id, node]));
-    const blacklist = this.getCompleteQueryRulesByKey('blacklist');
+    const blacklist = this.getBlockingQueryRules();
     const whitelist = this.getCompleteQueryRulesByKey('whitelist');
     const matches = (node, rules) =>
       rules.some((rule) => this.nodeMatchesParsedGroup(node.meta || {}, rule, node));
@@ -2279,8 +2357,7 @@ class GraphFrontierView extends ItemView {
     }
 
     if (this.filterVisibilityCache.parsedRulesSignature !== ruleSignature) {
-      this.filterVisibilityCache.parsedBlacklistRules =
-        this.getCompleteQueryRulesByKey('blacklist');
+      this.filterVisibilityCache.parsedBlacklistRules = this.getBlockingQueryRules();
       this.filterVisibilityCache.parsedWhitelistRules =
         this.getCompleteQueryRulesByKey('whitelist');
       this.filterVisibilityCache.parsedRulesSignature = ruleSignature;
@@ -2334,11 +2411,19 @@ class GraphFrontierView extends ItemView {
     return visibleNodeIds;
   }
 
-  getCompleteQueryRulesByKey(ruleKey) {
+  // Hidden groups block their nodes exactly like blacklist rules.
+  getBlockingQueryRules() {
+    return [
+      ...this.getCompleteQueryRulesByKey('blacklist'),
+      ...this.getCompleteQueryRulesByKey('groups', (group) => group.hidden === true),
+    ];
+  }
+
+  getCompleteQueryRulesByKey(ruleKey, include = null) {
     const rawRules = Array.isArray(this.plugin.data?.[ruleKey]) ? this.plugin.data[ruleKey] : [];
     const parsedRules = [];
     for (const rawRule of rawRules) {
-      if (!rawRule || rawRule.enabled === false) continue;
+      if (!rawRule || (include ? !include(rawRule) : rawRule.enabled === false)) continue;
       const queryText = String(rawRule.query || '').trim();
       if (!queryText) continue;
       const parsed = this.plugin.parseGroupQuery(queryText);
@@ -2783,11 +2868,42 @@ class GraphFrontierView extends ItemView {
   }
 
   // Groups block: color-rule rows, drag-and-drop priority, and settings persistence.
+  refreshGroupVisibilityButton(rowState) {
+    const label = rowState.hidden ? 'Show group nodes' : 'Hide group nodes';
+    rowState.visibilityBtn.setAttribute('aria-label', label);
+    rowState.visibilityBtn.setAttribute('title', `${label} (Alt-click: show only this group)`);
+    rowState.visibilityBtn.setAttribute('aria-pressed', rowState.hidden ? 'true' : 'false');
+    setIcon(rowState.visibilityBtn, rowState.hidden ? 'eye-off' : 'eye');
+    rowState.row.toggleClass('is-hidden', !!rowState.hidden);
+  }
+
+  // Alt-click solos a group. The previous hidden set lives in the view, not in layout data:
+  // solo is a temporary inspection mode, and its undo need not survive a reload.
+  toggleGroupVisibility(rowState, solo = false) {
+    const rows = this.groupEditorRows.filter((entry) => this.isGroupRowComplete(entry));
+    if (!solo) {
+      this.groupSoloState = null;
+      rowState.hidden = !rowState.hidden;
+    } else if (this.groupSoloState?.row === rowState) {
+      const previous = this.groupSoloState.hiddenByRow;
+      for (const entry of rows) entry.hidden = previous.has(entry) ? previous.get(entry) : false;
+      this.groupSoloState = null;
+    } else {
+      const hiddenByRow =
+        this.groupSoloState?.hiddenByRow || new Map(rows.map((entry) => [entry, !!entry.hidden]));
+      for (const entry of rows) entry.hidden = entry !== rowState;
+      this.groupSoloState = { row: rowState, hiddenByRow };
+    }
+    for (const entry of rows) this.refreshGroupVisibilityButton(entry);
+    this.markQueryRuleVisibilityDirty();
+  }
+
   buildGroupEditorSection(parentEl) {
     const section = parentEl.createDiv({ cls: 'graphfrontier-groups' });
     section.createDiv({ cls: 'graphfrontier-groups-title', text: 'Groups' });
 
     this.groupEditorRows = [];
+    this.groupSoloState = null;
     const existingGroups = Array.isArray(this.plugin.data.groups) ? this.plugin.data.groups : [];
     for (const group of existingGroups) {
       this.addGroupEditorRow(section, group);
@@ -2800,6 +2916,7 @@ class GraphFrontierView extends ItemView {
       id: group?.id || null,
       query: String(group?.query || ''),
       color: this.plugin.normalizeGroupColor(group?.color || '#7aa2f7'),
+      hidden: group?.hidden === true,
       settings: { ...(group?.settings || {}) },
     };
   }
@@ -2821,9 +2938,8 @@ class GraphFrontierView extends ItemView {
     const complete = this.isGroupRowComplete(rowState);
     const empty = this.isGroupRowEmpty(rowState);
     rowState.dragHandle.style.visibility = complete ? 'visible' : 'hidden';
-    rowState.colorInput.style.display = complete ? '' : 'none';
-    rowState.colorInput.disabled = !complete;
     rowState.settingsBtn.style.display = complete ? '' : 'none';
+    rowState.visibilityBtn.style.display = complete ? '' : 'none';
     rowState.row.draggable = complete;
     rowState.row.toggleClass('is-empty', empty);
     rowState.row.toggleClass('is-complete', complete);
@@ -2847,6 +2963,7 @@ class GraphFrontierView extends ItemView {
         query,
         color: this.plugin.normalizeGroupColor(rowState.colorInput.value),
         enabled: true,
+        ...(rowState.hidden ? { hidden: true } : {}),
         ...(Object.keys(rowState.settings).length ? { settings: { ...rowState.settings } } : {}),
       });
     }
@@ -2873,15 +2990,22 @@ class GraphFrontierView extends ItemView {
     });
     queryInput.value = form.query;
 
+    // The color lives in the group settings menu; the swatch button shows it and opens them.
     const colorInput = row.createEl('input', {
-      cls: 'graphfrontier-group-color-input',
+      cls: 'graphfrontier-group-color-value',
       type: 'color',
     });
     colorInput.value = form.color;
+    colorInput.hidden = true;
+
+    // The eye sits inside the query field, like a search clear button, to keep the row compact.
+    const visibilityBtn = queryInputWrap.createEl('button', {
+      cls: 'graphfrontier-group-visibility',
+    });
 
     const settingsBtn = row.createEl('button', { cls: 'graphfrontier-group-settings' });
-    settingsBtn.setAttribute('aria-label', 'Group settings');
-    settingsBtn.setAttribute('title', 'Group settings');
+    settingsBtn.setAttribute('aria-label', 'Group color and settings');
+    settingsBtn.setAttribute('title', 'Group color and settings');
     setIcon(settingsBtn, 'settings-2');
 
     const rowState = {
@@ -2890,10 +3014,30 @@ class GraphFrontierView extends ItemView {
       queryInput,
       colorInput,
       settingsBtn,
+      visibilityBtn,
       id: form.id,
+      hidden: form.hidden,
       settings: form.settings,
+      refreshSwatch: () => {
+        const color = this.plugin.normalizeGroupColor(colorInput.value);
+        settingsBtn.style.backgroundColor = color;
+        settingsBtn.style.color = getContrastIconColor(color);
+      },
     };
+    rowState.refreshSwatch();
+    this.refreshGroupVisibilityButton(rowState);
     this.groupEditorRows.push(rowState);
+    // Keep focus and the suggestion menu away from the query field when using the eye.
+    this.registerDomEvent(visibilityBtn, 'mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    this.registerDomEvent(visibilityBtn, 'click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.toggleGroupVisibility(rowState, event.altKey);
+      this.persistGroupRows(sectionEl);
+    });
 
     const openGroupSuggestMenu = () => {
       const queryText = String(rowState.queryInput.value || '');
@@ -2969,9 +3113,6 @@ class GraphFrontierView extends ItemView {
     });
     this.registerDomEvent(queryInput, 'focus', () => {
       openGroupSuggestMenu();
-    });
-    this.registerDomEvent(colorInput, 'input', () => {
-      this.persistGroupRows(sectionEl);
     });
     this.registerDomEvent(settingsBtn, 'click', (event) => {
       event.preventDefault();
@@ -3282,10 +3423,9 @@ class GraphFrontierView extends ItemView {
   formatSliderValue(value, step) {
     const stepNum = Number(step);
     if (!Number.isFinite(stepNum) || stepNum >= 1) return String(Math.round(value));
-    if (stepNum >= 0.1) return value.toFixed(1);
-    if (stepNum >= 0.01) return value.toFixed(2);
-    if (stepNum >= 0.001) return value.toFixed(3);
-    return value.toFixed(4);
+    // Show as many decimals as the step has (0.25 -> 2), at most four.
+    const decimals = Math.min(4, (String(stepNum).split('.')[1] || '').length);
+    return value.toFixed(Math.max(1, decimals));
   }
 
   normalizeModifierSetting(rawModifier, fallback = 'none') {
@@ -3464,6 +3604,11 @@ class GraphFrontierView extends ItemView {
     const skipLayoutKick = !!opts.skipLayoutKick;
     const metadataResolved = !!opts.metadataResolved;
     const passive = opts.passive === true || metadataResolved;
+    const wasWaitingForMetadata = this.waitingForMetadata;
+    if (wasWaitingForMetadata && this.plugin.isGraphMetadataReady()) {
+      this.waitingForMetadata = false;
+    }
+    const resumeSleep = this.pendingLayoutSleepRestore;
     if (metadataResolved) {
       this.hasSeenMetadataResolvedRefresh = true;
     } else if (this.plugin.metadataResolvedOnce) {
@@ -3509,8 +3654,12 @@ class GraphFrontierView extends ItemView {
       this.layoutPaused = true;
       this.layoutStillFrames = 0;
       if (forceSavedPositions) this.layoutAutosaveDirty = false;
-    } else if (!passive || topologyChanged) {
+    } else if (!this.waitingForMetadata && (!passive || topologyChanged || wasWaitingForMetadata)) {
       this.kickLayoutSearch();
+    }
+    if (!this.waitingForMetadata && resumeSleep === this.plugin.data) {
+      this.pendingLayoutSleepRestore = resumeSleep;
+      this.restoreSavedLayoutSleep();
     }
     this.render();
   }
@@ -3695,6 +3844,9 @@ class GraphFrontierView extends ItemView {
       vy,
       degree: 0,
     };
+    if (!forceSavedPositions && oldNode && node.x === oldNode.x && node.y === oldNode.y) {
+      copyLayoutSleepState(this, oldNode, node);
+    }
     return node;
   }
 
@@ -3813,11 +3965,38 @@ class GraphFrontierView extends ItemView {
    */
   runFrame() {
     if (!this.isOpen) return;
+    if (this.plugin.data.legacy_render_settings?.pending_edge_dpr)
+      this.plugin.applyPendingRenderMigration(this.contentEl.win.devicePixelRatio || 1);
     if (this.subgraphScope && !this.hasValidSubgraphScope() && this.nodes.length)
       this.refreshFromVault({ keepCamera: true, skipLayoutKick: true });
     this.finishSubgraphFraming();
     this.stepCameraSmoothing();
-    this.stepSimulation();
+    if (!this.waitingForMetadata && !this.plugin.backups?.restoring) {
+      const dragging =
+        !!this.dragNodeId ||
+        (this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0);
+      const batch = { moving: false };
+      this.layoutAutosaveBatch = batch;
+      try {
+        if (this.nodes.length && (!this.layoutPaused || dragging)) {
+          const startedAt = performance.now();
+          let lastStepMs = 0;
+          for (let step = 0; step < (dragging ? 1 : 3); step++) {
+            if (step > 0 && performance.now() - startedAt + lastStepMs > 8) break;
+            const stepStartedAt = performance.now();
+            this.stepSimulation();
+            lastStepMs = performance.now() - stepStartedAt;
+            if (this.layoutPaused || this.waitingForMetadata || this.plugin.backups?.restoring)
+              break;
+          }
+        }
+      } finally {
+        this.layoutAutosaveBatch = null;
+      }
+      if (!this.waitingForMetadata && !this.plugin.backups?.restoring) {
+        stepLayoutAutosavePhysics(this, batch.moving);
+      }
+    }
     this.warmNodeSpatialIndexIfIdle();
     this.stepFocusSmoothing();
     this.render();
@@ -3829,8 +4008,15 @@ class GraphFrontierView extends ItemView {
   }
 
   stepSimulation() {
-    if (this.plugin.backups?.restoring) return;
+    if (this.plugin.backups?.restoring || this.waitingForMetadata) return;
     return stepSimulationPhysics(this);
+  }
+
+  restoreSavedLayoutSleep() {
+    if (this.pendingLayoutSleepRestore === this.plugin.data) {
+      restoreLayoutSleep(this, this.plugin.data.saved_layout_sleep?.[this.subgraphScope?.id || '']);
+    }
+    this.pendingLayoutSleepRestore = null;
   }
 
   /*
@@ -3840,6 +4026,7 @@ class GraphFrontierView extends ItemView {
    * ============================================================
    */
   render() {
+    this.renderCount = (this.renderCount || 0) + 1;
     return renderFrameRender(this);
   }
 
@@ -4908,6 +5095,7 @@ class GraphFrontierView extends ItemView {
       if (key === 'node_color') {
         next.color = value;
         rowState.colorInput.value = value;
+        rowState.refreshSwatch?.();
       } else if (key === null) {
         const strongPull = next.settings.strong_pull;
         next.settings = strongPull == null ? {} : { strong_pull: strongPull };
@@ -5510,12 +5698,6 @@ class GraphFrontierView extends ItemView {
       source: edge.source,
       target: edge.target,
       width: getEdgeVisualSetting(this.plugin, edge.source, edge.target, 'edge_width_scale'),
-      paintedWidth: getEdgeVisualSetting(
-        this.plugin,
-        edge.source,
-        edge.target,
-        'painted_edge_width'
-      ),
       paintedColor:
         this.plugin.getPaintedEdgeColor(edge.source) ||
         this.plugin.getPaintedEdgeColor(edge.target) ||
@@ -5529,6 +5711,7 @@ class GraphFrontierView extends ItemView {
     const bgColor = theme.background;
     const textColor = theme.text;
     const mutedTextColor = theme.mutedText;
+    const edgeAppearance = getEdgeAppearanceRender(this);
     const exportedAt = new Date().toISOString();
     const payload = {
       exportPath: normalizedExportPath,
@@ -5546,16 +5729,15 @@ class GraphFrontierView extends ItemView {
         gridLineWidth: this.plugin.clampGridLineWidth(this.plugin.getSettings().grid_line_width),
         edgeWidth: this.plugin.clampNumber(
           this.plugin.getSettings().edge_width_scale,
-          0.01,
-          1,
+          0.1,
+          5,
           DEFAULT_DATA.settings.edge_width_scale
         ),
-        paintedEdgeWidth: this.plugin.clampNumber(
-          this.plugin.getSettings().painted_edge_width,
-          0.01,
-          1,
-          DEFAULT_DATA.settings.painted_edge_width
-        ),
+        edgeColor: edgeAppearance.color,
+        edgeOpacity: edgeAppearance.opacity,
+        hoverColor: /^#[0-9a-f]{6}$/i.test(this.plugin.getSettings().hover_highlight_color || '')
+          ? this.plugin.getSettings().hover_highlight_color
+          : null,
         labelMinZoom: this.getLabelZoomThreshold(),
         labelFontSize: this.getLabelFontSize(),
         zoomStepFactor: ZOOM_STEP_FACTOR,
@@ -5732,6 +5914,14 @@ class GraphFrontierView extends ItemView {
     const EXPORT_DATA = ${payloadJson};
     (() => {
       const getLabelAppearance = ${getLabelAppearance.toString()};
+      const getNodeScreenRadius = ${getNodeScreenRadius.toString()};
+      const getNodeWorldRadius = ${getNodeWorldRadius.toString()};
+      const getEdgeCssWidth = ${getEdgeCssWidth.toString()};
+      const setCrispStroke = ${setCrispStroke.toString()};
+      const quantizeFocusProgress = ${quantizeFocusProgress.toString()};
+      const getFocusEdgeWidth = ${getFocusEdgeWidth.toString()};
+      const getFocusEdgeColor = ${getFocusEdgeColor.toString()};
+      const getCrispCoordinate = ${getCrispCoordinate.toString()};
       const canvas = document.getElementById('graph');
       const hud = document.getElementById('hud');
       const panelTitle = document.getElementById('panel-title');
@@ -5751,7 +5941,10 @@ class GraphFrontierView extends ItemView {
         zoom: Number(EXPORT_DATA.camera?.zoom) || 1,
       };
       const edgeWidth = Number(EXPORT_DATA.settings?.edgeWidth) || 0.34;
-      const paintedEdgeWidth = Number(EXPORT_DATA.settings?.paintedEdgeWidth) || 0.2;
+      const edgeColor = EXPORT_DATA.settings?.edgeColor || EXPORT_DATA.theme?.mutedText || '#9ea4af';
+      const rawEdgeOpacity = Number(EXPORT_DATA.settings?.edgeOpacity);
+      const edgeOpacity = Number.isFinite(rawEdgeOpacity) ? Math.max(0, Math.min(1, rawEdgeOpacity)) : 1;
+      const hoverColor = /^#[0-9a-f]{6}$/i.test(EXPORT_DATA.settings?.hoverColor || '') ? EXPORT_DATA.settings.hoverColor : null;
       const labelMinZoom = Number(EXPORT_DATA.settings?.labelMinZoom) || 0.4;
       const labelFontSize = Number(EXPORT_DATA.settings?.labelFontSize) || 1.8;
       const showGrid = !!EXPORT_DATA.settings?.showGrid;
@@ -5808,7 +6001,7 @@ class GraphFrontierView extends ItemView {
           }
         }
         if (!bestNode) return null;
-        const maxDist = Math.max(1, Number(bestNode.radius || 1) + (bestNode.isSubgraph ? 4.2 : 2) / Math.max(camera.zoom, 0.0001));
+        const maxDist = Math.max(1, getNodeWorldRadius(Number(bestNode.radius || 1), camera.zoom) + (bestNode.isSubgraph ? 4.2 : 2) / Math.max(camera.zoom, 0.0001));
         if (bestDist2 > maxDist * maxDist) return null;
         return bestNode;
       }
@@ -5827,22 +6020,22 @@ class GraphFrontierView extends ItemView {
         const endY = Math.ceil(bottomWorld / gridStep) * gridStep;
 
         ctx.save();
-        ctx.globalAlpha = EXPORT_DATA.theme.gridOpacity;
+        const backingScale = dpr;
         ctx.strokeStyle = EXPORT_DATA.theme.grid;
-        ctx.lineWidth = gridLineWidth;
+        setCrispStroke(ctx, gridLineWidth, EXPORT_DATA.theme.gridOpacity, backingScale);
         // Chromium can drop subpixel lines when a crossed grid shares one path.
-        const strokeSeparately = gridLineWidth < 1;
+        const strokeSeparately = ctx.lineWidth < 1;
         if (!strokeSeparately) ctx.beginPath();
         for (let x = startX; x <= endX; x += gridStep) {
           if (strokeSeparately) ctx.beginPath();
-          const sx = Math.round(worldToScreen(x, 0).x) + 0.5;
+          const sx = getCrispCoordinate(worldToScreen(x, 0).x, backingScale, ctx.lineWidth);
           ctx.moveTo(sx, 0);
           ctx.lineTo(sx, viewHeight);
           if (strokeSeparately) ctx.stroke();
         }
         for (let y = startY; y <= endY; y += gridStep) {
           if (strokeSeparately) ctx.beginPath();
-          const sy = Math.round(worldToScreen(0, y).y) + 0.5;
+          const sy = getCrispCoordinate(worldToScreen(0, y).y, backingScale, ctx.lineWidth);
           ctx.moveTo(0, sy);
           ctx.lineTo(viewWidth, sy);
           if (strokeSeparately) ctx.stroke();
@@ -5852,7 +6045,9 @@ class GraphFrontierView extends ItemView {
       }
 
       function drawEdges() {
+        // One stroke per appearance, so translucent edges never stack where they overlap.
         const selectedNeighbors = selectedNodeId ? neighborsById.get(selectedNodeId) || new Set() : null;
+        const buckets = new Map();
         for (const edge of EXPORT_DATA.edges) {
           const sourceNode = nodeById.get(edge.source);
           const targetNode = nodeById.get(edge.target);
@@ -5860,17 +6055,38 @@ class GraphFrontierView extends ItemView {
           const sourcePoint = worldToScreen(sourceNode.x, sourceNode.y);
           const targetPoint = worldToScreen(targetNode.x, targetNode.y);
           const isActive = !!selectedNodeId && (edge.source === selectedNodeId || edge.target === selectedNodeId);
-
-          ctx.save();
-          ctx.globalAlpha = selectedNodeId ? (isActive ? 1 : 0.24) : 1;
-          ctx.strokeStyle = edge.paintedColor || 'rgba(145,160,187,0.7)';
-          ctx.lineWidth = edge.paintedColor ? (edge.paintedWidth ?? paintedEdgeWidth) : (edge.width ?? edgeWidth);
-          ctx.beginPath();
-          ctx.moveTo(sourcePoint.x, sourcePoint.y);
-          ctx.lineTo(targetPoint.x, targetPoint.y);
-          ctx.stroke();
-          ctx.restore();
+          const physicalWidth = getFocusEdgeWidth(edge.width ?? edgeWidth, isActive ? 1 : 0);
+          // Highlighted edges are fully opaque; the rest keep the edge opacity.
+          const alpha = isActive ? 1 : (selectedNodeId ? 0.24 : 1) * edgeOpacity;
+          const color = getFocusEdgeColor(
+            edge.paintedColor || edgeColor,
+            EXPORT_DATA.theme?.text,
+            isActive ? 1 : 0,
+            hoverColor
+          );
+          const layer = (edge.paintedColor ? 1 : 0) + (isActive ? 2 : 0);
+          const key = layer + '|' + color + '|' + physicalWidth + '|' + alpha;
+          let bucket = buckets.get(key);
+          if (!bucket) {
+            bucket = { layer, color, physicalWidth, alpha, points: [] };
+            buckets.set(key, bucket);
+          }
+          bucket.points.push(sourcePoint.x, sourcePoint.y, targetPoint.x, targetPoint.y);
         }
+        const ordered = Array.from(buckets.values()).sort((a, b) => a.layer - b.layer);
+        ctx.save();
+        for (const bucket of ordered) {
+          ctx.strokeStyle = bucket.color;
+          setCrispStroke(ctx, getEdgeCssWidth(bucket.physicalWidth, dpr), bucket.alpha, dpr);
+          ctx.beginPath();
+          const points = bucket.points;
+          for (let i = 0; i < points.length; i += 4) {
+            ctx.moveTo(points[i], points[i + 1]);
+            ctx.lineTo(points[i + 2], points[i + 3]);
+          }
+          ctx.stroke();
+        }
+        ctx.restore();
       }
 
       function drawAuras() {
@@ -5899,7 +6115,7 @@ class GraphFrontierView extends ItemView {
         for (const node of EXPORT_DATA.nodes) {
           const point = worldToScreen(node.x, node.y);
           if (point.x < -80 || point.x > viewWidth + 80 || point.y < -80 || point.y > viewHeight + 80) continue;
-          const radius = Math.max(0.6, Number(node.radius || 1) * camera.zoom);
+          const radius = getNodeScreenRadius(Number(node.radius || 1), camera.zoom);
           const isHovered = hoveredNodeId === node.id;
           const isSelected = selectedNodeId === node.id;
           const isNeighbor = selectedNodeId && selectedNeighbors.has(node.id);
@@ -5912,16 +6128,15 @@ class GraphFrontierView extends ItemView {
           ctx.arc(point.x, point.y, radius + (node.isSubgraph ? 2 : 0), 0, Math.PI * 2);
           if (node.isSubgraph) {
             ctx.strokeStyle = node.color || '#7aa2f7';
-            ctx.lineWidth = 3;
+            setCrispStroke(ctx, 3, alpha, dpr);
             ctx.stroke();
           } else ctx.fill();
           ctx.restore();
 
           if (isHovered || isSelected) {
             ctx.save();
-            ctx.globalAlpha = 1;
-            ctx.strokeStyle = EXPORT_DATA.theme.selection;
-            ctx.lineWidth = isSelected ? 1.8 : 1.3;
+            ctx.strokeStyle = hoverColor || EXPORT_DATA.theme.selection;
+            setCrispStroke(ctx, isSelected ? 1.8 : 1.3, 1, dpr);
             ctx.beginPath();
             ctx.arc(point.x, point.y, radius + (node.isSubgraph ? 4 : 2), 0, Math.PI * 2);
             ctx.stroke();
@@ -6656,6 +6871,7 @@ class GraphFrontierView extends ItemView {
         gridStep,
         occupiedGridCells
       );
+      this.noteGridDisplacement(linkedNode.x, linkedNode.y, gridStep, snappedCell, linkedNodeId);
       occupiedGridCells.add(this.gridKey(snappedCell.gx, snappedCell.gy));
 
       this.plugin.setPin(linkedNodeId, { x: snappedCell.x, y: snappedCell.y }, { mode: 'grid' });
@@ -6940,6 +7156,7 @@ class GraphFrontierView extends ItemView {
       if (mode !== 'grid') return { node, next: { x: node.x, y: node.y } };
       const next = this.findNearestFreeGridCell(node.x, node.y, step, occupied);
       if (occupied.has(this.gridKey(next.gx, next.gy))) throw new Error('No free grid cell');
+      this.noteGridDisplacement(node.x, node.y, step, next, node.id);
       occupied.add(this.gridKey(next.gx, next.gy));
       return { node, next };
     });
@@ -7210,6 +7427,7 @@ class GraphFrontierView extends ItemView {
           JSON.stringify(this.captureLayoutSnapshot(layoutName)) === snapshotText;
         for (const key of [
           'saved_positions',
+          'saved_layout_sleep',
           'saved_layout_settings',
           'saved_layout_pins',
           'saved_layout_orbit_pins',
@@ -7253,6 +7471,18 @@ class GraphFrontierView extends ItemView {
     snapshot.saved_layout_pins = Object.assign({}, snapshot.pins);
     snapshot.saved_layout_orbit_pins = Object.assign({}, snapshot.orbit_pins);
     const views = this.getScopeLeaves().map((leaf) => leaf.view);
+    for (const view of new Set([...views.filter((view) => view.isOpen), this])) {
+      if (
+        view.waitingForMetadata ||
+        view.graphDataRef !== this.plugin.data ||
+        (view.subgraphScope && !view.hasValidSubgraphScope())
+      )
+        continue;
+      const scope = view.subgraphScope?.id || '';
+      const sleep = captureLayoutSleep(view);
+      if (sleep) snapshot.saved_layout_sleep[scope] = sleep;
+      else delete snapshot.saved_layout_sleep[scope];
+    }
     const main = this.subgraphScope
       ? views.find((view) => !view.subgraphScope && view.isOpen)
       : this;
@@ -7366,6 +7596,7 @@ class GraphFrontierView extends ItemView {
     const step = this.plugin.clampGridStep(this.plugin.getSettings().grid_step);
     const occupied = this.getOccupiedGridCells(nodeId);
     const snapped = this.findNearestFreeGridCell(x, y, step, occupied);
+    this.noteGridDisplacement(x, y, step, snapped, nodeId);
     return { x: snapped.x, y: snapped.y };
   }
 
@@ -7386,6 +7617,95 @@ class GraphFrontierView extends ItemView {
     }
 
     return occupied;
+  }
+
+  // Hidden pinned nodes keep their grid cells; map each held cell to its node.
+  getHiddenGridHolders() {
+    const visible = this.getFilterVisibleNodeIds();
+    const holders = new Map();
+    if (!(visible instanceof Set)) return holders;
+    const step = this.plugin.clampGridStep(this.plugin.getSettings().grid_step);
+    const parents = hierarchy(this.plugin.data.subgraphs);
+    for (const [nodeId, pos] of Object.entries(this.plugin.data.pins)) {
+      if (!this.nodeById.has(nodeId) || visible.has(nodeId)) continue;
+      if ((parents.get(nodeId) || null) !== (this.subgraphScope?.id || null)) continue;
+      if (!pos || typeof pos !== 'object') continue;
+      const gx = Math.round(pos.x / step);
+      const gy = Math.round(pos.y / step);
+      holders.set(this.gridKey(gx, gy), { nodeId, gx, gy });
+    }
+    return holders;
+  }
+
+  // While grid-pinned nodes are dragged, report the hidden holders of the cells under them.
+  getDragHiddenGridHolders() {
+    const dragged = new Set(
+      this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0
+        ? this.dragSelectionOffsets.keys()
+        : this.dragNodeId
+          ? [this.dragNodeId]
+          : []
+    );
+    const result = [];
+    if (!dragged.size) return result;
+    const holders = this.getHiddenGridHolders();
+    if (!holders.size) return result;
+    const step = this.plugin.clampGridStep(this.plugin.getSettings().grid_step);
+    for (const nodeId of dragged) {
+      const node = this.nodeById.get(nodeId);
+      if (!node || this.plugin.getPinMode(nodeId) !== 'grid') continue;
+      const holder = holders.get(
+        this.gridKey(Math.round(node.x / step), Math.round(node.y / step))
+      );
+      if (holder && holder.nodeId !== nodeId && !result.includes(holder)) result.push(holder);
+    }
+    return result;
+  }
+
+  // Record a placement pushed out of a cell held by a hidden node, then report it once.
+  noteGridDisplacement(x, y, step, cell, nodeId = null) {
+    const baseKey = this.gridKey(Math.round(x / step), Math.round(y / step));
+    if (this.gridKey(cell.gx, cell.gy) === baseKey) return;
+    const holder = this.getHiddenGridHolders().get(baseKey);
+    if (!holder || holder.nodeId === nodeId) return;
+    const entry = {
+      heldBy: holder.nodeId,
+      heldByLabel: this.nodeById.get(holder.nodeId)?.label || holder.nodeId,
+      placedAt: { x: cell.x, y: cell.y },
+    };
+    if (Array.isArray(this.gridWarningCollector)) {
+      this.gridWarningCollector.push(entry);
+      return;
+    }
+    if (!this.pendingGridNotices) {
+      this.pendingGridNotices = [];
+      setTimeout(() => this.flushGridNotices(), 0);
+    }
+    this.pendingGridNotices.push(entry);
+  }
+
+  flushGridNotices() {
+    const entries = this.pendingGridNotices || [];
+    this.pendingGridNotices = null;
+    if (!entries.length) return;
+    new Notice(
+      entries.length === 1
+        ? `Grid cell is held by hidden node “${entries[0].heldByLabel}” — placed in the nearest free cell`
+        : `${entries.length} nodes placed in nearby free cells: their grid cells are held by hidden nodes`
+    );
+  }
+
+  // API callers receive displacement warnings in the result instead of notices.
+  async collectGridWarnings(action) {
+    const previous = this.gridWarningCollector;
+    const warnings = [];
+    this.gridWarningCollector = warnings;
+    try {
+      await action();
+    } finally {
+      this.gridWarningCollector = previous;
+    }
+    return warnings;
   }
 
   gridKey(gx, gy) {
@@ -7514,6 +7834,18 @@ class GraphFrontierView extends ItemView {
     return getNodeRadiusRender(this, node);
   }
 
+  // Largest base radius among nodes; node size has no ceiling, so hit testing must
+  // search far enough. Cached for one rendered frame.
+  getMaxNodeRadius() {
+    const cache = this.maxNodeRadiusCache;
+    if (cache && cache.renderCount === this.renderCount && cache.nodes === this.nodes)
+      return cache.value;
+    let value = 0;
+    for (const node of this.nodes) value = Math.max(value, this.getNodeRadius(node));
+    this.maxNodeRadiusCache = { renderCount: this.renderCount, nodes: this.nodes, value };
+    return value;
+  }
+
   getLabelZoomThreshold() {
     return getLabelZoomThresholdRender(this);
   }
@@ -7538,7 +7870,9 @@ class GraphFrontierView extends ItemView {
     const hasFilter = visibleNodeIds instanceof Set;
     const zoom = Math.max(this.camera.zoom, 0.0001);
     const hasSubgraphs = !!this.plugin.data.subgraphs?.length;
-    const maxCandidateRadius = (hasSubgraphs ? 8 : 4) + (hasSubgraphs ? 5 : 2) / zoom;
+    const maxCandidateRadius =
+      getNodeWorldRadius(Math.max(hasSubgraphs ? 8 : 4, this.getMaxNodeRadius()), zoom) +
+      (hasSubgraphs ? 5 : 2) / zoom;
 
     if (!this.isNodeSpatialIndexFresh()) {
       // Moving nodes may have crossed buckets. Scan current coordinates without
@@ -7552,7 +7886,7 @@ class GraphFrontierView extends ItemView {
     const bucketRange = Math.max(1, Math.ceil(maxCandidateRadius / cellSize));
 
     let bestNode = null;
-    let bestDist2 = Infinity;
+    let bestScore = Infinity;
 
     for (let offsetX = -bucketRange; offsetX <= bucketRange; offsetX += 1) {
       for (let offsetY = -bucketRange; offsetY <= bucketRange; offsetY += 1) {
@@ -7560,29 +7894,31 @@ class GraphFrontierView extends ItemView {
         if (!bucket) continue;
         for (const node of bucket) {
           if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
-          const dx = node.x - world.x;
-          const dy = node.y - world.y;
-          const dist2 = dx * dx + dy * dy;
-          if (dist2 < bestDist2) {
-            bestDist2 = dist2;
+          const score = this.getNodeHitScore(node, world, zoom);
+          if (score < bestScore) {
+            bestScore = score;
             bestNode = node;
           }
         }
       }
     }
 
-    if (!bestNode) return null;
+    return bestScore <= 1 ? bestNode : null;
+  }
 
-    const baseRadius = this.getNodeRadius(bestNode);
-    const maxDist = Math.max(1, baseRadius + (bestNode.meta?.subgraph ? 4.2 : 2) / zoom);
-    if (bestDist2 > maxDist * maxDist) return null;
-
-    return bestNode;
+  // Distance relative to the node's own hit radius: <= 1 is a hit, and the smallest value
+  // wins, so a large node is not hidden by a nearer small node whose radius misses.
+  getNodeHitScore(node, world, zoom) {
+    const dx = node.x - world.x;
+    const dy = node.y - world.y;
+    const worldRadius = getNodeWorldRadius(this.getNodeRadius(node), zoom);
+    const maxDist = Math.max(1, worldRadius + (node.meta?.subgraph ? 4.2 : 2) / zoom);
+    return Math.sqrt(dx * dx + dy * dy) / maxDist;
   }
 
   getNodeAtWorldByScan(world, visibleNodeIds, hasFilter, zoom, maxCandidateRadius) {
     let bestNode = null;
-    let bestDist2 = Infinity;
+    let bestScore = Infinity;
     const coarseMaxDist = Math.max(1, maxCandidateRadius);
     const coarseMaxDist2 = coarseMaxDist * coarseMaxDist;
 
@@ -7592,19 +7928,15 @@ class GraphFrontierView extends ItemView {
       if (Math.abs(dx) > coarseMaxDist) continue;
       const dy = node.y - world.y;
       if (Math.abs(dy) > coarseMaxDist) continue;
-      const dist2 = dx * dx + dy * dy;
-      if (dist2 > coarseMaxDist2 || dist2 >= bestDist2) continue;
-      bestDist2 = dist2;
-      bestNode = node;
+      if (dx * dx + dy * dy > coarseMaxDist2) continue;
+      const score = this.getNodeHitScore(node, world, zoom);
+      if (score < bestScore) {
+        bestScore = score;
+        bestNode = node;
+      }
     }
 
-    if (!bestNode) return null;
-
-    const baseRadius = this.getNodeRadius(bestNode);
-    const maxDist = Math.max(1, baseRadius + (bestNode.meta?.subgraph ? 4.2 : 2) / zoom);
-    if (bestDist2 > maxDist * maxDist) return null;
-
-    return bestNode;
+    return bestScore <= 1 ? bestNode : null;
   }
 
   screenToWorld(screenX, screenY) {
@@ -7702,4 +8034,5 @@ class ExactCoordinatesModal extends Modal {
 
 module.exports = {
   GraphFrontierView,
+  getContrastIconColor,
 };

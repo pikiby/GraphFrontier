@@ -79,6 +79,8 @@
 }
 
 .graphfrontier-sidepanel {
+  /* One divider look for section headers, separators and Display groups. */
+  --graphfrontier-divider: 1px solid var(--text-muted);
   position: absolute;
   right: 8px;
   top: 8px;
@@ -254,9 +256,9 @@
 .graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle::after {
   content: '';
   flex: 1;
-  height: 1px;
+  height: 0;
   margin-left: 6px;
-  background: var(--text-muted);
+  border-top: var(--graphfrontier-divider);
 }
 
 .graphfrontier-sidepanel button.graphfrontier-sidepanel-section-toggle:hover,
@@ -303,9 +305,15 @@
 }
 
 .graphfrontier-sidepanel-separator {
-  height: 1px;
+  height: 0;
   margin: 6px 0 8px;
-  background: var(--text-muted);
+  border-top: var(--graphfrontier-divider);
+}
+
+.graphfrontier-sidepanel-group + .graphfrontier-sidepanel-group {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: var(--graphfrontier-divider);
 }
 
 .graphfrontier-sidepanel-label {
@@ -576,6 +584,7 @@
 }
 
 .graphfrontier-group-query-wrap {
+  position: relative;
   flex: 1;
   width: 1px;
   min-width: 0;
@@ -591,11 +600,13 @@
 }
 
 .graphfrontier-group-drag {
-  width: 12px;
+  width: 9px;
+  min-height: 22px;
+  line-height: 22px;
   color: var(--text-faint);
   cursor: grab;
   user-select: none;
-  font-size: 10px;
+  font-size: 8px;
   text-align: center;
 }
 
@@ -626,6 +637,10 @@
   width: 100%;
   min-width: 0;
   flex: none;
+}
+
+.graphfrontier-sidepanel .graphfrontier-group-query-wrap input.graphfrontier-group-query {
+  padding-right: 22px;
 }
 
 .graphfrontier-group-row.is-property-layout .graphfrontier-group-query {
@@ -680,18 +695,45 @@
   box-shadow: none;
 }
 
-.graphfrontier-group-color-input::-webkit-color-swatch-wrapper {
+/* Obsidian outlines color swatches with box-shadow in every state; these selectors
+   outrank input[type=color] rules so plugin swatches stay plain circles everywhere. */
+input[type='color'].graphfrontier-group-color-input::-webkit-color-swatch-wrapper {
   padding: 0;
 }
 
-.graphfrontier-group-color-input::-webkit-color-swatch {
+input[type='color'].graphfrontier-group-color-input::-webkit-color-swatch,
+input[type='color'].graphfrontier-group-color-input:hover::-webkit-color-swatch,
+input[type='color'].graphfrontier-group-color-input:focus::-webkit-color-swatch,
+input[type='color'].graphfrontier-group-color-input:focus-visible::-webkit-color-swatch {
+  width: 100%;
+  height: 100%;
   border: 0;
-  border-radius: 999px;
+  border-radius: 50%;
+  box-shadow: none;
 }
 
-.graphfrontier-group-color-input::-moz-color-swatch {
+input[type='color'].graphfrontier-group-color-input::-moz-color-swatch,
+input[type='color'].graphfrontier-group-color-input:hover::-moz-color-swatch,
+input[type='color'].graphfrontier-group-color-input:focus::-moz-color-swatch {
   border: 0;
-  border-radius: 999px;
+  border-radius: 50%;
+  box-shadow: none;
+}
+
+input[type='color'].graphfrontier-group-color-input,
+input[type='color'].graphfrontier-group-color-input:hover,
+input[type='color'].graphfrontier-group-color-input:focus {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+/* Keyboard focus stays visible as a soft offset ring, not an outline on the swatch. */
+input[type='color'].graphfrontier-group-color-input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: 2px solid var(--background-modifier-border-focus);
+  outline-offset: 2px;
 }
 
 .graphfrontier-group-remove {
@@ -914,7 +956,23 @@
   max-height: 26px;
   flex: 0 0 26px;
   padding: 0;
-  border: 1px solid var(--text-muted);
+  border: 0;
+}
+
+/* Same specificity as the sizing rule above, so no hover/focus state brings an outline back. */
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control)
+  input.graphfrontier-group-color-input:is(:hover, :focus, :active) {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+:is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control)
+  input.graphfrontier-group-color-input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: 2px solid var(--background-modifier-border-focus);
+  outline-offset: 2px;
 }
 
 :is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control) input[type='range'] {
@@ -965,17 +1023,6 @@
   background: var(--background-primary);
   box-shadow: none;
   transform: none;
-}
-
-input.graphfrontier-group-color-input::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-
-input.graphfrontier-group-color-input::-webkit-color-swatch {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  box-shadow: none;
 }
 
 :is(.graphfrontier-sidepanel, .graphfrontier-node-visual-control)
@@ -1084,16 +1131,63 @@ input.graphfrontier-group-color-input::-webkit-color-swatch {
   padding-top: 2px;
 }
 
-.graphfrontier-group-settings {
-  width: 22px;
-  height: 22px;
-  padding: 3px;
-  flex: none;
+.graphfrontier-sidepanel button.graphfrontier-group-settings {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  flex: 0 0 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: none;
+  cursor: pointer;
 }
 
 .graphfrontier-group-settings svg {
   width: 14px;
   height: 14px;
+}
+
+.graphfrontier-sidepanel button.graphfrontier-group-visibility {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  transform: translateY(-50%);
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.graphfrontier-group-row.is-hidden .graphfrontier-group-visibility {
+  color: var(--text-normal);
+}
+
+.graphfrontier-sidepanel button.graphfrontier-group-visibility:hover {
+  color: var(--text-normal);
+}
+
+.graphfrontier-group-visibility svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Hidden groups stay editable but read as switched off. */
+.graphfrontier-group-row.is-hidden .graphfrontier-group-query,
+.graphfrontier-group-row.is-hidden .graphfrontier-group-settings {
+  opacity: 0.45;
 }
 
 .graphfrontier-node-list {
