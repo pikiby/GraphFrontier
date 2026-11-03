@@ -63,15 +63,56 @@ Other settings, overrides, positions and pins are preserved; no replacement over
 
 ## Visual Controls
 
-- `Grid step`: world-space grid spacing
-- `Grid thickness`: grid line width, 0.1-1 CSS px in steps of 0.1, independent of zoom; default 1 preserves the original appearance. Stored per layout and included in static HTML exports; legacy layouts default to 1.
-- `Node size`: node radius scale, 0.1-4
+`Display` groups its controls without titles: general, nodes, text, edges and grid.
+
+- `Existing files only` and `Show orphans`: graph visibility (see above)
+- `Hover dimming`: how strongly non-focused elements are dimmed
+- `Hover color`: color of highlighted edges and of the hover ring. Until a color is picked,
+  highlighted edges keep their own color and move it towards the theme text color, and the
+  ring uses the theme selection color. A picked color is reached smoothly, also by painted edges.
 - `Node color`: base color for nodes without a group or individual color
-- `Edge width`: regular edge thickness
-- `Painted edge width`: thickness for painted edges only
+- `Node size`: node radius scale, 0.1-2 in steps of 0.005. The radius is proportional to it at every value, so
+  the size ratio between nodes of different degree is kept. As in Obsidian's graph, nodes grow and shrink with the
+  square root of zoom on screen: zooming out four times halves them. Hit testing, labels and
+  selection follow the same radius; the color aura stays in graph units.
 - `Text zoom`: how far labels stay visible when zooming out, 1-40 steps
 - `Text size`: base label font size
-- `Hover dimming`: how strongly non-focused elements are dimmed
+- `Edge color`: color of regular edges. It follows the theme until a color is picked.
+  Painted edges and group edge colors take priority.
+- `Edge opacity`: 0-1, default 1, applied to every edge at rest. Highlighted edges become
+  fully opaque, as do highlighted nodes and their neighbors.
+  Edges of the same appearance are stroked together, so translucent edges do not darken where
+  they cross or overlap. The grid is not affected.
+- `Edge width`: edge thickness in physical screen pixels, 0.1-5, like Obsidian's link
+  thickness, for regular and painted edges alike. It does not change with zoom. Highlighted
+  edges (hover, Find connections, HTML-export selection) grow relative to their own width: to
+  at least twice as thick and one physical pixel thicker, capped at 12. They keep their
+  own color, edge color or painted color, and move it smoothly towards the theme text color,
+  or towards `Hover color` when set.
+- `Show grid`, `Grid step`: background grid and its world-space spacing
+- `Grid thickness`: grid line width, 0.1-1 CSS px in steps of 0.1, independent of zoom; default 1 preserves the original appearance. Stored per layout and included in static HTML exports; legacy layouts default to 1.
+
+Lines thinner than one canvas pixel are drawn exactly one pixel wide with proportionally lower
+opacity, so very thin edges, grid lines and outlines fade instead of breaking into dashes.
+
+### Updating from earlier versions
+
+Data and layouts saved before render model 2 are converted once when they are loaded, and the
+result is marked with `render_model: 2`; new data and layouts are created with the mark.
+
+- Node sizes keep the look of unlinked nodes under the former radius ceiling: the new value is
+  `min(4 * max(1, s / 2), 2.2 * s) / 2.2`, limited to 0.1-2. Sizes up to about 1.8 are
+  unchanged; larger ones settle at the new maximum 2. High-degree nodes are no longer clipped,
+  so they can look larger than before.
+- Edge widths were CSS pixels and are now physical pixels: global, saved-layout and individual
+  widths are multiplied by the device pixel ratio of the first device that opens the graph,
+  limited to 0.1-5, so lines keep their thickness.
+- The separate painted edge width and the short-lived Sharpness setting are removed.
+- The original values and the device pixel ratio are kept in `legacy_render_settings`.
+
+A layout file that was not opened since the update is converted when it is next loaded.
+Edge color, edge opacity and hover color are stored per layout like other settings and are
+included in static HTML exports.
 
 ## Individual Visual Settings
 
@@ -98,8 +139,9 @@ included in static HTML exports.
 ## Groups
 
 Group rows define visual rules for nodes based on query expressions. By default,
-only color changes. The sliders icon beside each color opens the same visual settings
-menu used for individual nodes. **Reset visual settings** clears the additional
+only color changes. Each row has one round button filled with the group color and
+marked with a settings icon; it opens the same visual settings menu used for
+individual nodes, where the group color is changed with the other settings. **Reset visual settings** clears the additional
 visual overrides and keeps its rule color and Strong pull. The same menu also
 provides **Paint edges**, **Strong pull**, and
 **Clear strong pull**. These effects follow group membership; individual node
@@ -122,6 +164,14 @@ Behavior:
 2. For each setting, the first matching enabled group that defines it wins;
    otherwise the global setting is used. Every group still defines its color.
 3. Group rows can be reordered by drag-and-drop.
+4. The eye icon at the right edge of the query field hides or shows a group's nodes. A node that
+   matches at least one hidden group is hidden, exactly like a blacklist match: it leaves
+   the graph, physics and HTML export, while gravity centers stay visible. Hidden rows are
+   dimmed. Whitelist rules and search apply to the remaining nodes. The flag is saved with
+   the group in the layout and accepted by the API as `hidden`.
+5. Alt-click the eye to solo a group: every other group is hidden. Alt-click the same group
+   again to restore the previous hidden set; a plain click leaves solo mode. The previous
+   set is remembered only until the view is reloaded.
 
 ### Node lists
 

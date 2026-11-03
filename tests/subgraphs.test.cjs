@@ -92,6 +92,7 @@ test('normalization retains missing members and settings, rejects duplicate pare
     ],
     pins: { 'missing.md': { x: 1, y: 2 } },
     node_visual_settings: { 'missing.md': { node_size_scale: 2 } },
+    render_model: 2,
   });
   assert.deepEqual(
     data.subgraphs.map((item) => item.members),

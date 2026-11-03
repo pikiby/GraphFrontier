@@ -1,5 +1,12 @@
 const { BackupManager } = require('./backups');
-const { Plugin, Notice } = require('obsidian');
+const { normalizeLayoutSleep } = require('./physics');
+const {
+  RENDER_MODEL,
+  prepareRenderModel,
+  normalizeLegacyRenderSettings,
+  applyEdgeDprMigration,
+} = require('./render-migration');
+const { Plugin, Notice, parseLinktext } = require('obsidian');
 const { normalizeDarkEnergy, darkEnergyNodes } = require('./dark-energy');
 const { normalizeSubgraphs, subgraphNodes, normalizeSubgraphSpaces } = require('./subgraphs');
 const {
@@ -202,12 +209,6 @@ function registerGraphFrontierRefreshEvents(plugin) {
     plugin.scheduleRefreshAllViews({ passive: true });
   };
 
-  plugin.registerEvent(
-    plugin.app.metadataCache.on('resolved', () => {
-      plugin.metadataResolvedOnce = true;
-      plugin.scheduleRefreshAllViews({ metadataResolved: true, passive: true });
-    })
-  );
   plugin.registerEvent(plugin.app.vault.on('create', scheduleRefreshForVaultEvent));
   plugin.registerEvent(plugin.app.vault.on('modify', scheduleRefreshForVaultEvent));
   plugin.registerEvent(plugin.app.vault.on('delete', scheduleRefreshForVaultEvent));
@@ -303,14 +304,28 @@ function getHotkeyFromKeyboardEventUtil(keyboardEvent) {
 // ============================================================================
 module.exports = class GraphFrontierPlugin extends Plugin {
   async onload() {
-    const loadedData = await this.loadData();
-    this.data = this.normalizeData(loadedData);
+    this.metadataResolvedOnce = false;
+    this.metadataResolutionPending = false;
+    this._graphRefreshReady = false;
     this._persistTimer = null;
     this._refreshTimer = null;
     this._pendingRefreshOptions = {};
-    const resolvedLinks = this.app?.metadataCache?.resolvedLinks;
-    this.metadataResolvedOnce =
-      !!resolvedLinks && typeof resolvedLinks === 'object' && Object.keys(resolvedLinks).length > 0;
+    // Subscribe before disk/MCP awaits, so the initial resolution cannot be missed.
+    this.registerEvent(
+      this.app.metadataCache.on('changed', () => {
+        this.metadataResolutionPending = true;
+      })
+    );
+    this.registerEvent(
+      this.app.metadataCache.on('resolved', () => {
+        this.metadataResolvedOnce = true;
+        this.metadataResolutionPending = false;
+        if (this._graphRefreshReady)
+          this.scheduleRefreshAllViews({ metadataResolved: true, passive: true });
+      })
+    );
+    const loadedData = await this.loadData();
+    this.data = this.normalizeData(loadedData);
     await this.bootstrapActiveLayoutData();
     this.nodeListStore = new NodeListStore(
       this.app.vault.adapter,
@@ -379,6 +394,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         })
         .catch((error) => new Notice(error.message));
     });
+    this._graphRefreshReady = true;
+    if (this.metadataResolvedOnce && !this.metadataResolutionPending)
+      this.scheduleRefreshAllViews({ metadataResolved: true, passive: true });
   }
 
   onunload() {
@@ -390,9 +408,36 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this._pendingRefreshOptions = {};
   }
 
+  isGraphMetadataReady() {
+    if (this.metadataResolutionPending) return false;
+    if (this.metadataResolvedOnce) return true;
+    if (!this.app.workspace.layoutReady) return false;
+    // Hot enabling may miss `resolved`. Check the public indexed links against
+    // the resolved graph; linkless notes need no entries in either link map.
+    const cache = this.app.metadataCache;
+    return this.app.vault.getMarkdownFiles().every((file) => {
+      const indexed = cache.getFileCache(file);
+      if (!indexed) return false;
+      const expected = new Map();
+      for (const link of [
+        ...(indexed.links || []),
+        ...(indexed.embeds || []),
+        ...(indexed.frontmatterLinks || []),
+      ]) {
+        const target = cache.getFirstLinkpathDest(parseLinktext(link.link).path, file.path);
+        if (target) expected.set(target.path, (expected.get(target.path) || 0) + 1);
+      }
+      const resolved = Object.entries(cache.resolvedLinks?.[file.path] || {});
+      return (
+        resolved.length === expected.size &&
+        resolved.every(([id, count]) => expected.get(id) === count)
+      );
+    });
+  }
+
   // Persisted-data normalization: sanitize and repair loaded state before use.
   normalizeData(data) {
-    const safe = data && typeof data === 'object' ? data : {};
+    const safe = prepareRenderModel(data && typeof data === 'object' ? data : {});
     const activeLayoutName = this.normalizeLayoutFileName(safe.active_layout_name);
 
     const pins = safe.pins && typeof safe.pins === 'object' ? safe.pins : {};
@@ -435,6 +480,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       pins: {},
       orbit_pins: {},
       saved_positions: {},
+      saved_layout_sleep: normalizeLayoutSleep(safe.saved_layout_sleep),
       saved_layout_settings: {},
       saved_layout_pins: {},
       saved_layout_orbit_pins: {},
@@ -603,7 +649,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.node_size_scale = this.clampNumber(
       normalized.settings.node_size_scale,
       0.1,
-      4,
+      2,
       DEFAULT_DATA.settings.node_size_scale
     );
     if (!/^#[0-9a-f]{6}$/i.test(normalized.settings.node_color))
@@ -611,6 +657,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     for (const settings of [normalized.settings, normalized.saved_layout_settings]) {
       if (!/^#[0-9a-f]{6}$/i.test(settings.attachment_node_color))
         settings.attachment_node_color = null;
+      settings.edge_color = /^#[0-9a-f]{6}$/i.test(settings.edge_color)
+        ? settings.edge_color.toLowerCase()
+        : null;
+      settings.hover_highlight_color = /^#[0-9a-f]{6}$/i.test(settings.hover_highlight_color)
+        ? settings.hover_highlight_color.toLowerCase()
+        : null;
     }
     normalized.settings.aura_brightness = this.clampNumber(
       normalized.settings.aura_brightness,
@@ -619,18 +671,24 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       22
     );
     normalized.settings.aura_radius = this.clampNumber(normalized.settings.aura_radius, 0, 5000, 0);
+    // Edge widths are physical pixels (0.1-5); older stored values keep their number.
     normalized.settings.edge_width_scale = this.clampNumber(
       normalized.settings.edge_width_scale,
-      0.01,
-      1,
+      0.1,
+      5,
       DEFAULT_DATA.settings.edge_width_scale
     );
-    normalized.settings.painted_edge_width = this.clampNumber(
-      normalized.settings.painted_edge_width,
-      0.01,
+    normalized.settings.edge_opacity = this.clampNumber(
+      normalized.settings.edge_opacity,
+      0,
       1,
-      DEFAULT_DATA.settings.painted_edge_width
+      DEFAULT_DATA.settings.edge_opacity
     );
+    // Removed settings: painted edges share the edge width; Sharpness was withdrawn.
+    for (const settings of [normalized.settings, normalized.saved_layout_settings]) {
+      delete settings.painted_edge_width;
+      delete settings.render_resolution_scale;
+    }
     if (normalized.settings.label_zoom_steps == null && settings.label_min_zoom != null) {
       const legacySlider = this.clampNumber(settings.label_min_zoom, 0.01, 1, 0.35);
       const legacyThreshold = this.clampNumber(1.01 - legacySlider, MIN_ZOOM, MAX_ZOOM, 1);
@@ -771,6 +829,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         query,
         color,
         enabled: rawGroup.enabled !== false,
+        ...(rawGroup.hidden === true ? { hidden: true } : {}),
         settings: normalizeGroupVisuals(rawGroup.settings),
       });
     }
@@ -836,7 +895,24 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         ]
       : null;
 
+    const legacyRender = normalizeLegacyRenderSettings(safe.legacy_render_settings);
+    if (legacyRender) normalized.legacy_render_settings = legacyRender;
+    if (safe.render_model === RENDER_MODEL && !legacyRender?.pending_edge_dpr)
+      normalized.render_model = RENDER_MODEL;
+
     return normalizeSubgraphSpaces(normalized, safe.subgraph_coordinates);
+  }
+
+  // Finishes the render model 2 migration once the device pixel ratio is known.
+  applyPendingRenderMigration(devicePixelRatio) {
+    if (!applyEdgeDprMigration(this.data, devicePixelRatio)) return false;
+    const views = this.isLocalGraphFrontier
+      ? [this.getScopeView?.()]
+      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
+    for (const view of views) if (view) view.layoutAutosaveDirty = true;
+    this.schedulePersist();
+    this.renderAllViews?.();
+    return true;
   }
 
   // Utility helpers: clamp functions, id generation, and color normalization.
@@ -1403,10 +1479,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this.renderAllViews();
   }
 
-  getNodeMultiplier(nodeId) {
+  getNodeMultiplier(nodeId, context) {
     const stored =
       this.data.node_force_multipliers[nodeId] ??
-      (this.getGroupVisualSettings(nodeId)?.strong_pull
+      (this.getGroupVisualSettings(nodeId, context)?.strong_pull
         ? this.clampStrongPullMultiplier(this.getSettings().strong_pull_multiplier)
         : 1);
     const multiplier = this.clampMultiplier(stored);
@@ -1567,10 +1643,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     }
   }
 
-  getGroupVisualSettings(nodeId) {
-    const leaves = this.isLocalGraphFrontier
-      ? [{ view: this.getScopeView() }]
-      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE);
+  getGroupVisualSettings(nodeId, context) {
+    const leaves =
+      context?.leaves ||
+      (this.isLocalGraphFrontier
+        ? [{ view: this.getScopeView() }]
+        : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE));
+    if (context) context.leaves = leaves;
     const view = leaves.find((leaf) => leaf.view?.nodeById?.has(nodeId))?.view;
     return view ? getGroupStyleMap(view)?.get(nodeId) : null;
   }
@@ -1595,11 +1674,22 @@ module.exports = class GraphFrontierPlugin extends Plugin {
           query,
           color,
           enabled: rawGroup.enabled !== false,
+          // Hidden groups remove their nodes like blacklist rules; the flag belongs to the layout.
+          ...(rawGroup.hidden === true ? { hidden: true } : {}),
           settings: normalizeGroupVisuals(rawGroup.settings),
         });
       }
     }
+    const hiddenRules = (groups) =>
+      JSON.stringify(groups.filter((group) => group.hidden).map((group) => group.query));
+    const previousHidden = hiddenRules(this.data.groups);
     this.data.groups = normalizedGroups;
+    if (previousHidden !== hiddenRules(normalizedGroups)) {
+      const views = this.isLocalGraphFrontier
+        ? [this.getScopeView()]
+        : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
+      for (const view of views) view?.markQueryRuleVisibilityDirty?.();
+    }
     if (previousPull !== pullRules(normalizedGroups)) {
       const views = this.isLocalGraphFrontier
         ? [this.getScopeView()]

@@ -28,6 +28,9 @@ const settings = Object.fromEntries(
 );
 Object.assign(settings, visuals, {
   attachment_node_color: color.nullable(),
+  edge_color: color.nullable(),
+  hover_highlight_color: color.nullable(),
+  edge_opacity: number(0, 1),
   excluded_attachment_extensions: z.array(z.string().max(4096)).max(4096),
   grid_step: number(5, 50).multipleOf(5),
   grid_line_width: number(0.1, 1).multipleOf(0.1),
@@ -49,6 +52,7 @@ const rule = z
     id: id.optional(),
     query: z.string().min(1).max(4096).optional(),
     enabled: z.boolean().optional(),
+    hidden: z.boolean().optional(),
     color: color.optional(),
     settings: patch({
       ...Object.fromEntries(Object.entries(visuals).filter(([key]) => key !== 'node_color')),

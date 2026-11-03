@@ -3,6 +3,42 @@ const { DARK_THEME, getLabelAppearance } = require('./theme');
 const { getNodeVisualSetting, getEdgeVisualSetting, getNodeColor } = require('./node-visuals');
 const EMPTY_LISTS = [];
 const { nodeListContains } = require('./node-lists');
+const {
+  getFocusEdgeWidth,
+  getFocusEdgeColor,
+  getFocusEdgeAlpha,
+  quantizeFocusProgress,
+  getNodeScreenRadius,
+  getEdgeCssWidth,
+  setCrispStroke,
+  getCrispCoordinate,
+} = require('./render-metrics');
+
+// Backing-store pixels per CSS pixel.
+function getBackingScale(view) {
+  return Number(view.devicePixelRatio) || 1;
+}
+
+// Custom hover highlight color, or null for the theme-derived default.
+function getHoverHighlightColor(view) {
+  const color = view.plugin.getSettings().hover_highlight_color;
+  return /^#[0-9a-f]{6}$/i.test(String(color || '')) ? color : null;
+}
+
+// Global edge appearance: theme color unless a valid custom color is set.
+function getEdgeAppearance(view) {
+  const settings = view.plugin.getSettings();
+  const theme = view.canvasTheme || DARK_THEME;
+  return {
+    color: /^#[0-9a-f]{6}$/i.test(settings.edge_color) ? settings.edge_color : theme.mutedText,
+    opacity: view.plugin.clampNumber(
+      settings.edge_opacity,
+      0,
+      1,
+      DEFAULT_DATA.settings.edge_opacity
+    ),
+  };
+}
 
 // Focus dimming helper: computes alpha of non-focused graph elements.
 function getHoverDimAlpha(plugin, focusProgress, nodeId) {
@@ -98,6 +134,7 @@ function renderFrame(view) {
   drawNodeAuras(view, ctx);
   drawEdges(view, ctx);
   drawNodes(view, ctx);
+  drawHiddenGridMarkers(view, ctx);
   drawSelectionBox(view, ctx);
 }
 
@@ -119,16 +156,15 @@ function getNodeLabelText(node) {
 
 // Shared node radius formula, including attachments.
 function getNodeRadius(view, node) {
-  const nodeScaleRaw = view.plugin.clampNumber(
+  const nodeScale = view.plugin.clampNumber(
     getNodeVisualSetting(view.plugin, node.id, 'node_size_scale'),
     0.1,
-    4,
+    2,
     DEFAULT_DATA.settings.node_size_scale
   );
-  // New node-size scale: 0.1 -> 1, max -> 40.
-  const nodeScale = nodeScaleRaw * 10;
-  const raw = (3 + Math.log2(node.degree + 2) * 1.4) * (nodeScale / 4);
-  return Math.max(0.2, Math.min(4 * Math.max(1, nodeScaleRaw / 2), raw / 5));
+  // Radius grows with degree and is proportional to Node size, without a ceiling,
+  // so relative node sizes survive any scale. Uncapped radii match earlier versions.
+  return Math.max(0.2, (3 + Math.log2(node.degree + 2) * 1.4) * nodeScale * 0.5);
 }
 
 // Convert slider steps into zoom threshold for label visibility.
@@ -287,10 +323,15 @@ function drawGrid(view, ctx) {
   const endY = Math.ceil(bottomWorld / step) * step;
 
   const theme = view.canvasTheme || DARK_THEME;
+  const backingScale = getBackingScale(view);
   ctx.save();
-  ctx.globalAlpha = theme.gridOpacity;
   ctx.strokeStyle = theme.grid;
-  ctx.lineWidth = view.plugin.clampGridLineWidth(view.plugin.getSettings().grid_line_width);
+  setCrispStroke(
+    ctx,
+    view.plugin.clampGridLineWidth(view.plugin.getSettings().grid_line_width),
+    theme.gridOpacity,
+    backingScale
+  );
 
   // Chromium can drop subpixel lines when a crossed grid shares one path.
   const strokeSeparately = ctx.lineWidth < 1;
@@ -298,7 +339,7 @@ function drawGrid(view, ctx) {
   for (let x = startX; x <= endX; x += step) {
     if (strokeSeparately) ctx.beginPath();
     const sx = view.worldToScreen(x, 0).x;
-    const crispX = Math.round(sx) + 0.5;
+    const crispX = getCrispCoordinate(sx, backingScale, ctx.lineWidth);
     ctx.moveTo(crispX, 0);
     ctx.lineTo(crispX, view.viewHeight);
     if (strokeSeparately) ctx.stroke();
@@ -306,12 +347,102 @@ function drawGrid(view, ctx) {
   for (let y = startY; y <= endY; y += step) {
     if (strokeSeparately) ctx.beginPath();
     const sy = view.worldToScreen(0, y).y;
-    const crispY = Math.round(sy) + 0.5;
+    const crispY = getCrispCoordinate(sy, backingScale, ctx.lineWidth);
     ctx.moveTo(0, crispY);
     ctx.lineTo(view.viewWidth, crispY);
     if (strokeSeparately) ctx.stroke();
   }
   if (!strokeSeparately) ctx.stroke();
+
+  ctx.restore();
+}
+
+// While a grid-pinned node is dragged over a cell held by a hidden pinned node, show a
+// faint dashed ring and the holder's name; release still snaps to the nearest free cell.
+let canvasFontFamily = null;
+function getCanvasFontFamily() {
+  if (canvasFontFamily) return canvasFontFamily;
+  try {
+    const family = globalThis.getComputedStyle?.(globalThis.document?.body).fontFamily;
+    canvasFontFamily = family && !family.includes('var(') ? family : 'sans-serif';
+  } catch {
+    canvasFontFamily = 'sans-serif';
+  }
+  return canvasFontFamily;
+}
+
+function drawHiddenGridMarkers(view, ctx) {
+  const holders = view.getDragHiddenGridHolders?.() || [];
+  if (!holders.length) return;
+  const step = view.plugin.clampGridStep(view.plugin.getSettings().grid_step);
+  const theme = view.canvasTheme || DARK_THEME;
+  const zoom = Math.max(view.camera.zoom, 0.0001);
+  const backingScale = getBackingScale(view);
+  const screenRadius = (node) => (node ? getNodeScreenRadius(getNodeRadius(view, node), zoom) : 0);
+  const dragged = [
+    ...(view.dragSelectionOffsets instanceof Map && view.dragSelectionOffsets.size > 0
+      ? view.dragSelectionOffsets.keys()
+      : view.dragNodeId
+        ? [view.dragNodeId]
+        : []),
+  ]
+    .map((id) => view.nodeById.get(id))
+    .filter(Boolean);
+  // A hidden holder has no visible label of its own, so it follows the global Text size
+  // and zoom exactly like an emphasized node label; per-node overrides would be surprising.
+  const baseSize =
+    view.plugin.clampNumber(
+      view.plugin.getSettings().label_font_size,
+      5,
+      20,
+      DEFAULT_DATA.settings.label_font_size
+    ) / 5;
+  const fontSize = getLabelAppearance(
+    zoom,
+    0,
+    baseSize,
+    1,
+    true,
+    (10 * baseSize) / (DEFAULT_DATA.settings.label_font_size / 5)
+  ).fontSize;
+  const padding = Math.max(2, fontSize * 0.25);
+  ctx.save();
+  // Canvas fonts cannot resolve CSS variables.
+  ctx.font = `${fontSize}px ${getCanvasFontFamily()}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  for (const { nodeId, gx, gy } of holders) {
+    const point = view.worldToScreen(gx * step, gy * step);
+    const markerRadius = Math.max(4, screenRadius(view.nodeById.get(nodeId)));
+    // The label sits above both the hidden marker and any dragged node in this cell.
+    let clearance = markerRadius;
+    for (const node of dragged) {
+      if (Math.round(node.x / step) !== gx || Math.round(node.y / step) !== gy) continue;
+      clearance = Math.max(clearance, screenRadius(node));
+    }
+    ctx.strokeStyle = theme.mutedText;
+    setCrispStroke(ctx, 1, 0.55, backingScale);
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, markerRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const text = `Hidden: ${view.nodeById.get(nodeId)?.label || nodeId}`;
+    const textY = point.y - clearance - 6 - padding;
+    const textWidth = ctx.measureText ? ctx.measureText(text).width : text.length * fontSize * 0.55;
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = theme.background;
+    ctx.fillRect?.(
+      point.x - textWidth / 2 - padding,
+      textY - fontSize - padding,
+      textWidth + padding * 2,
+      fontSize + padding * 2
+    );
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = theme.mutedText;
+    ctx.fillText(text, point.x, textY);
+  }
   ctx.restore();
 }
 
@@ -351,24 +482,23 @@ function drawEdges(view, ctx) {
   const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1) : 1;
   const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress);
   const normalEdgeAlpha = hasSearchHighlight ? searchDimAlpha : hasAnyFocus ? focusDimAlpha : 1;
-  let hasNormalEdgeBatch = false;
-  let normalEdgeBatchWidth;
-
-  const beginNormalEdgeBatch = (edgeScale) => {
-    if (hasNormalEdgeBatch && normalEdgeBatchWidth !== edgeScale) flushNormalEdgeBatch();
-    if (hasNormalEdgeBatch) return;
-    normalEdgeBatchWidth = edgeScale;
-    ctx.globalAlpha = normalEdgeAlpha;
-    ctx.strokeStyle = (view.canvasTheme || DARK_THEME).mutedText;
-    ctx.lineWidth = edgeScale;
-    ctx.beginPath();
-    hasNormalEdgeBatch = true;
-  };
-
-  const flushNormalEdgeBatch = () => {
-    if (!hasNormalEdgeBatch) return;
-    ctx.stroke();
-    hasNormalEdgeBatch = false;
+  const devicePixelRatio = Number(view.devicePixelRatio) || 1;
+  const backingScale = getBackingScale(view);
+  const edgeAppearance = getEdgeAppearance(view);
+  // Highlighted edges move towards the theme text color for contrast.
+  const focusContrastColor = (view.canvasTheme || DARK_THEME).text;
+  const hoverHighlightColor = getHoverHighlightColor(view);
+  // Edges sharing one appearance are stroked as a single path, so translucent edges
+  // never stack where they cross or overlap. Layers keep painted and focused edges on top.
+  const edgeBuckets = new Map();
+  const addEdgeSegment = (layer, color, physicalWidth, alpha, x1, y1, x2, y2) => {
+    const key = `${layer}|${color}|${physicalWidth}|${alpha}`;
+    let bucket = edgeBuckets.get(key);
+    if (!bucket) {
+      bucket = { layer, color, physicalWidth, alpha, points: [] };
+      edgeBuckets.set(key, bucket);
+    }
+    bucket.points.push(x1, y1, x2, y2);
   };
 
   for (const edge of view.edges) {
@@ -405,12 +535,6 @@ function drawEdges(view, ctx) {
       edge.target,
       'edge_width_scale'
     );
-    const paintedEdgeScale = getEdgeVisualSetting(
-      view.plugin,
-      edge.source,
-      edge.target,
-      'painted_edge_width'
-    );
 
     const isHoverFocusEdge =
       !!hoverFocusNodeId && (edge.source === hoverFocusNodeId || edge.target === hoverFocusNodeId);
@@ -431,38 +555,60 @@ function drawEdges(view, ctx) {
     );
 
     if (!paintedColor && focusEdgeProgress <= 0.001) {
-      beginNormalEdgeBatch(edgeScale);
-      ctx.moveTo(sourcePointX, sourcePointY);
-      ctx.lineTo(targetPointX, targetPointY);
+      addEdgeSegment(
+        0,
+        edgeAppearance.color,
+        edgeScale,
+        normalEdgeAlpha * edgeAppearance.opacity,
+        sourcePointX,
+        sourcePointY,
+        targetPointX,
+        targetPointY
+      );
       continue;
     }
 
-    flushNormalEdgeBatch();
-    const edgeAlpha = hasSearchHighlight
-      ? searchDimAlpha + (1 - searchDimAlpha) * focusEdgeProgress
-      : hasAnyFocus
-        ? focusDimAlpha + (1 - focusDimAlpha) * focusEdgeProgress
-        : 1;
-    ctx.globalAlpha = edgeAlpha;
+    // Quantized progress keeps the number of distinct edge buckets small during animation.
+    const edgeProgress = quantizeFocusProgress(focusEdgeProgress);
+    const physicalWidth = getFocusEdgeWidth(edgeScale, edgeProgress);
+    const color = getFocusEdgeColor(
+      paintedColor && /^#[0-9a-f]{6}$/i.test(paintedColor) ? paintedColor : edgeAppearance.color,
+      focusContrastColor,
+      edgeProgress,
+      hoverHighlightColor
+    );
+    // Painted edges stay softer at rest; highlighted edges of any kind become fully opaque.
+    const restAlpha = normalEdgeAlpha * (paintedColor ? 0.65 : 1) * edgeAppearance.opacity;
+    const alpha = getFocusEdgeAlpha(restAlpha, edgeProgress);
+    addEdgeSegment(
+      edgeProgress > 0 ? 2 : 1,
+      color,
+      physicalWidth,
+      alpha,
+      sourcePointX,
+      sourcePointY,
+      targetPointX,
+      targetPointY
+    );
+  }
 
-    if (paintedColor) {
-      const alpha = 0.65 + (0.95 - 0.65) * focusEdgeProgress;
-      ctx.strokeStyle = hexToRgba(paintedColor, alpha);
-      ctx.lineWidth = paintedEdgeScale + (2 - paintedEdgeScale) * focusEdgeProgress;
-    } else {
-      ctx.strokeStyle =
-        focusEdgeProgress > 0.5
-          ? (view.canvasTheme || DARK_THEME).selection
-          : (view.canvasTheme || DARK_THEME).mutedText;
-      ctx.lineWidth = edgeScale + (2 - edgeScale) * focusEdgeProgress;
-    }
-
+  const buckets = [...edgeBuckets.values()].sort((a, b) => a.layer - b.layer);
+  for (const bucket of buckets) {
+    ctx.strokeStyle = bucket.color;
+    setCrispStroke(
+      ctx,
+      getEdgeCssWidth(bucket.physicalWidth, devicePixelRatio),
+      bucket.alpha,
+      backingScale
+    );
     ctx.beginPath();
-    ctx.moveTo(sourcePointX, sourcePointY);
-    ctx.lineTo(targetPointX, targetPointY);
+    const points = bucket.points;
+    for (let i = 0; i < points.length; i += 4) {
+      ctx.moveTo(points[i], points[i + 1]);
+      ctx.lineTo(points[i + 2], points[i + 3]);
+    }
     ctx.stroke();
   }
-  flushNormalEdgeBatch();
   ctx.globalAlpha = 1;
 }
 
@@ -510,6 +656,7 @@ function drawNodes(view, ctx) {
   const screenCenterX = view.viewWidth / 2;
   const screenCenterY = view.viewHeight / 2;
   const theme = view.canvasTheme || DARK_THEME;
+  const hoverRingColor = getHoverHighlightColor(view);
   const nowMs = Date.now();
   const visibleNodeIds = view.getFilterVisibleNodeIds();
   const hasFilter = visibleNodeIds instanceof Set;
@@ -544,6 +691,7 @@ function drawNodes(view, ctx) {
     }
   }
   const selectedNodeIds = view.selectedNodeIds instanceof Set ? view.selectedNodeIds : null;
+  const backingScale = getBackingScale(view);
 
   for (const node of view.nodes) {
     if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
@@ -553,7 +701,7 @@ function drawNodes(view, ctx) {
     const pointX = (node.x - view.camera.x) * zoom + screenCenterX;
     const pointY = (node.y - view.camera.y) * zoom + screenCenterY;
 
-    const radius = Math.max(0.6, getNodeRadius(view, node) * view.camera.zoom);
+    const radius = getNodeScreenRadius(getNodeRadius(view, node), zoom);
 
     const isFocusNode = hasFocus && node.id === focusNodeId;
     const isHoverFocusNode = hasHoverFocus && node.id === hoverFocusNodeId;
@@ -620,25 +768,29 @@ function drawNodes(view, ctx) {
     ctx.arc(pointX, pointY, radius + (node.meta?.subgraph ? 2 : 0), 0, Math.PI * 2);
     if (node.meta?.subgraph) {
       ctx.strokeStyle = fillColor;
-      ctx.lineWidth = 3;
+      setCrispStroke(ctx, 3, nodeAlpha, backingScale);
       ctx.stroke();
     } else ctx.fill();
 
     if (node.meta?.darkEnergy) {
       ctx.strokeStyle = fillColor;
-      ctx.lineWidth = 1.5;
+      setCrispStroke(ctx, 1.5, nodeAlpha, backingScale);
       ctx.beginPath();
       ctx.arc(pointX, pointY, radius + 4, 0, Math.PI * 2);
       ctx.stroke();
     }
     if (isHover || isSelectedNode) {
-      const hoverStrokeAlpha = Math.max(0.12, 0.95 * hoverVisualProgress);
+      const hoverStrokeAlpha = Math.max(0.12, hoverVisualProgress);
       const selectedStrokeAlpha = isSelectedNode ? 0.95 : 0;
       const hoverLineWidth = 1 + hoverVisualProgress;
       const selectedLineWidth = isSelectedNode ? 1.4 : 0;
-      ctx.globalAlpha = Math.max(hoverStrokeAlpha, selectedStrokeAlpha);
-      ctx.strokeStyle = theme.selection;
-      ctx.lineWidth = Math.max(hoverLineWidth, selectedLineWidth);
+      ctx.strokeStyle = isHover && hoverRingColor ? hoverRingColor : theme.selection;
+      setCrispStroke(
+        ctx,
+        Math.max(hoverLineWidth, selectedLineWidth),
+        Math.max(hoverStrokeAlpha, selectedStrokeAlpha),
+        backingScale
+      );
       ctx.beginPath();
       ctx.arc(pointX, pointY, radius + (node.meta?.subgraph ? 4 : 2), 0, Math.PI * 2);
       ctx.stroke();
@@ -682,11 +834,10 @@ function drawSelectionBox(view, ctx) {
   const theme = view.canvasTheme || DARK_THEME;
   ctx.fillStyle = theme.selection;
   ctx.strokeStyle = theme.selection;
-  ctx.lineWidth = 1;
   ctx.setLineDash([5, 3]);
   ctx.globalAlpha = 0.12;
   ctx.fillRect(left, top, width, height);
-  ctx.globalAlpha = 0.9;
+  setCrispStroke(ctx, 1, 0.9, getBackingScale(view));
   ctx.strokeRect(left, top, width, height);
   ctx.restore();
 }
@@ -698,6 +849,8 @@ module.exports = {
   hexToRgba,
   getNodeLabelText,
   getNodeRadius,
+  getBackingScale,
+  getEdgeAppearance,
   getLabelZoomThreshold,
   getLabelFontSize,
   getLabelMinimumSize,
@@ -705,6 +858,7 @@ module.exports = {
   getGroupStyleMap,
   nodeMatchesParsedGroup,
   drawGrid,
+  drawHiddenGridMarkers,
   drawEdges,
   drawNodes,
   drawNodeAuras,

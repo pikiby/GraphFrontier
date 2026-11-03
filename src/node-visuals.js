@@ -1,19 +1,12 @@
 const { DEFAULT_DATA } = require('./constants');
 
 const NODE_VISUAL_SETTINGS = [
-  { key: 'node_size_scale', label: 'Node size', min: 0.1, max: 4, step: 0.01 },
+  { key: 'node_size_scale', label: 'Node size', min: 0.1, max: 2, step: 0.005 },
   { key: 'node_color', label: 'Node color', type: 'color' },
   { key: 'aura_radius', label: 'Color aura', min: 0, max: 5000, step: 10 },
   { key: 'aura_brightness', label: 'Aura brightness', min: 0, max: 50, step: 1 },
-  { edges: true, key: 'edge_width_scale', label: 'Edge width', min: 0.01, max: 1, step: 0.01 },
-  {
-    edges: true,
-    key: 'painted_edge_width',
-    label: 'Painted edge width',
-    min: 0.01,
-    max: 1,
-    step: 0.01,
-  },
+  // Edge widths are physical screen pixels, like Obsidian's link thickness.
+  { edges: true, key: 'edge_width_scale', label: 'Edge width', min: 0.1, max: 5, step: 0.01 },
   { key: 'label_zoom_steps', label: 'Text zoom', min: 1, max: 40, step: 1 },
   { key: 'label_font_size', label: 'Text size', min: 5, max: 20, step: 1 },
   { key: 'hover_dim_strength', label: 'Hover dimming', min: 0, max: 100, step: 1 },

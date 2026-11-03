@@ -646,3 +646,74 @@ test('a stale edge picker cannot apply after its original layout becomes current
   f.input.events.change();
   assert.deepEqual(f.applied, []);
 });
+
+test('group swatch button shows the group color and opens its settings', (t) => {
+  const { fixture } = require('./helpers/obsidian.cjs');
+  const { getContrastIconColor } = loadSource('view.js');
+  const { view, plugin } = fixture(t, {
+    groups: [{ id: 'g', query: 'name:alpha', color: '#f5e0a0' }],
+  });
+  const dom = attachmentPopoverFixture();
+  view.contentEl.ownerDocument = dom.doc;
+  view.contentEl.win = dom.win;
+  view.registerDomEvent = (el, name, handler) => el.addEventListener(name, handler);
+  let opened = 0;
+  view.showMenuAtPointer = () => (opened += 1);
+  view.buildGroupEditorSection(dom.element('div'));
+  const row = view.groupEditorRows[0];
+  assert.equal(row.colorInput.hidden, true, 'separate color input is not shown');
+  assert.equal(row.settingsBtn.icon, 'settings-2');
+  assert.equal(row.settingsBtn.attributes['aria-label'], 'Group color and settings');
+  assert.equal(row.settingsBtn.style.backgroundColor, '#f5e0a0');
+  assert.equal(row.settingsBtn.style.color, '#000000', 'dark icon over a light fill');
+  row.settingsBtn.fire('click', { preventDefault() {}, stopPropagation() {} });
+  assert.equal(opened, 1);
+  view.groupVisualMenuTarget(row).set('node_color', '#102030');
+  assert.equal(plugin.data.groups[0].color, '#102030');
+  assert.equal(row.settingsBtn.style.backgroundColor, '#102030');
+  assert.equal(row.settingsBtn.style.color, '#ffffff', 'light icon over a dark fill');
+  assert.equal(getContrastIconColor('#ffffff'), '#000000');
+  assert.equal(getContrastIconColor('#000000'), '#ffffff');
+});
+
+test('group eye button hides groups, and Alt-click solos and restores the previous set', (t) => {
+  const { fixture } = require('./helpers/obsidian.cjs');
+  const { view, plugin } = fixture(t, {
+    groups: [
+      { id: 'a', query: 'name:alpha', color: '#f5e0a0' },
+      { id: 'b', query: 'name:beta', color: '#102030', hidden: true },
+      { id: 'c', query: 'name:gamma', color: '#304050' },
+    ],
+  });
+  const dom = attachmentPopoverFixture();
+  view.contentEl.ownerDocument = dom.doc;
+  view.contentEl.win = dom.win;
+  view.registerDomEvent = (el, name, handler) => el.addEventListener(name, handler);
+  view.buildGroupEditorSection(dom.element('div'));
+  const [a, b, c] = view.groupEditorRows;
+  const hidden = () => plugin.data.groups.map((group) => group.hidden === true);
+  const click = (row, altKey = false) =>
+    row.visibilityBtn.fire('click', { altKey, preventDefault() {}, stopPropagation() {} });
+
+  assert.equal(a.visibilityBtn.icon, 'eye');
+  assert.equal(b.visibilityBtn.icon, 'eye-off');
+  assert.equal(b.visibilityBtn.attributes['aria-label'], 'Show group nodes');
+  assert.equal(a.visibilityBtn.attributes['aria-label'], 'Hide group nodes');
+  const classes = {};
+  b.row.toggleClass = (name, on) => (classes[name] = on);
+  view.refreshGroupVisibilityButton(b);
+  assert.equal(classes['is-hidden'], true, 'hidden row is dimmed');
+
+  click(a);
+  assert.deepEqual(hidden(), [true, true, false]);
+  assert.equal(a.visibilityBtn.icon, 'eye-off');
+  click(a);
+  assert.deepEqual(hidden(), [false, true, false]);
+
+  click(c, true);
+  assert.deepEqual(hidden(), [true, true, false], 'solo keeps only this group visible');
+  click(b, true);
+  assert.deepEqual(hidden(), [true, false, true], 'switching solo target keeps the original set');
+  click(b, true);
+  assert.deepEqual(hidden(), [false, true, false], 'second Alt-click restores the original set');
+});

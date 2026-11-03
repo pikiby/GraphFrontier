@@ -70,7 +70,7 @@ test('normalization accepts only finite visual parameters, retaining legacy text
     node_label_sizes: { a: 16 },
   });
   assert.deepEqual(plugin.data.node_visual_settings, {
-    a: { node_size_scale: 4, hover_dim_strength: 0 },
+    a: { node_size_scale: 2, hover_dim_strength: 0 },
   });
   assert.equal(getNodeVisualSetting(plugin, 'a', 'label_font_size'), 16);
 });
@@ -114,16 +114,24 @@ test('edge widths prefer explicit endpoint overrides and batch differently sized
     moveTo() {},
     lineTo() {},
     stroke() {
-      widths.push(this.lineWidth);
+      widths.push([this.lineWidth, this.globalAlpha]);
     },
   };
+  // Sub-pixel widths are drawn one backing pixel wide; opacity conveys the thinness,
+  // so each width still needs its own batch.
   render.drawEdges(view, ctx);
-  assert.deepEqual(widths, [0.5, 0.8]);
+  assert.deepEqual(widths, [
+    [1, 0.5],
+    [1, 0.8],
+  ]);
+  // Painted edges keep the edge width and are layered above regular edges.
   plugin.data.painted_edge_colors.a = '#112233';
-  plugin.setNodeVisualSetting('a', 'painted_edge_width', 0.25);
   widths.length = 0;
   render.drawEdges(view, ctx);
-  assert.deepEqual(widths, [0.25, 0.8]);
+  assert.equal(widths.length, 2);
+  assert.deepEqual(widths[0], [1, 0.8]);
+  assert.equal(widths[1][0], 1);
+  assert(Math.abs(widths[1][1] - 0.5 * 0.65) < 1e-12);
 });
 
 test('one reset clears all visual controls, identical for notes and attachments', (t) => {
@@ -257,13 +265,13 @@ test('base color, groups and individual color have explicit priority; invalid co
   }
 });
 
-test('size supports four and gravity menus omit inapplicable controls', (t) => {
-  const { plugin, view, app } = fixture(t, { settings: { node_size_scale: 4 } });
-  assert.equal(plugin.getSettings().node_size_scale, 4);
+test('size supports two and gravity menus omit inapplicable controls', (t) => {
+  const { plugin, view, app } = fixture(t, { settings: { node_size_scale: 2 } });
+  assert.equal(plugin.getSettings().node_size_scale, 2);
   const node = { id: 'a', x: 0, y: 0, degree: 100, meta: { darkEnergy: true } };
-  plugin.setNodeVisualSetting('a', 'node_size_scale', 2);
+  plugin.setNodeVisualSetting('a', 'node_size_scale', 1);
   const before = render.getNodeRadius(view, node);
-  plugin.setNodeVisualSetting('a', 'node_size_scale', 4);
+  plugin.setNodeVisualSetting('a', 'node_size_scale', 2);
   assert.equal(render.getNodeRadius(view, node), before * 2);
   app.vault.getAbstractFileByPath = () => null;
   const menu = buildNodeContextMenu(view, node, 0, 0);
@@ -271,13 +279,7 @@ test('size supports four and gravity menus omit inapplicable controls', (t) => {
   const titles = menu.items
     .find((item) => item.title === 'Visual settings')
     .submenu.items.map((item) => item.title);
-  for (const title of [
-    'Strong pull',
-    'Paint edges',
-    'Edge width',
-    'Painted edge width',
-    'Attachment size',
-  ])
+  for (const title of ['Strong pull', 'Paint edges', 'Edge width', 'Attachment size'])
     assert(!titles.includes(title));
   for (const title of ['Node color', 'Color aura', 'Reset visual settings'])
     assert(titles.includes(title));

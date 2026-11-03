@@ -53,7 +53,8 @@ Like attraction, it respects pins and active dragging, and is saved
 with the layout. Gravity centers do not repel each other.
 Pinned, orbit-pinned and actively dragged nodes are not pulled. Attachments obey the same
 force rules as notes. Multiple centers combine their attraction. Centers stay visible
-when search or blacklist/whitelist hide notes, but hidden notes do not participate in physics.
+when search, blacklist/whitelist or hidden groups (the eye button in Groups) hide notes,
+but hidden notes do not participate in physics.
 
 Objects, rules, strength and positions belong to the active layout and follow its existing
 Save, Load and autosave behavior. They remain stationary unless moved manually.
@@ -124,9 +125,9 @@ Flow:
 
 ## Right-Click Context Menu On Node
 
-**Visual settings** provides per-node sliders for node size, edge width, painted edge width,
+**Visual settings** provides per-node sliders for node size, edge width,
 text zoom, text size and hover dimming. Notes and attachments use the same size controls.
-Node size supports up to x4 in both menus. **Text zoom** supports 1-40 steps in both menus. **Node color** sets the global base color or
+Node size supports 0.1-2 in both menus. **Text zoom** supports 1-40 steps in both menus. **Node color** sets the global base color or
 an individual override; individual color takes priority over Groups, then the global base.
 **Color aura** is available only in individual settings: 0 disables it (the default),
 and its 0-5000 scale corresponds to a radius of 0-500 graph units.
@@ -137,7 +138,8 @@ Each value inherits the main panel setting until changed; one **Reset visual set
 action restores all visual inheritance and clears this node's edge painting.
 Gravity nodes omit edge settings, edge painting and Strong pull.
 Hover dimming controls how much this node fades when another node is focused. Edge widths
-apply to incident edges; if both endpoints override a width, the larger override wins.
+are physical screen pixels (0.1-5) and apply to incident edges; if both endpoints override a
+width, the larger override wins.
 Visual changes do not restart physics. Overrides follow layout Save, Load and autosave,
 and are included in static HTML export. Grid, graph-wide visibility and physics settings
 are not individual visual overrides.
@@ -169,7 +171,11 @@ as **Unpin · 3 of 5 nodes**. Exact/grid pinning and unpinning support selection
 exact pins and already-grid pins are skipped. Grid placement reserves unique cells,
 excludes batch targets' old pins, preserves unchanged grid pins and protects outsiders.
 Grid occupancy ignores stale pins for nodes absent from the current graph or outside
-the current graph scope, so they do not block available cells.
+the current graph scope, so they do not block available cells. Pinned nodes hidden by
+blacklist, a hidden group or a filter keep their cells. Dragging a grid-pinned node over
+such a cell shows a faint dashed ring with **Hidden: <name>**, with or without the visible
+grid; on release the node takes the nearest free cell and a notice names the hidden holder
+(API pin and move results return a `GRID_CELL_HELD_BY_HIDDEN_NODE` warning instead).
 
 Basic **Visual settings** and reset apply to eligible selected nodes. Each control shows
 its eligible count; mixed values are marked **Mixed**, including colors, without writing

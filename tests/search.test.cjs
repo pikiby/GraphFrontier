@@ -142,9 +142,10 @@ test('Find selects only matches; hover highlights neighbors and links in both mo
   assert.equal(links.length, 2, 'only matching files retain selection outlines');
   links.length = 0;
   render.drawEdges(view, ctx);
-  assert.equal(links[0].alpha, 1);
-  assert.equal(links[1].alpha, 1);
-  assert(links[2].alpha < 1);
+  // Edges are stroked once per appearance, highlighted ones last.
+  assert.equal(links.length, 2);
+  assert(links[0].alpha < 1, 'unrelated link stays dim');
+  assert.equal(links[1].alpha, 1, 'both match links share one highlighted stroke');
   plugin.data.settings.show_search_connections = false;
   alphas.length = 0;
   render.drawNodes(view, ctx);
@@ -163,9 +164,11 @@ test('Find selects only matches; hover highlights neighbors and links in both mo
     assert(alphas[5] < 1, `${mode}: unrelated node stays dim`);
     links.length = 0;
     render.drawEdges(view, ctx);
-    assert.equal(links[0].alpha, 1, `${mode}: hovered node's link`);
-    assert.equal(links[0].width, 2);
-    assert(links.slice(1).every((link) => link.alpha < 1));
+    const hovered = links.at(-1);
+    assert.equal(hovered.alpha, 1, `${mode}: hovered node's link`);
+    // Highlight grows relative to the base width: 0.34 + 2 physical pixels.
+    assert.equal(hovered.width, 1.34);
+    assert(links.slice(0, -1).every((link) => link.alpha < 1));
   }
 });
 
