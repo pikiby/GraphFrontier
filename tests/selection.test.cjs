@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { element, fixture } = require('./helpers/obsidian.cjs');
+const { element, fixture, loadSource } = require('./helpers/obsidian.cjs');
 
 function selectionFixture(t, settings = {}) {
   const f = fixture(t, { settings });
@@ -161,14 +161,21 @@ test('quick pick None leaves ordinary opening intact', (t) => {
   assert.equal(view.searchInputValue, 'name:');
 });
 
-test('quick pick overrides preview on configured Ctrl and restarts Filter layout', (t) => {
-  const { view, event } = selectionFixture(t, { quick_pick_modifier: 'ctrl' });
+test('quick pick overrides preview on Ctrl and defers Filter wake to the subset check', (t) => {
+  const { view, event } = selectionFixture(t, { quick_pick_modifier: 'ctrl', hide_orphans: false });
+  const { resetPhysicsVisibilityBaseline, wakeOnPhysicsVisibilityChange } =
+    loadSource('physics.js');
   view.searchMode = 'filter';
   view.nodes[0].label = 'Alpha';
   view.layoutPaused = true;
+  resetPhysicsVisibilityBaseline(view);
+  const kick = t.mock.method(view, 'kickLayoutSearch');
   t.mock.method(view, 'toggleQuickPreview', () => assert.fail('Search has priority'));
   view.onMouseDown(event(10, 10, { ctrlKey: true }));
   assert.equal(view.searchInputValue, 'name:Alpha');
+  assert.equal(kick.mock.callCount(), 0);
+  assert.equal(view.layoutPaused, true);
+  assert.equal(wakeOnPhysicsVisibilityChange(view), true);
   assert.equal(view.layoutPaused, false);
 });
 

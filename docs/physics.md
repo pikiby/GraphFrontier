@@ -42,6 +42,7 @@ Ordinary Damping remains active while nodes move toward equilibrium.
 - A node sleeps after eight consecutive frames with speed and net acceleration below 0.02.
 - During active simulation, a sleeping node wakes at speed or acceleration of 0.04 or higher.
 - The higher wake threshold suppresses small oscillations near equilibrium.
+- Changing the physics-visible subset preserves surviving nodes' sleep. Changed forces can wake affected neighbors; returning Exclude nodes wake explicitly. Pure Hide does not wake physics.
 - Physics pauses once all movable nodes are asleep and no nodes are being dragged.
 - Layout-changing actions clear sleep state and restart simulation.
 - Competing forces can still prevent convergence; a fixed settling time is not guaranteed.

@@ -956,7 +956,7 @@ test('grid cells held by hidden pinned nodes are reported, not silently taken', 
 
 test('changing the physics subset wakes a settled layout once', (t) => {
   const f = setup(t);
-  const { wakeOnPhysicsVisibilityChange } = require('../src/physics');
+  const { wakeOnPhysicsVisibilityChange } = loadSource('physics.js');
   for (let i = 0; i < 5000 && !f.view.layoutPaused; i++) f.view.stepSimulation();
   assert.equal(f.view.layoutPaused, true, 'settled');
   assert.equal(wakeOnPhysicsVisibilityChange(f.view), false, 'first call only records');
@@ -995,6 +995,39 @@ test('changing the physics subset wakes a settled layout once', (t) => {
   f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#445566' }]);
   assert.equal(wakeOnPhysicsVisibilityChange(f.view), false, 'visual edits do not wake');
   assert.equal(f.view.layoutPaused, true);
+});
+
+test('filter UI and API defer subset wake without clearing sleepers, but force settings still kick', (t) => {
+  const f = setup(t);
+  const { wakeOnPhysicsVisibilityChange, resetPhysicsVisibilityBaseline } =
+    loadSource('physics.js');
+  const kick = t.mock.method(f.view, 'kickLayoutSearch');
+  resetPhysicsVisibilityBaseline(f.view);
+  f.view.layoutPaused = true;
+  f.api.setSearch({ ...f.ref(), query: 'tag:keep', mode: 'filter' });
+  assert.equal(kick.mock.callCount(), 0);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.api.setSearch({ ...f.ref(), query: '', mode: 'find' });
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.api.setVisibleNodes({ ...f.ref(), nodeIds: ['alpha.md', 'beta.md'] });
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.api.setVisibleNodes({ ...f.ref(), nodeIds: null });
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#112233', hidden: true }]);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.api.updateSettings({ ...f.ref(), settings: { group_hide_mode: 'hide' } });
+  assert.equal(kick.mock.callCount(), 0, 'API mode switch does not full-kick');
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true, 'Exclude node returns');
+  f.view.layoutPaused = true;
+  f.plugin.updateGroups([{ id: 'g', query: 'name:alpha', color: '#112233' }]);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), false);
+  assert.equal(f.view.layoutPaused, true, 'Hide eye keeps physics asleep');
+  f.view.searchMode = 'filter';
+  f.view.commitSearchSelectionFromInput('tag:keep');
+  assert.equal(kick.mock.callCount(), 0, 'UI commit does not full-kick');
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.api.updateSettings({ ...f.ref(), settings: { center_strength: 60, hide_orphans: false } });
+  assert(kick.mock.callCount() > 0, 'force changes still kick even with data-filter settings');
 });
 
 test('force multiplier edits wake physics', (t) => {

@@ -1,7 +1,12 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { DEFAULT_DATA } = require('../src/constants');
-const { kickLayoutSearch, stepSimulation } = require('../src/physics');
+const {
+  kickLayoutSearch,
+  stepSimulation,
+  wakeOnPhysicsVisibilityChange,
+  resetPhysicsVisibilityBaseline,
+} = require('../src/physics');
 const { loadReferencePhysics } = require('./helpers/repulsion-reference.cjs');
 const referencePhysics = loadReferencePhysics();
 
@@ -253,6 +258,151 @@ function fixture(t, options = {}) {
     },
   };
 }
+
+test('visibility preserves survivor hysteresis, wakes returning nodes, and keeps manual kicks global', (t) => {
+  const f = fixture(t, {
+    nodes: [{ id: 'survivor' }, { id: 'returning' }],
+    settings: { center_strength: 100, layout_autosave: false },
+  });
+  f.frames(8);
+  assert.equal(f.view.layoutPaused, true);
+  resetPhysicsVisibilityBaseline(f.view);
+  // Residual attraction between settle and wake thresholds, like the drag regression.
+  for (const node of f.view.nodes) node.x = 10;
+  let visible = new Set(['survivor']);
+  f.view.getPhysicsVisibleNodeIds = () => visible;
+  f.view.layoutEditVersion = 10;
+  f.view.pendingLayoutSleepRestore = {};
+  f.view.layoutStillFrames = 7;
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  assert.equal(f.view.layoutEditVersion, 11);
+  assert.equal(f.view.pendingLayoutSleepRestore, null);
+  assert.equal(f.view.layoutStillFrames, 0);
+  assert.equal(f.view.layoutAutosaveDirty, true);
+  assert.equal(captureLayoutSleep(f.view), null);
+  f.frames();
+  assert.equal(f.view.nodeById.get('survivor').x, 10, 'survivor keeps sleep threshold');
+  visible.add('returning');
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true, 'in-place addition detected');
+  f.frames();
+  assert(f.view.nodeById.get('returning').x < 10, 'returning node wakes below 0.04');
+  assert.equal(f.view.nodeById.get('survivor').x, 10);
+  visible = null;
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), false, 'Set(all) equals null');
+  visible = new Set(['returning', 'survivor']);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), false, 'null equals Set(all)');
+  visible.delete('returning');
+  visible.add('not-in-graph');
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true, 'same-size replacement detected');
+  kickLayoutSearch(f.view);
+  f.frames();
+  assert(f.view.nodeById.get('survivor').x < 10, 'manual kick clears all sleep');
+});
+
+test('exclude rebuilds sleeper forces and local degree/mass while distant sleepers stay still', (t) => {
+  const f = fixture(t, {
+    nodes: [
+      { id: 'near' },
+      { id: 'left', x: -100 },
+      { id: 'right', x: 100 },
+      { id: 'far', x: 20000 },
+    ],
+    edges: [
+      { source: 'near', target: 'left' },
+      { source: 'near', target: 'right' },
+    ],
+    pins: { left: { x: -100, y: 0 }, right: { x: 100, y: 0 } },
+    settings: { repel_strength: 2500, repel_radius: 400, layout_autosave: false },
+  });
+  f.frames(8);
+  assert.equal(f.view.layoutPaused, true);
+  resetPhysicsVisibilityBaseline(f.view);
+  let samples = 0;
+  setSleepForceProbe(({ sleepers }) => {
+    for (const { cached, full } of sleepers) {
+      samples++;
+      assert(Math.abs(cached[0] - full[0]) < 1e-10);
+      assert(Math.abs(cached[1] - full[1]) < 1e-10);
+    }
+  });
+  t.after(() => setSleepForceProbe(null));
+  f.view.getPhysicsVisibleNodeIds = () => new Set(['near', 'right', 'far']);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.frames();
+  const near = f.view.nodeById.get('near');
+  const retention = Math.pow(0.01, 1 / 60) * (1 - f.settings.damping * 0.95);
+  assert(Math.abs(near.vx - -0.25 * 7 * retention) < 1e-10, 'degree 1 uses mass 1');
+  assert.equal(f.view.nodeById.get('far').x, 20000);
+  assert.equal(f.view.nodeById.get('far').vx, 0);
+  assert.equal(f.view.nodeById.get('right').x, 100);
+  assert(samples > 0, 'cached forces checked against fresh sums');
+  const velocity = near.vx;
+  f.view.getPhysicsVisibleNodeIds = () => new Set(['near', 'far']);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.frames();
+  assert(
+    Math.abs(near.vx - velocity * retention) < 1e-10,
+    'new orphan has no removed-source forces'
+  );
+});
+
+test('empty physics subset pauses, autosaves after eight quiet ticks, and wakes on return', async (t) => {
+  const f = fixture(t, { settings: { center_strength: 100 } });
+  f.frames(8);
+  await Promise.resolve();
+  await Promise.resolve();
+  f.calls.length = 0;
+  f.advance(1001);
+  resetPhysicsVisibilityBaseline(f.view);
+  f.view.getPhysicsVisibleNodeIds = () => new Set();
+  f.view.nodeById.get('a').vx = 3;
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.frames();
+  assert.equal(f.view.layoutPaused, true);
+  assert.equal(f.view.nodeById.get('a').vx, 0);
+  assert.equal(f.view.layoutStillFrames, 1);
+  assert.equal(f.calls.length, 0);
+  f.frames(7);
+  assert.equal(f.calls.length, 1);
+  f.frames(10);
+  assert.equal(f.calls.length, 1);
+  f.view.nodeById.get('a').x = 10;
+  f.view.getPhysicsVisibleNodeIds = () => null;
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  assert.equal(f.view.layoutStillFrames, 0);
+  f.frames();
+  assert(f.view.nodeById.get('a').x < 10);
+});
+
+test('returning exact, grid and orbit pins retain constraints', (t) => {
+  const f = fixture(t, {
+    nodes: [
+      { id: 'anchor', x: 100 },
+      { id: 'grid', x: 200 },
+      { id: 'orbit', x: 130 },
+      { id: 'free' },
+    ],
+    pins: { anchor: { x: 100, y: 0 }, grid: { x: 200, y: 0, mode: 'grid' } },
+    orbitPins: { orbit: { anchor_id: 'anchor', radius: 30, angle: 0 } },
+    settings: { center_strength: 100, layout_autosave: false },
+  });
+  f.frames(8);
+  resetPhysicsVisibilityBaseline(f.view);
+  f.view.getPhysicsVisibleNodeIds = () => new Set(['free']);
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.frames();
+  f.view.getPhysicsVisibleNodeIds = () => null;
+  assert.equal(wakeOnPhysicsVisibilityChange(f.view), true);
+  f.frames();
+  for (const [id, x] of [
+    ['anchor', 100],
+    ['grid', 200],
+    ['orbit', 130],
+  ]) {
+    const node = f.view.nodeById.get(id);
+    assert.deepEqual([node.x, node.y, node.vx, node.vy], [x, 0, 0, 0]);
+  }
+});
 
 function repulsionFixture(t, kinds, pinnedId = null, mode = 'exact') {
   const nodes = [
