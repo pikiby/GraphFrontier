@@ -717,3 +717,53 @@ test('group eye button hides groups, and Alt-click solos and restores the previo
   click(b, true);
   assert.deepEqual(hidden(), [false, true, false], 'second Alt-click restores the original set');
 });
+
+test('groups section shows a Hide/Exclude toggle in place of its title', (t) => {
+  const { fixture } = require('./helpers/obsidian.cjs');
+  const { view, plugin } = fixture(t, {
+    groups: [{ id: 'a', query: 'name:alpha', color: '#f5e0a0', hidden: true }],
+  });
+  const dom = attachmentPopoverFixture();
+  view.contentEl.ownerDocument = dom.doc;
+  view.contentEl.win = dom.win;
+  view.registerDomEvent = (el, name, handler) => el.addEventListener(name, handler);
+  const section = dom.element('div');
+  view.buildGroupEditorSection(section);
+  assert.equal(
+    view.groupHideModeHideLabelEl.textContent ?? view.groupHideModeHideLabelEl.text,
+    'Hide'
+  );
+  assert.equal(
+    view.groupHideModeExcludeLabelEl.textContent ?? view.groupHideModeExcludeLabelEl.text,
+    'Exclude'
+  );
+  const texts = [];
+  const walk = (el) => {
+    if (el.text) texts.push(el.text);
+    for (const child of el.children || []) walk(child);
+  };
+  walk(section);
+  assert.ok(texts.includes('Filtering:'), 'caption precedes the toggle');
+  assert.match(
+    view.groupHideModeHideLabelEl.getAttribute?.('title') ??
+      view.groupHideModeHideLabelEl.attr?.title ??
+      '',
+    /keep their place/
+  );
+  assert.match(
+    view.groupHideModeExcludeLabelEl.getAttribute?.('title') ??
+      view.groupHideModeExcludeLabelEl.attr?.title ??
+      '',
+    /removed from drawing and physics/
+  );
+  const states = {};
+  view.groupHideModeToggleEl.toggleClass = (name, on) => (states[name] = on);
+  view.syncGroupHideModeToggleUi();
+  assert.equal(states['is-on'], true, 'Exclude is the default position');
+  view.groupHideModeToggleEl.fire('click');
+  assert.equal(plugin.getSettings().group_hide_mode, 'hide');
+  view.syncGroupHideModeToggleUi();
+  assert.equal(states['is-on'], false);
+  view.groupHideModeToggleEl.fire('click');
+  assert.equal(plugin.getSettings().group_hide_mode, 'exclude');
+});

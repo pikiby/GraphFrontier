@@ -172,6 +172,17 @@ Behavior:
 5. Alt-click the eye to solo a group: every other group is hidden. Alt-click the same group
    again to restore the previous hidden set; a plain click leaves solo mode. The previous
    set is remembered only until the view is reloaded.
+6. The **Filtering: Hide / Exclude** switch at the top of Groups chooses what hiding a group
+   means (hover either word for a short explanation). Any change to which nodes take part in
+   physics — the eye, solo, this switch, blacklist/whitelist or filters — wakes a settled
+   layout so it adapts immediately.
+   **Exclude** (default) is the behavior above. **Hide** only stops drawing the nodes and
+   their edges: they keep their place in physics, still push and pull their neighbours,
+   and reappear where they were. Hidden nodes cannot be hovered, clicked, box-selected or
+   found by search, and HTML export and the API leave them out in both modes. Grid cells
+   held by hidden pinned nodes stay occupied in both modes. The mode is saved in the
+   layout settings as `group_hide_mode` (`exclude` or `hide`). With subgraphs, hidden
+   groups are always excluded.
 
 ### Node lists
 

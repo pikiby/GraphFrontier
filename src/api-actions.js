@@ -140,6 +140,7 @@ class GraphFrontierActions extends LayoutApi {
           'repel_radius',
           'center_strength',
           'damping',
+          'group_hide_mode',
         ].includes(k)
       ),
       panel: true,

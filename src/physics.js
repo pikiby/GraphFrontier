@@ -38,9 +38,45 @@ function sortedByKey(items, key) {
   return keyed.map((entry) => entry[1]);
 }
 
+// Hide-mode groups stay in physics while they are absent from drawing.
+function getPhysicsVisibleNodeIds(view) {
+  return typeof view.getPhysicsVisibleNodeIds === 'function'
+    ? view.getPhysicsVisibleNodeIds()
+    : view.getFilterVisibleNodeIds();
+}
+
+const physicsVisibilityStates = new WeakMap();
+
+function physicsVisibilitySignature(visible) {
+  if (!(visible instanceof Set)) return null;
+  return [...visible].sort().join('\n');
+}
+
+// Record the current physics subset without waking, e.g. after restoring sleep.
+function resetPhysicsVisibilityBaseline(view) {
+  const visible = getPhysicsVisibleNodeIds(view);
+  physicsVisibilityStates.set(view, {
+    visible,
+    signature: physicsVisibilitySignature(visible),
+  });
+}
+
+// A changed physics subset (eye, solo, Hide/Exclude, rules, filters) must re-settle.
+function wakeOnPhysicsVisibilityChange(view) {
+  const visible = getPhysicsVisibleNodeIds(view);
+  const state = physicsVisibilityStates.get(view);
+  if (state && state.visible === visible) return false;
+  const signature = physicsVisibilitySignature(visible);
+  physicsVisibilityStates.set(view, { visible, signature });
+  if (!state || state.signature === signature) return false;
+  if (typeof view.kickLayoutSearch === 'function') view.kickLayoutSearch();
+  else kickLayoutSearch(view);
+  return true;
+}
+
 function layoutSleepSignature(view, multipliers = new Map(), multiplierContext = {}) {
   const settings = view.plugin.getSettings();
-  const visible = view.getFilterVisibleNodeIds();
+  const visible = getPhysicsVisibleNodeIds(view);
   const targets = getDarkEnergyTargets(view);
   return JSON.stringify([
     [
@@ -799,7 +835,7 @@ function stepSimulation(view) {
     return;
   }
 
-  const filterVisibleNodeIds = view.getFilterVisibleNodeIds();
+  const filterVisibleNodeIds = getPhysicsVisibleNodeIds(view);
   const hasPhysicsFilter = filterVisibleNodeIds instanceof Set;
   if (hasPhysicsFilter) {
     for (const node of view.nodes) {
@@ -1296,6 +1332,8 @@ function recomputeOrbitRadii(view) {
 
 module.exports = {
   setSleepForceProbe,
+  wakeOnPhysicsVisibilityChange,
+  resetPhysicsVisibilityBaseline,
   normalizeLayoutSleep,
   captureLayoutSleep,
   restoreLayoutSleep,

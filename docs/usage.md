@@ -54,7 +54,8 @@ with the layout. Gravity centers do not repel each other.
 Pinned, orbit-pinned and actively dragged nodes are not pulled. Attachments obey the same
 force rules as notes. Multiple centers combine their attraction. Centers stay visible
 when search, blacklist/whitelist or hidden groups (the eye button in Groups) hide notes,
-but hidden notes do not participate in physics.
+but hidden notes do not participate in physics, except hidden groups in **Hide** mode,
+which stay in physics while they are not drawn.
 
 Objects, rules, strength and positions belong to the active layout and follow its existing
 Save, Load and autosave behavior. They remain stationary unless moved manually.

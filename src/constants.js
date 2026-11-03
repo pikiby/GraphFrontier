@@ -38,6 +38,7 @@ const DEFAULT_DATA = {
     excluded_attachment_extensions: [],
     existing_files_only: true,
     search_mode: 'find',
+    group_hide_mode: 'exclude',
     show_search_connections: false,
     quick_pick_modifier: 'alt',
     selection_box_modifier: 'shift',

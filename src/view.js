@@ -55,6 +55,8 @@ const {
 const {
   captureLayoutSleep,
   restoreLayoutSleep,
+  wakeOnPhysicsVisibilityChange,
+  resetPhysicsVisibilityBaseline,
   copyLayoutSleepState,
   kickLayoutSearch: kickLayoutSearchPhysics,
   updateLayoutCenter: updateLayoutCenterPhysics,
@@ -95,6 +97,11 @@ function getContrastIconColor(hexColor) {
   const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
   return luminance > 0.179 ? '#000000' : '#ffffff';
 }
+
+const GROUP_HIDE_MODE_HINTS = {
+  hide: 'Hide: hidden groups are not drawn but keep their place and forces in physics',
+  exclude: 'Exclude: hidden groups are removed from drawing and physics',
+};
 
 class GraphFrontierView extends ItemView {
   constructor(leaf, plugin) {
@@ -210,6 +217,8 @@ class GraphFrontierView extends ItemView {
     this.inputSuggestInputEl = null;
     this.visibilityGraphVersion = 0;
     this.visibilitySearchVersion = 0;
+    this.physicsVisibilityCache = null;
+    this.ignoreHiddenGroups = false;
     this.filterVisibilityCache = {
       parsedRulesSignature: '',
       parsedBlacklistRules: [],
@@ -2072,6 +2081,7 @@ class GraphFrontierView extends ItemView {
   }
 
   markGraphVisibilityDirty() {
+    this.physicsVisibilityCache = null;
     this.visibilityGraphVersion += 1;
     this.contentSearchIndexGraphVersion = -1;
     this.filterVisibilityCache.queryRuleVisibleGraphVersion = -1;
@@ -2081,6 +2091,7 @@ class GraphFrontierView extends ItemView {
   }
 
   markSearchVisibilityDirty() {
+    this.physicsVisibilityCache = null;
     this.visibilitySearchVersion += 1;
     this.filterVisibilityCache.searchVisibleVersion = -1;
     this.filterVisibilityCache.searchVisibleNodeIds = null;
@@ -2089,6 +2100,7 @@ class GraphFrontierView extends ItemView {
   }
 
   markQueryRuleVisibilityDirty() {
+    this.physicsVisibilityCache = null;
     this.filterVisibilityCache.parsedRulesSignature = '';
     this.filterVisibilityCache.parsedBlacklistRules = [];
     this.filterVisibilityCache.parsedWhitelistRules = [];
@@ -2114,7 +2126,9 @@ class GraphFrontierView extends ItemView {
     };
     const blacklistRules = this.plugin?.data?.blacklist;
     const whitelistRules = this.plugin?.data?.whitelist;
-    const hiddenGroups = (this.plugin?.data?.groups || []).filter((group) => group?.hidden);
+    const hiddenGroups = this.ignoreHiddenGroups
+      ? []
+      : (this.plugin?.data?.groups || []).filter((group) => group?.hidden);
     return `b:${serializeRules(blacklistRules)}##w:${serializeRules(whitelistRules)}##h:${serializeRules(hiddenGroups)}`;
   }
 
@@ -2413,10 +2427,50 @@ class GraphFrontierView extends ItemView {
 
   // Hidden groups block their nodes exactly like blacklist rules.
   getBlockingQueryRules() {
+    const blacklist = this.getCompleteQueryRulesByKey('blacklist');
+    if (this.ignoreHiddenGroups) return blacklist;
     return [
-      ...this.getCompleteQueryRulesByKey('blacklist'),
+      ...blacklist,
       ...this.getCompleteQueryRulesByKey('groups', (group) => group.hidden === true),
     ];
+  }
+
+  // Hide mode removes hidden groups from drawing and interaction but keeps them in physics.
+  isGroupHideModeActive() {
+    return (
+      this.plugin.getSettings().group_hide_mode === 'hide' &&
+      !this.plugin.data.subgraphs?.length &&
+      !this.subgraphScope &&
+      (this.plugin.data.groups || []).some((group) => group?.hidden === true)
+    );
+  }
+
+  // Physics visibility: the drawing pipeline without hidden groups, with its own cache.
+  getPhysicsVisibleNodeIds() {
+    if (!this.isGroupHideModeActive()) return this.getFilterVisibleNodeIds();
+    const drawingCache = this.filterVisibilityCache;
+    if (!this.physicsVisibilityCache) {
+      this.physicsVisibilityCache = {
+        parsedRulesSignature: '',
+        parsedBlacklistRules: [],
+        parsedWhitelistRules: [],
+        queryRuleVisibleGraphVersion: -1,
+        queryRuleVisibleRulesSignature: '',
+        queryRuleVisibleNodeIds: null,
+        searchVisibleVersion: -1,
+        searchVisibleNodeIds: null,
+        finalVisibleKey: '',
+        finalVisibleNodeIds: null,
+      };
+    }
+    this.filterVisibilityCache = this.physicsVisibilityCache;
+    this.ignoreHiddenGroups = true;
+    try {
+      return this.getFilterVisibleNodeIds();
+    } finally {
+      this.ignoreHiddenGroups = false;
+      this.filterVisibilityCache = drawingCache;
+    }
   }
 
   getCompleteQueryRulesByKey(ruleKey, include = null) {
@@ -2900,7 +2954,7 @@ class GraphFrontierView extends ItemView {
 
   buildGroupEditorSection(parentEl) {
     const section = parentEl.createDiv({ cls: 'graphfrontier-groups' });
-    section.createDiv({ cls: 'graphfrontier-groups-title', text: 'Groups' });
+    this.buildGroupHideModeToggle(section);
 
     this.groupEditorRows = [];
     this.groupSoloState = null;
@@ -2909,6 +2963,50 @@ class GraphFrontierView extends ItemView {
       this.addGroupEditorRow(section, group);
     }
     this.addGroupEditorRow(section, null);
+  }
+
+  // Hide keeps hidden groups in physics; Exclude removes them like blacklist rules.
+  buildGroupHideModeToggle(section) {
+    const controlsRow = section.createDiv({
+      cls: 'graphfrontier-find-mode-row graphfrontier-group-mode-row',
+    });
+    const controls = controlsRow.createDiv({
+      cls: 'graphfrontier-find-mode-controls graphfrontier-find-mode-controls-left',
+    });
+    controls.createSpan({
+      cls: 'graphfrontier-sidepanel-label graphfrontier-group-mode-caption',
+      text: 'Filtering:',
+    });
+    this.groupHideModeHideLabelEl = controls.createSpan({
+      cls: 'graphfrontier-find-mode-label',
+      text: 'Hide',
+      attr: { title: GROUP_HIDE_MODE_HINTS.hide },
+    });
+    const toggle = controls.createEl('button', {
+      cls: 'graphfrontier-toggle-btn graphfrontier-search-mode-toggle',
+      attr: { type: 'button' },
+    });
+    this.groupHideModeToggleEl = toggle;
+    this.groupHideModeExcludeLabelEl = controls.createSpan({
+      cls: 'graphfrontier-find-mode-label',
+      text: 'Exclude',
+      attr: { title: GROUP_HIDE_MODE_HINTS.exclude },
+    });
+    this.syncGroupHideModeToggleUi();
+    this.registerDomEvent(toggle, 'click', () => {
+      const next = this.plugin.getSettings().group_hide_mode === 'hide' ? 'exclude' : 'hide';
+      this.plugin.setGroupHideMode(next);
+    });
+  }
+
+  syncGroupHideModeToggleUi() {
+    if (!this.groupHideModeToggleEl) return;
+    const mode = this.plugin.getSettings().group_hide_mode === 'hide' ? 'hide' : 'exclude';
+    this.groupHideModeToggleEl.toggleClass('is-on', mode === 'exclude');
+    this.groupHideModeToggleEl.setAttr('aria-label', `Hidden groups: ${mode}`);
+    this.groupHideModeToggleEl.setAttr('title', GROUP_HIDE_MODE_HINTS[mode]);
+    this.groupHideModeHideLabelEl?.toggleClass('is-active', mode === 'hide');
+    this.groupHideModeExcludeLabelEl?.toggleClass('is-active', mode === 'exclude');
   }
 
   parseGroupForm(group) {
@@ -3972,6 +4070,7 @@ class GraphFrontierView extends ItemView {
     this.finishSubgraphFraming();
     this.stepCameraSmoothing();
     if (!this.waitingForMetadata && !this.plugin.backups?.restoring) {
+      if (this.nodes.length) wakeOnPhysicsVisibilityChange(this);
       const dragging =
         !!this.dragNodeId ||
         (this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0);
@@ -4015,6 +4114,7 @@ class GraphFrontierView extends ItemView {
   restoreSavedLayoutSleep() {
     if (this.pendingLayoutSleepRestore === this.plugin.data) {
       restoreLayoutSleep(this, this.plugin.data.saved_layout_sleep?.[this.subgraphScope?.id || '']);
+      resetPhysicsVisibilityBaseline(this);
     }
     this.pendingLayoutSleepRestore = null;
   }
@@ -4112,7 +4212,9 @@ class GraphFrontierView extends ItemView {
     const minY = Math.min(screenRect.startY, screenRect.currentY);
     const maxY = Math.max(screenRect.startY, screenRect.currentY);
     const selectedNodeIds = [];
+    const visibleNodeIds = this.getFilterVisibleNodeIds();
     for (const node of this.nodes) {
+      if (visibleNodeIds instanceof Set && !visibleNodeIds.has(node.id)) continue;
       const point = this.worldToScreen(node.x, node.y);
       if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) continue;
       selectedNodeIds.push(node.id);

@@ -1424,3 +1424,7 @@ input[type='color'].graphfrontier-group-color-input:focus-visible {
     flex-basis: 100%;
   }
 }
+
+.graphfrontier-group-mode-caption {
+  margin-right: 4px;
+}

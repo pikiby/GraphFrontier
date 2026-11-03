@@ -26,6 +26,13 @@ function normalizeLayoutSleep(value) {
   );
 }
 
+// Hide-mode groups stay in physics while they are absent from drawing.
+function getPhysicsVisibleNodeIds(view) {
+  return typeof view.getPhysicsVisibleNodeIds === 'function'
+    ? view.getPhysicsVisibleNodeIds()
+    : view.getFilterVisibleNodeIds();
+}
+
 // Exact context, not just zero velocity: explicit saves also stop moving nodes.
 function cachedNodeMultiplier(plugin, id, values, context) {
   if (!values.has(id)) values.set(id, plugin.getNodeMultiplier(id, context));
@@ -34,7 +41,7 @@ function cachedNodeMultiplier(plugin, id, values, context) {
 
 function layoutSleepSignature(view, multipliers = new Map(), multiplierContext = {}) {
   const settings = view.plugin.getSettings();
-  const visible = view.getFilterVisibleNodeIds();
+  const visible = getPhysicsVisibleNodeIds(view);
   const targets = getDarkEnergyTargets(view);
   return JSON.stringify([
     [
@@ -284,7 +291,7 @@ function stepSimulation(view) {
     return;
   }
 
-  const filterVisibleNodeIds = view.getFilterVisibleNodeIds();
+  const filterVisibleNodeIds = getPhysicsVisibleNodeIds(view);
   const hasPhysicsFilter = filterVisibleNodeIds instanceof Set;
   if (hasPhysicsFilter) {
     for (const node of view.nodes) {

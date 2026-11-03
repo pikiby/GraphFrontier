@@ -663,6 +663,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       settings.hover_highlight_color = /^#[0-9a-f]{6}$/i.test(settings.hover_highlight_color)
         ? settings.hover_highlight_color.toLowerCase()
         : null;
+      settings.group_hide_mode = settings.group_hide_mode === 'hide' ? 'hide' : 'exclude';
     }
     normalized.settings.aura_brightness = this.clampNumber(
       normalized.settings.aura_brightness,
@@ -1495,6 +1496,19 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     return !!this.getGroupVisualSettings(nodeId)?.strong_pull;
   }
 
+  // Force multipliers change link forces, so settled layouts must re-settle.
+  kickPhysicsViews(nodeId) {
+    const views = this.isLocalGraphFrontier
+      ? [this.getScopeView()]
+      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
+    for (const view of views) {
+      if (!view?.nodeById?.has(nodeId)) continue;
+      const visible = view.getPhysicsVisibleNodeIds?.() ?? view.getFilterVisibleNodeIds?.();
+      if (visible instanceof Set && !visible.has(nodeId)) continue;
+      view.kickLayoutSearch?.();
+    }
+  }
+
   setNodeMultiplier(nodeId, value, options = {}) {
     const multiplier = this.clampMultiplier(value);
     if (multiplier <= 1) {
@@ -1507,6 +1521,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     } else if (options.mode === 'manual') {
       delete this.data.strong_pull_nodes[nodeId];
     }
+    this.kickPhysicsViews(nodeId);
     this.schedulePersist();
   }
 
@@ -1514,6 +1529,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     if (!this.data.node_force_multipliers[nodeId] && !this.data.strong_pull_nodes[nodeId]) return;
     delete this.data.node_force_multipliers[nodeId];
     delete this.data.strong_pull_nodes[nodeId];
+    this.kickPhysicsViews(nodeId);
     this.schedulePersist();
   }
 
@@ -1521,6 +1537,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const target = this.clampStrongPullMultiplier(this.data.settings.strong_pull_multiplier);
     for (const nodeId of Object.keys(this.data.strong_pull_nodes)) {
       this.data.node_force_multipliers[nodeId] = target;
+      this.kickPhysicsViews(nodeId);
     }
     this.schedulePersist();
   }
@@ -1695,6 +1712,22 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         ? [this.getScopeView()]
         : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
       for (const view of views) view?.kickLayoutSearch();
+    }
+    this.schedulePersist();
+    this.renderAllViews();
+  }
+
+  // Switching modes changes only which hidden-group nodes stay in physics.
+  setGroupHideMode(mode) {
+    const next = mode === 'hide' ? 'hide' : 'exclude';
+    if (this.data.settings.group_hide_mode === next) return;
+    this.data.settings.group_hide_mode = next;
+    const views = this.isLocalGraphFrontier
+      ? [this.getScopeView()]
+      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
+    for (const view of views) {
+      view?.markQueryRuleVisibilityDirty?.();
+      view?.syncGroupHideModeToggleUi?.();
     }
     this.schedulePersist();
     this.renderAllViews();
