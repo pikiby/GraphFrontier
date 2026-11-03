@@ -47,30 +47,60 @@ function getPhysicsVisibleNodeIds(view) {
 
 const physicsVisibilityStates = new WeakMap();
 
-function physicsVisibilitySignature(visible) {
-  if (!(visible instanceof Set)) return null;
-  return [...visible].sort().join('\n');
+function isPhysicsVisible(view, visible, node) {
+  return (
+    (!(visible instanceof Set) || visible.has(node.id)) &&
+    !(view.plugin.data?.dark_energy?.length && node.meta?.darkEnergy)
+  );
+}
+
+function physicsVisibleIds(view, visible = getPhysicsVisibleNodeIds(view)) {
+  const ids = new Set();
+  for (const node of view.nodes) {
+    if (isPhysicsVisible(view, visible, node)) ids.add(node.id);
+  }
+  return ids;
 }
 
 // Record the current physics subset without waking, e.g. after restoring sleep.
 function resetPhysicsVisibilityBaseline(view) {
-  const visible = getPhysicsVisibleNodeIds(view);
-  physicsVisibilityStates.set(view, {
-    visible,
-    signature: physicsVisibilitySignature(visible),
-  });
+  physicsVisibilityStates.set(view, physicsVisibleIds(view));
 }
 
-// A changed physics subset (eye, solo, Hide/Exclude, rules, filters) must re-settle.
+// Keep surviving sleepers; changed forces wake only those that need to react.
 function wakeOnPhysicsVisibilityChange(view) {
-  const visible = getPhysicsVisibleNodeIds(view);
+  const filter = getPhysicsVisibleNodeIds(view);
   const state = physicsVisibilityStates.get(view);
-  if (state && state.visible === visible) return false;
-  const signature = physicsVisibilitySignature(visible);
-  physicsVisibilityStates.set(view, { visible, signature });
-  if (!state || state.signature === signature) return false;
-  if (typeof view.kickLayoutSearch === 'function') view.kickLayoutSearch();
-  else kickLayoutSearch(view);
+  // Allocation-free when unchanged, including an in-place Set edit or null/all transition.
+  if (state) {
+    let count = 0;
+    let same = true;
+    for (const node of view.nodes) {
+      if (!isPhysicsVisible(view, filter, node)) continue;
+      count += 1;
+      if (!state.has(node.id)) {
+        same = false;
+        break;
+      }
+    }
+    if (same && count === state.size) return false;
+  }
+  const visible = physicsVisibleIds(view, filter);
+  physicsVisibilityStates.set(view, visible);
+  if (!state) return false;
+  const sleepers = layoutSleepStates.get(view);
+  for (const node of view.nodes) {
+    if (visible.has(node.id) && !state.has(node.id)) sleepers?.delete(node);
+  }
+  // Rebuild source forces, degrees, masses and orphan partitions for the new subset.
+  physicsCaches.delete(view);
+  layoutSleepSignatures.delete(view);
+  view.pendingLayoutSleepRestore = null;
+  view.layoutEditVersion = (view.layoutEditVersion || 0) + 1;
+  view.layoutKickAtMs = Date.now();
+  view.layoutStillFrames = 0;
+  view.layoutAutosaveDirty = true;
+  view.layoutPaused = false;
   return true;
 }
 
@@ -855,6 +885,7 @@ function stepSimulation(view) {
   const nodes = structure.nodes;
   const nodeCount = structure.count;
   if (nodeCount === 0) {
+    view.layoutPaused = true;
     stepLayoutAutosave(view);
     return;
   }

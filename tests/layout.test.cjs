@@ -1177,7 +1177,7 @@ test('adding an edge through a passive metadata refresh wakes settled physics', 
   assert.equal(view.layoutStillFrames, 0);
 });
 
-test('passive refresh preserves an already-running layout, while deliberate settings still kick', (t) => {
+test('passive and topology-neutral data-filter refreshes preserve sleep and dirty state', (t) => {
   const { plugin, view } = fixture(t);
   view.layoutPaused = false;
   view.layoutAutosaveDirty = true;
@@ -1190,9 +1190,49 @@ test('passive refresh preserves an already-running layout, while deliberate sett
   view.layoutAutosaveDirty = false;
   plugin.data.settings.hide_orphans = false;
   view.applyRefreshMode('data');
-  assert.equal(view.layoutPaused, false);
-  assert.equal(view.layoutAutosaveDirty, true);
-  assert.equal(view.layoutStillFrames, 0);
+  assert.equal(view.layoutPaused, true);
+  assert.equal(view.layoutAutosaveDirty, false);
+  assert.equal(view.layoutStillFrames, 3);
+});
+
+test('visibility wake protects dirty state when an older layout save finishes', async (t) => {
+  const { wakeOnPhysicsVisibilityChange, resetPhysicsVisibilityBaseline } =
+    loadSource('physics.js');
+  const { view, adapter } = fixture(t);
+  resetPhysicsVisibilityBaseline(view);
+  const gate = holdWrite(t, adapter);
+  const saving = view.saveCurrentLayout({ silent: true });
+  await gate.entered;
+  const version = view.layoutEditVersion;
+  view.apiVisibleNodeIds = new Set();
+  view.markSearchVisibilityDirty();
+  assert.equal(wakeOnPhysicsVisibilityChange(view), true);
+  assert.equal(view.layoutEditVersion, version + 1);
+  gate.release();
+  await saving;
+  assert.equal(
+    view.layoutAutosaveDirty,
+    true,
+    'older completion cannot acknowledge visibility edit'
+  );
+});
+
+test('exclude-all frame stops batching immediately and paused frames still tick autosave once', (t) => {
+  const { resetPhysicsVisibilityBaseline } = loadSource('physics.js');
+  const { view } = fixture(t, { settings: { hide_orphans: false, layout_autosave: true } });
+  frameLoop(view);
+  resetPhysicsVisibilityBaseline(view);
+  view.apiVisibleNodeIds = new Set();
+  view.markSearchVisibilityDirty();
+  view.layoutPaused = true;
+  const step = t.mock.method(view, 'stepSimulation');
+  view.runFrame();
+  assert.equal(step.mock.callCount(), 1);
+  assert.equal(view.layoutPaused, true);
+  assert.equal(view.layoutStillFrames, 1);
+  view.runFrame();
+  assert.equal(step.mock.callCount(), 1, 'paused empty subset does not simulate again');
+  assert.equal(view.layoutStillFrames, 2);
 });
 
 test('physics setting slider still restarts a loaded layout', (t) => {

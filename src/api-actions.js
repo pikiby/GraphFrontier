@@ -67,7 +67,7 @@ class GraphFrontierActions extends LayoutApi {
       view.layoutEditVersion++;
       view.layoutAutosaveDirty = true;
       view.layoutStillFrames = 0;
-      if (rebuild) view.refreshFromVault({ keepCamera: true });
+      if (rebuild) view.refreshFromVault({ keepCamera: true, passive: true });
       if (kick) view.kickLayoutSearch();
       if (panel) view.buildSidePanel();
       view.markQueryRuleVisibilityDirty();
@@ -140,7 +140,6 @@ class GraphFrontierActions extends LayoutApi {
           'repel_radius',
           'center_strength',
           'damping',
-          'group_hide_mode',
         ].includes(k)
       ),
       panel: true,

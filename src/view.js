@@ -1469,14 +1469,12 @@ class GraphFrontierView extends ItemView {
             this.searchSelectedNodeId = null;
             this.syncSearchMatchesLive();
             this.syncSearchClearButtonVisibility();
-            if (this.searchMode === 'filter') this.kickLayoutSearch();
             this.contentEl.win.setTimeout(() => openSearchSuggestionPopup(), 0);
             return;
           }
           searchInput.value = selectedText;
           this.searchInputValue = selectedText;
           commitBestSearchSelection();
-          if (this.searchMode === 'filter') this.kickLayoutSearch();
         },
         { title: suggestionPack.menuTitle || '' }
       );
@@ -1493,7 +1491,6 @@ class GraphFrontierView extends ItemView {
       this.syncSearchMatchesLive();
       this.markSearchVisibilityDirty();
       this.syncSearchModeToggleUi();
-      this.kickLayoutSearch();
       this.plugin.schedulePersist();
     });
 
@@ -1509,7 +1506,6 @@ class GraphFrontierView extends ItemView {
       this.searchSelectedNodeId = null;
       this.syncSearchMatchesLive();
       this.syncSearchClearButtonVisibility();
-      if (this.searchMode === 'filter') this.kickLayoutSearch();
       openSearchSuggestionPopup();
     });
     this.registerDomEvent(searchInput, 'change', () => {
@@ -1562,7 +1558,6 @@ class GraphFrontierView extends ItemView {
       this.markSearchVisibilityDirty();
       if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
       this.syncSearchClearButtonVisibility();
-      if (this.searchMode === 'filter') this.kickLayoutSearch();
       this.closeInputSuggestMenu();
       if (this.searchInputEl) this.searchInputEl.focus();
     });
@@ -2015,7 +2010,6 @@ class GraphFrontierView extends ItemView {
       this.searchMatchedNodeIds = new Set();
       this.markSearchVisibilityDirty();
       this.syncSearchClearButtonVisibility();
-      if (this.searchMode === 'filter') this.kickLayoutSearch();
       return;
     }
     if (parsed.source === 'name' && this.searchMode === 'filter') {
@@ -2025,19 +2019,16 @@ class GraphFrontierView extends ItemView {
         this.searchSelectedNodeId = null;
         this.markSearchVisibilityDirty();
         this.syncSearchClearButtonVisibility();
-        if (this.searchMode === 'filter') this.kickLayoutSearch();
         return;
       }
       this.applySearchSelectionFromNode(bestNode, { forceSource: 'name' });
       this.syncSearchClearButtonVisibility();
-      if (this.searchMode === 'filter') this.kickLayoutSearch();
       return;
     }
     this.searchSelectedNodeId = null;
     this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
     this.markSearchVisibilityDirty();
     this.syncSearchClearButtonVisibility();
-    if (this.searchMode === 'filter') this.kickLayoutSearch();
   }
 
   getSearchHighlightNodeIds() {
@@ -3548,7 +3539,7 @@ class GraphFrontierView extends ItemView {
 
   // UI refresh helpers: keep controls synced and canvas sized to current container.
   applyRefreshMode(refreshMode) {
-    if (refreshMode === 'data') this.plugin.refreshAllViews();
+    if (refreshMode === 'data') this.plugin.refreshAllViews({ passive: true });
     else this.plugin.renderAllViews();
   }
 
@@ -4315,7 +4306,6 @@ class GraphFrontierView extends ItemView {
       }
       if (this.isModifierActive(event, this.plugin.getSettings().quick_pick_modifier)) {
         this.applySearchSelectionFromNode(node, { forceSource: 'name' });
-        if (this.searchMode === 'filter') this.kickLayoutSearch();
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -6616,7 +6606,6 @@ class GraphFrontierView extends ItemView {
     const node = this.getCommandTargetNodeOrNotice();
     if (!node) return;
     this.applySearchSelectionFromNode(node, { forceSource: 'name' });
-    if (this.searchMode === 'filter') this.kickLayoutSearch();
   }
 
   async commandShowLocalGraph() {
