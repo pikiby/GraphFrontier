@@ -1,7 +1,15 @@
 const { DEFAULT_DATA, MAX_ZOOM, ZOOM_STEP_FACTOR } = require('./constants');
 const { DARK_THEME, getLabelAppearance } = require('./theme');
-const { getNodeVisualSetting, getEdgeVisualSetting, getNodeColor } = require('./node-visuals');
+const {
+  getNodeVisualSetting,
+  getNodeVisualOverride,
+  NODE_VISUAL_SETTINGS,
+} = require('./node-visuals');
 const EMPTY_LISTS = [];
+const LINK_STYLE_KEYS = NODE_VISUAL_SETTINGS.filter((setting) => setting.edges).map(
+  ({ key }) => key
+);
+const APPEARANCE_KEYS = NODE_VISUAL_SETTINGS.map(({ key }) => key).concat('attachment_node_color');
 const { nodeListContains } = require('./node-lists');
 const {
   getFocusEdgeWidth,
@@ -9,6 +17,8 @@ const {
   getFocusEdgeAlpha,
   quantizeFocusProgress,
   getNodeScreenRadius,
+  getLowDegreeAlpha,
+  getLinkArrowSegments,
   getEdgeCssWidth,
   setCrispStroke,
   getCrispCoordinate,
@@ -42,13 +52,19 @@ function getEdgeAppearance(view) {
 
 // Focus dimming helper: computes alpha of non-focused graph elements.
 function getHoverDimAlpha(plugin, focusProgress, nodeId) {
-  const clampedProgress = Math.max(0, Math.min(1, Number(focusProgress) || 0));
   const dimStrength = plugin.clampNumber(
-    getNodeVisualSetting(plugin, nodeId, 'hover_dim_strength'),
+    nodeId == null
+      ? plugin.getSettings().hover_dim_strength
+      : getNodeVisualSetting(plugin, nodeId, 'hover_dim_strength'),
     0,
     100,
     DEFAULT_DATA.settings.hover_dim_strength
   );
+  return getDimAlpha(dimStrength, focusProgress);
+}
+
+function getDimAlpha(dimStrength, focusProgress) {
+  const clampedProgress = Math.max(0, Math.min(1, Number(focusProgress) || 0));
   if (dimStrength <= 0 || clampedProgress <= 0) return 1;
   const dimFactor = dimStrength / 100;
   const minAlpha = Math.max(0.02, 1 - dimFactor);
@@ -124,16 +140,23 @@ function renderFrame(view) {
   const height = view.viewHeight;
 
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = view.canvasBackgroundColor || '#111418';
+  const settings = view.plugin.getSettings();
+  ctx.fillStyle =
+    settings.custom_background && /^#[0-9a-f]{6}$/i.test(settings.background_color)
+      ? settings.background_color
+      : view.canvasTheme?.background || view.canvasBackgroundColor || '#111418';
   ctx.fillRect(0, 0, width, height);
 
   if (view.plugin.getSettings().show_grid) {
     drawGrid(view, ctx);
   }
 
-  drawNodeAuras(view, ctx);
-  drawEdges(view, ctx);
-  drawNodes(view, ctx);
+  // Subgraph visibility can rebuild edges/degrees before appearances are prepared.
+  view.getFilterVisibleNodeIds();
+  const appearance = getPreparedAppearance(view);
+  drawNodeAuras(view, ctx, appearance);
+  drawEdges(view, ctx, appearance);
+  drawNodes(view, ctx, appearance);
   drawHiddenGridMarkers(view, ctx);
   drawSelectionBox(view, ctx);
 }
@@ -155,16 +178,20 @@ function getNodeLabelText(node) {
 }
 
 // Shared node radius formula, including attachments.
-function getNodeRadius(view, node) {
+function getNodeRadius(view, node, context) {
   const nodeScale = view.plugin.clampNumber(
-    getNodeVisualSetting(view.plugin, node.id, 'node_size_scale'),
+    getNodeVisualSetting(view.plugin, node.id, 'node_size_scale', context),
     0.1,
     2,
     DEFAULT_DATA.settings.node_size_scale
   );
   // Radius grows with degree and is proportional to Node size, without a ceiling,
   // so relative node sizes survive any scale. Uncapped radii match earlier versions.
-  return Math.max(0.2, (3 + Math.log2(node.degree + 2) * 1.4) * nodeScale * 0.5);
+  return getBaseRadius(node, nodeScale);
+}
+
+function getBaseRadius(node, scale) {
+  return Math.max(0.2, (3 + Math.log2(node.degree + 2) * 1.4) * scale * 0.5);
 }
 
 // Convert slider steps into zoom threshold for label visibility.
@@ -206,7 +233,11 @@ function getGroupStyleMap(view) {
     cache &&
     cache.graphVersion === graphVersion &&
     cache.groups === groups &&
+    cache.groupVersion === (view.plugin.groupStyleVersion || 0) &&
     cache.lists === lists &&
+    cache.listVersion === (view.plugin.nodeListStore?.appearanceVersion || 0) &&
+    cache.nodes === view.nodes &&
+    cache.meta === view.nodeMetaById &&
     cache.styleByNodeId instanceof Map
   ) {
     return cache.styleByNodeId;
@@ -250,11 +281,142 @@ function getGroupStyleMap(view) {
   view.groupColorCache = {
     graphVersion,
     groups,
+    groupVersion: view.plugin.groupStyleVersion || 0,
+    nodes: view.nodes,
+    meta: view.nodeMetaById,
     colorByNodeId,
     styleByNodeId,
     lists,
+    listVersion: view.plugin.nodeListStore?.appearanceVersion || 0,
   };
   return styleByNodeId;
+}
+
+// Only appearance inputs participate: camera, positions and focus never rebuild this cache.
+// Configuration notifications update revisions; camera frames never scan configuration.
+function getPreparedAppearance(view) {
+  const plugin = view.plugin;
+  const data = plugin.data;
+  const settings = plugin.getSettings();
+  const groups = getGroupStyleMap(view);
+  const revision = Number(plugin.appearanceVersion || 0);
+  const cached = view.appearanceCache;
+  if (
+    cached?.data === data &&
+    cached.nodes === view.nodes &&
+    cached.edges === view.edges &&
+    cached.nodeCount === view.nodes.length &&
+    cached.edgeCount === view.edges.length &&
+    cached.graphVersion === view.visibilityGraphVersion &&
+    cached.groups === groups &&
+    cached.revision === revision &&
+    cached.theme === view.canvasTheme &&
+    cached.visuals === data.node_visual_settings &&
+    cached.labels === data.node_label_sizes &&
+    cached.paint === data.painted_edge_colors
+  )
+    return cached;
+
+  const nodeStyles = new Map();
+  const auraNodes = [];
+  for (const node of view.nodes) {
+    const group = groups?.get(node.id);
+    const individual = {};
+    for (const key of APPEARANCE_KEYS)
+      individual[key] = getNodeVisualOverride(plugin, node.id, key);
+    const value = (key) =>
+      individual[key] ?? group?.[key] ?? settings[key] ?? DEFAULT_DATA.settings[key];
+    const fontSize =
+      plugin.clampNumber(value('label_font_size'), 5, 20, DEFAULT_DATA.settings.label_font_size) /
+      5;
+    const painted = String(
+      data.painted_edge_colors?.[node.id] ?? individual.edge_color ?? group?.edge_color ?? ''
+    ).trim();
+    const style = {
+      scale: plugin.clampNumber(
+        value('node_size_scale'),
+        0.1,
+        2,
+        DEFAULT_DATA.settings.node_size_scale
+      ),
+      color:
+        individual.node_color ??
+        group?.node_color ??
+        (node.meta?.isAttachment ? settings.attachment_node_color : null) ??
+        value('node_color'),
+      auraRadius: value('aura_radius') / 10,
+      auraBrightness: value('aura_brightness') / 100,
+      dimStrength: plugin.clampNumber(
+        value('hover_dim_strength'),
+        0,
+        100,
+        DEFAULT_DATA.settings.hover_dim_strength
+      ),
+      fontSize,
+      minimumSize: (10 * fontSize) / (DEFAULT_DATA.settings.label_font_size / 5),
+      labelThreshold:
+        MAX_ZOOM /
+        Math.pow(
+          ZOOM_STEP_FACTOR,
+          plugin.clampNumber(
+            value('label_zoom_steps'),
+            1,
+            40,
+            DEFAULT_DATA.settings.label_zoom_steps
+          ) - 1
+        ),
+      individual,
+      group,
+      painted: /^#[0-9a-f]{6}$/i.test(painted),
+      customLink: LINK_STYLE_KEYS.some((key) => individual[key] != null || group?.[key] != null),
+    };
+    nodeStyles.set(node.id, style);
+    if (style.auraRadius > 0 && style.auraBrightness > 0) auraNodes.push(node);
+  }
+  const fallbackColor = getEdgeAppearance(view).color;
+  const defaultLink = Object.fromEntries(
+    LINK_STYLE_KEYS.map((key) => [key, settings[key] ?? DEFAULT_DATA.settings[key]])
+  );
+  defaultLink.edge_color ||= fallbackColor;
+  defaultLink.painted = false;
+  const edgeStyles = view.edges.map((edge) => {
+    const a = nodeStyles.get(edge.source);
+    const b = nodeStyles.get(edge.target);
+    if (!a?.customLink && !b?.customLink) return defaultLink;
+    const style = {};
+    for (const key of LINK_STYLE_KEYS) {
+      const ai = a?.individual[key],
+        bi = b?.individual[key];
+      const ag = a?.group?.[key],
+        bg = b?.group?.[key];
+      if (key === 'edge_width_scale') {
+        const av = ai ?? ag,
+          bv = bi ?? bg;
+        style[key] = av != null && bv != null ? Math.max(av, bv) : (av ?? bv ?? defaultLink[key]);
+      } else style[key] = ai ?? bi ?? ag ?? bg ?? defaultLink[key];
+    }
+    style.edge_color ||= fallbackColor;
+    style.painted = !!(a?.painted || b?.painted);
+    return style;
+  });
+  return (view.appearanceCache = {
+    data,
+    nodes: view.nodes,
+    edges: view.edges,
+    nodeCount: view.nodes.length,
+    edgeCount: view.edges.length,
+    graphVersion: view.visibilityGraphVersion,
+    groups,
+    revision,
+    theme: view.canvasTheme,
+    visuals: data.node_visual_settings,
+    labels: data.node_label_sizes,
+    paint: data.painted_edge_colors,
+    nodeStyles,
+    auraNodes,
+    edgeStyles,
+    defaultLink,
+  });
 }
 
 function getGroupColorMap(view) {
@@ -325,11 +487,12 @@ function drawGrid(view, ctx) {
   const theme = view.canvasTheme || DARK_THEME;
   const backingScale = getBackingScale(view);
   ctx.save();
-  ctx.strokeStyle = theme.grid;
+  const settings = view.plugin.getSettings();
+  ctx.strokeStyle = /^#[0-9a-f]{6}$/i.test(settings.grid_color) ? settings.grid_color : theme.grid;
   setCrispStroke(
     ctx,
     view.plugin.clampGridLineWidth(view.plugin.getSettings().grid_line_width),
-    theme.gridOpacity,
+    settings.grid_opacity ?? theme.gridOpacity,
     backingScale
   );
 
@@ -447,7 +610,7 @@ function drawHiddenGridMarkers(view, ctx) {
 }
 
 // Draw all edges with focus/fade interpolation and painted-edge overrides.
-function drawEdges(view, ctx) {
+function drawEdges(view, ctx, appearance) {
   const zoom = Math.max(view.camera.zoom, 0.0001);
   const halfWidthWorld = view.viewWidth / (2 * zoom);
   const halfHeightWorld = view.viewHeight / (2 * zoom);
@@ -484,14 +647,14 @@ function drawEdges(view, ctx) {
   const normalEdgeAlpha = hasSearchHighlight ? searchDimAlpha : hasAnyFocus ? focusDimAlpha : 1;
   const devicePixelRatio = Number(view.devicePixelRatio) || 1;
   const backingScale = getBackingScale(view);
-  const edgeAppearance = getEdgeAppearance(view);
+  appearance ||= getPreparedAppearance(view);
   // Highlighted edges move towards the theme text color for contrast.
   const focusContrastColor = (view.canvasTheme || DARK_THEME).text;
   const hoverHighlightColor = getHoverHighlightColor(view);
   // Edges sharing one appearance are stroked as a single path, so translucent edges
   // never stack where they cross or overlap. Layers keep painted and focused edges on top.
   const edgeBuckets = new Map();
-  const addEdgeSegment = (layer, color, physicalWidth, alpha, x1, y1, x2, y2) => {
+  const addEdgeSegment = (layer, color, physicalWidth, alpha, x1, y1, x2, y2, arrows) => {
     const key = `${layer}|${color}|${physicalWidth}|${alpha}`;
     let bucket = edgeBuckets.get(key);
     if (!bucket) {
@@ -499,9 +662,11 @@ function drawEdges(view, ctx) {
       edgeBuckets.set(key, bucket);
     }
     bucket.points.push(x1, y1, x2, y2);
+    if (arrows) bucket.points.push(...arrows);
   };
 
-  for (const edge of view.edges) {
+  for (let edgeIndex = 0; edgeIndex < view.edges.length; edgeIndex++) {
+    const edge = view.edges[edgeIndex];
     if (hasFilter) {
       if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) continue;
       if (isNameFilterMode) {
@@ -526,15 +691,11 @@ function drawEdges(view, ctx) {
     const sourcePointY = (sourceNode.y - view.camera.y) * zoom + screenCenterY;
     const targetPointX = (targetNode.x - view.camera.x) * zoom + screenCenterX;
     const targetPointY = (targetNode.y - view.camera.y) * zoom + screenCenterY;
-    const sourcePaintColor = view.plugin.getPaintedEdgeColor(sourceNode.id);
-    const targetPaintColor = view.plugin.getPaintedEdgeColor(targetNode.id);
-    const paintedColor = sourcePaintColor || targetPaintColor;
-    const edgeScale = getEdgeVisualSetting(
-      view.plugin,
-      edge.source,
-      edge.target,
-      'edge_width_scale'
-    );
+    const style = appearance.edgeStyles[edgeIndex];
+    const linkColor = style.edge_color;
+    const paintedColor = style.painted;
+    const opacity = style.edge_opacity;
+    const edgeScale = style.edge_width_scale;
 
     const isHoverFocusEdge =
       !!hoverFocusNodeId && (edge.source === hoverFocusNodeId || edge.target === hoverFocusNodeId);
@@ -553,17 +714,37 @@ function drawEdges(view, ctx) {
       hoverFocusEdgeProgress,
       hoverFadeEdgeProgress
     );
+    const arrows = style.show_arrows
+      ? getLinkArrowSegments(
+          sourcePointX,
+          sourcePointY,
+          targetPointX,
+          targetPointY,
+          getNodeScreenRadius(
+            getBaseRadius(sourceNode, appearance.nodeStyles.get(sourceNode.id).scale),
+            zoom
+          ),
+          getNodeScreenRadius(
+            getBaseRadius(targetNode, appearance.nodeStyles.get(targetNode.id).scale),
+            zoom
+          ),
+          style.reverse_arrows,
+          edge.bidirectional,
+          getEdgeCssWidth(getFocusEdgeWidth(edgeScale, focusEdgeProgress), devicePixelRatio)
+        )
+      : null;
 
     if (!paintedColor && focusEdgeProgress <= 0.001) {
       addEdgeSegment(
         0,
-        edgeAppearance.color,
+        linkColor,
         edgeScale,
-        normalEdgeAlpha * edgeAppearance.opacity,
+        normalEdgeAlpha * opacity,
         sourcePointX,
         sourcePointY,
         targetPointX,
-        targetPointY
+        targetPointY,
+        arrows
       );
       continue;
     }
@@ -572,13 +753,13 @@ function drawEdges(view, ctx) {
     const edgeProgress = quantizeFocusProgress(focusEdgeProgress);
     const physicalWidth = getFocusEdgeWidth(edgeScale, edgeProgress);
     const color = getFocusEdgeColor(
-      paintedColor && /^#[0-9a-f]{6}$/i.test(paintedColor) ? paintedColor : edgeAppearance.color,
+      linkColor,
       focusContrastColor,
       edgeProgress,
       hoverHighlightColor
     );
     // Painted edges stay softer at rest; highlighted edges of any kind become fully opaque.
-    const restAlpha = normalEdgeAlpha * (paintedColor ? 0.65 : 1) * edgeAppearance.opacity;
+    const restAlpha = normalEdgeAlpha * (paintedColor ? 0.65 : 1) * opacity;
     const alpha = getFocusEdgeAlpha(restAlpha, edgeProgress);
     addEdgeSegment(
       edgeProgress > 0 ? 2 : 1,
@@ -588,7 +769,8 @@ function drawEdges(view, ctx) {
       sourcePointX,
       sourcePointY,
       targetPointX,
-      targetPointY
+      targetPointY,
+      arrows
     );
   }
 
@@ -613,15 +795,15 @@ function drawEdges(view, ctx) {
 }
 
 // Draw node auras.
-function drawNodeAuras(view, ctx) {
+function drawNodeAuras(view, ctx, appearance) {
   const visible = view.getFilterVisibleNodeIds();
-  const colors = getGroupColorMap(view);
-  for (const node of view.nodes) {
+  appearance ||= getPreparedAppearance(view);
+  if (!appearance.auraNodes.length) return;
+  for (const node of appearance.auraNodes) {
     if (visible instanceof Set && !visible.has(node.id)) continue;
-    const radius =
-      (getNodeVisualSetting(view.plugin, node.id, 'aura_radius') * view.camera.zoom) / 10;
-    const brightness = getNodeVisualSetting(view.plugin, node.id, 'aura_brightness') / 100;
-    if (!(radius > 0) || !(brightness > 0)) continue;
+    const style = appearance.nodeStyles.get(node.id);
+    const radius = style.auraRadius * view.camera.zoom;
+    const brightness = style.auraBrightness;
     const point = view.worldToScreen(node.x, node.y);
     if (
       point.x + radius < 0 ||
@@ -630,7 +812,7 @@ function drawNodeAuras(view, ctx) {
       point.y - radius > view.viewHeight
     )
       continue;
-    const color = getNodeColor(view.plugin, node, colors?.get(node.id));
+    const color = style.color;
     const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
     gradient.addColorStop(0, hexToRgba(color, brightness));
     gradient.addColorStop(0.4, hexToRgba(color, brightness * (6 / 11)));
@@ -644,7 +826,7 @@ function drawNodeAuras(view, ctx) {
   }
 }
 
-function drawNodes(view, ctx) {
+function drawNodes(view, ctx, appearance) {
   const zoom = Math.max(view.camera.zoom, 0.0001);
   const halfWidthWorld = view.viewWidth / (2 * zoom);
   const halfHeightWorld = view.viewHeight / (2 * zoom);
@@ -682,7 +864,7 @@ function drawNodes(view, ctx) {
     view.searchMode === 'find' &&
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
-  const groupColorByNodeId = getGroupColorMap(view);
+  appearance ||= getPreparedAppearance(view);
   const searchNeighbors = new Set();
   if (hasSearchHighlight && view.plugin.getSettings().show_search_connections) {
     for (const id of searchHighlightNodeIds) {
@@ -701,7 +883,8 @@ function drawNodes(view, ctx) {
     const pointX = (node.x - view.camera.x) * zoom + screenCenterX;
     const pointY = (node.y - view.camera.y) * zoom + screenCenterY;
 
-    const radius = getNodeScreenRadius(getNodeRadius(view, node), zoom);
+    const style = appearance.nodeStyles.get(node.id);
+    const radius = getNodeScreenRadius(getBaseRadius(node, style.scale), zoom);
 
     const isFocusNode = hasFocus && node.id === focusNodeId;
     const isHoverFocusNode = hasHoverFocus && node.id === hoverFocusNodeId;
@@ -738,10 +921,9 @@ function drawNodes(view, ctx) {
     );
     const isHover = hoverVisualProgress > 0.001;
     const isClickFlash = view.clickFlashNodeId === node.id && nowMs < view.clickFlashUntilMs;
-    const groupColor = groupColorByNodeId instanceof Map ? groupColorByNodeId.get(node.id) : null;
-    const searchDimAlpha = hasSearchHighlight ? getHoverDimAlpha(view.plugin, 1, node.id) : 1;
-    const focusDimAlpha = getHoverDimAlpha(view.plugin, combinedFocusProgress, node.id);
-    const nodeAlpha = isClickFlash
+    const searchDimAlpha = hasSearchHighlight ? getDimAlpha(style.dimStrength, 1) : 1;
+    const focusDimAlpha = getDimAlpha(style.dimStrength, combinedFocusProgress);
+    const focusAlpha = isClickFlash
       ? 1
       : hasSearchHighlight
         ? isSearchHighlightNode
@@ -758,8 +940,19 @@ function drawNodes(view, ctx) {
         : hasAnyFocus
           ? focusDimAlpha + (1 - focusDimAlpha) * relationProgress
           : 1;
+    const nodeAlpha =
+      (isClickFlash || isSelectedNode || isHoverNodeRaw ? 1 : focusAlpha) *
+      getLowDegreeAlpha(
+        view.plugin.getSettings().dim_low_degree_nodes,
+        node.degree,
+        isClickFlash ||
+          isSelectedNode ||
+          isHoverNodeRaw ||
+          relationProgress > 0.001 ||
+          searchNeighbors.has(node.id)
+      );
 
-    let fillColor = getNodeColor(view.plugin, node, groupColor);
+    let fillColor = style.color;
     if (isClickFlash) fillColor = '#ffffff';
 
     ctx.globalAlpha = nodeAlpha;
@@ -798,11 +991,11 @@ function drawNodes(view, ctx) {
 
     const label = getLabelAppearance(
       zoom,
-      getLabelZoomThreshold(view, node.id),
-      getLabelFontSize(view, node.id),
+      style.labelThreshold,
+      style.fontSize,
       nodeAlpha,
       isSelectedNode || isHover || isFocusNode,
-      getLabelMinimumSize(view, node.id)
+      style.minimumSize
     );
     if (label.alpha > 0) {
       ctx.globalAlpha = label.alpha;
@@ -856,6 +1049,7 @@ module.exports = {
   getLabelMinimumSize,
   getGroupColorForNode,
   getGroupStyleMap,
+  getPreparedAppearance,
   nodeMatchesParsedGroup,
   drawGrid,
   drawHiddenGridMarkers,

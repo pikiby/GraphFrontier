@@ -2,9 +2,11 @@
 const GRAPHFRONTIER_VIEW_TYPE = 'graphfrontier-view';
 const LOCAL_GRAPHFRONTIER_VIEW_TYPE = 'graphfrontier-local-view';
 const NODE_MULTIPLIER_MIN = 1;
-const NODE_MULTIPLIER_MAX = 10;
+const NODE_MULTIPLIER_MAX = 20;
 const ZOOM_STEP_FACTOR = 1.12;
 const TWO_PI = Math.PI * 2;
+
+const SETTINGS_TABS = ['groups', 'display', 'physics', 'selection'];
 
 const DEFAULT_DATA = {
   active_layout_name: 'data.json',
@@ -31,7 +33,12 @@ const DEFAULT_DATA = {
   settings: {
     grid_step: 20,
     grid_line_width: 1,
+    grid_color: null,
+    grid_opacity: null,
     show_grid: true,
+    dim_low_degree_nodes: false,
+    custom_background: false,
+    background_color: null,
     hide_orphans: true,
     hide_attachments: true,
     include_unlinked_attachments: false,
@@ -51,6 +58,8 @@ const DEFAULT_DATA = {
     edge_width_scale: 0.34,
     edge_opacity: 1,
     edge_color: null,
+    show_arrows: false,
+    reverse_arrows: false,
     label_zoom_steps: 10,
     label_font_size: 9,
     hover_dim_strength: 80,
@@ -72,6 +81,7 @@ const DEFAULT_DATA = {
     pan_y: 0,
     zoom: 1,
     side_panel_sections: {},
+    settings_tab: 'groups',
   },
 };
 
@@ -114,10 +124,10 @@ const HOTKEY_COMMANDS = [
     name: 'Export static graph to HTML',
   },
   { id: 'graphfrontier-unpin-linked-nodes-under-cursor', name: 'Unpin linked nodes under cursor' },
-  { id: 'graphfrontier-paint-edges-under-cursor', name: 'Paint edges under cursor' },
+  { id: 'graphfrontier-paint-edges-under-cursor', name: 'Paint links under cursor' },
   {
     id: 'graphfrontier-clear-painted-edges-under-cursor',
-    name: 'Clear painted edges under cursor',
+    name: 'Clear painted links under cursor',
   },
   { id: 'graphfrontier-strong-pull-under-cursor', name: 'Strong pull under cursor' },
   { id: 'graphfrontier-clear-strong-pull-under-cursor', name: 'Clear strong pull under cursor' },
@@ -163,6 +173,7 @@ function normalizeAttachmentExtensions(value) {
 }
 
 module.exports = {
+  SETTINGS_TABS,
   normalizeAttachmentExtensions,
   GRAPHFRONTIER_VIEW_TYPE,
   LOCAL_GRAPHFRONTIER_VIEW_TYPE,

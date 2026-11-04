@@ -1,10 +1,14 @@
-const { Notice, Platform } = require('obsidian');
+const { Menu, Notice, Platform } = require('obsidian');
 
-async function openNoteTarget(app, type, target, hostWindow) {
-  const nodeRequire =
-    !Platform.isMobile && typeof hostWindow?.require === 'function'
-      ? hostWindow.require.bind(hostWindow)
-      : null;
+const NOTE_NAVIGATION_EXAMPLE = `url:
+  - https://example.com
+  - '[Dashboard](https://example.com/dashboard)'
+path:
+  - '[Project](/home/user/projects/example)'
+  - '[Schema](Schemas/schema.sql)'
+`;
+
+function validateNoteTarget(type, target) {
   if (type === 'url') {
     let url;
     try {
@@ -14,12 +18,9 @@ async function openNoteTarget(app, type, target, hostWindow) {
     }
     if (!['http:', 'https:'].includes(url.protocol))
       throw new Error('URL must use http:// or https://');
-    if (nodeRequire) await nodeRequire('electron').shell.openExternal(url.href);
-    else hostWindow.open(url.href, '_blank', 'noopener,noreferrer');
-    return;
+    return url;
   }
-
-  if (type === 'path' && /^obsidian:/i.test(target)) {
+  if (/^obsidian:/i.test(target)) {
     let uri;
     try {
       uri = new URL(target);
@@ -28,6 +29,55 @@ async function openNoteTarget(app, type, target, hostWindow) {
     }
     if (!/^obsidian:\/\/open\?/i.test(target) || uri.hostname !== 'open' || !uri.search)
       throw new Error('Obsidian path must use obsidian://open?...');
+    return uri;
+  }
+  if (
+    /\p{Cc}/u.test(target) ||
+    (/^[a-z][a-z\d+.-]*:/i.test(target) && !/^[a-z]:[\\/]/i.test(target))
+  )
+    throw new Error('Path must be a local path or obsidian://open link');
+  return null;
+}
+
+function getNoteTargets(type, value) {
+  const array = Array.isArray(value);
+  return (array ? value : [value]).flatMap((entry) => {
+    if (typeof entry !== 'string' || !entry.trim()) return [];
+    const raw = entry.trim();
+    const aliasEnd = raw.startsWith('[') ? raw.indexOf('](') : -1;
+    const alias = aliasEnd > 0 && raw.endsWith(')');
+    const target = alias ? raw.slice(aliasEnd + 2, -1).trim() : raw;
+    if (!target) return [];
+    let uri;
+    try {
+      uri = validateNoteTarget(type, target);
+    } catch {
+      // Keep legacy scalar errors actionable on click; arrays list valid choices only.
+      if (array) return [];
+    }
+    const label = (
+      (alias && raw.slice(1, aliasEnd).trim()) ||
+      (type === 'url' && uri
+        ? `${uri.host}${uri.pathname}${uri.search}${uri.hash}`
+        : target
+            .replace(/[\\/]+$/, '')
+            .split(/[\\/]/)
+            .at(-1) || target)
+    ).replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, ' ');
+    const characters = Array.from(label);
+    return [
+      { target, label: characters.length > 48 ? `${characters.slice(0, 45).join('')}...` : label },
+    ];
+  });
+}
+
+async function openNoteTarget(app, type, target, hostWindow) {
+  const uri = validateNoteTarget(type, target);
+  const nodeRequire =
+    !Platform.isMobile && typeof hostWindow?.require === 'function'
+      ? hostWindow.require.bind(hostWindow)
+      : null;
+  if (uri) {
     if (nodeRequire) await nodeRequire('electron').shell.openExternal(uri.href);
     else hostWindow.open(uri.href, '_blank', 'noopener,noreferrer');
     return;
@@ -53,28 +103,62 @@ async function openNoteTarget(app, type, target, hostWindow) {
   if (error) throw new Error(error);
 }
 
+function addNoteTargetActions(menu, app, key, value, hostWindow, options = {}) {
+  const targets = getNoteTargets(key, value);
+  if (!targets.length) return;
+  const title = key === 'url' ? 'Open URL' : 'Open path';
+  const icon = key === 'url' ? 'external-link' : 'folder-open';
+  const add =
+    options.add ||
+    ((targetMenu, label, actionIcon, callback) => {
+      let added;
+      targetMenu.addItem((item) => {
+        added = item;
+        item
+          .setTitle(label)
+          .setIcon(actionIcon)
+          .onClick(async () => {
+            try {
+              await callback();
+            } catch (error) {
+              new Notice(`Cannot open ${key}: ${error.message}`);
+            }
+          });
+      });
+      return added;
+    });
+  const choice = (targetMenu, entry, label) => {
+    const item = add(targetMenu, label, icon, () =>
+      openNoteTarget(app, key, entry.target, hostWindow)
+    );
+    item?.dom?.setAttribute('title', entry.target);
+  };
+  const fill = (targetMenu) => targets.forEach((entry) => choice(targetMenu, entry, entry.label));
+  if (options.submenu) options.submenu(title, icon, fill);
+  else
+    menu.addItem((item) => {
+      item.setTitle(title).setIcon(icon);
+      if (typeof item.setSubmenu === 'function') fill(item.setSubmenu());
+      else
+        item.onClick((event) => {
+          const submenu = new Menu(app);
+          fill(submenu);
+          submenu.showAtMouseEvent(event);
+        });
+    });
+}
+
 function addNoteNavigationActions(menu, app, file, hostWindow) {
   const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
   if (!frontmatter) return;
-  for (const [key, title, icon] of [
-    ['url', 'Open URL', 'external-link'],
-    ['path', 'Open path', 'folder-open'],
-  ]) {
-    const value = frontmatter[key];
-    if (typeof value !== 'string' || !value.trim()) continue;
-    menu.addItem((item) =>
-      item
-        .setTitle(title)
-        .setIcon(icon)
-        .onClick(async () => {
-          try {
-            await openNoteTarget(app, key, value.trim(), hostWindow);
-          } catch (error) {
-            new Notice(`Cannot open ${key}: ${error.message}`);
-          }
-        })
-    );
-  }
+  for (const key of ['url', 'path'])
+    addNoteTargetActions(menu, app, key, frontmatter[key], hostWindow);
 }
 
-module.exports = { addNoteNavigationActions, openNoteTarget };
+module.exports = {
+  addNoteNavigationActions,
+  addNoteTargetActions,
+  getNoteTargets,
+  openNoteTarget,
+  NOTE_NAVIGATION_EXAMPLE,
+};

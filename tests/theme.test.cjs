@@ -319,13 +319,17 @@ test('CSS changes refresh cached custom colours through the graph owner window',
   assert.equal(view.canvasTheme.grid, '#79674e');
   assert.equal(view.canvasTheme.selection, '#735a9b');
   let change;
+  let activate;
   let rendered = 0;
   app.workspace.on = (name, callback) => {
-    assert.equal(name, 'css-change');
-    change = callback;
+    if (name === 'css-change') change = callback;
+    else {
+      assert.equal(name, 'active-leaf-change');
+      activate = callback;
+    }
     return callback;
   };
-  view.registerEvent = (ref) => assert.equal(ref, change);
+  view.registerEvent = (ref) => assert([change, activate].includes(ref));
   view.render = () => rendered++;
   GraphFrontierView.prototype.bindEvents.call(view);
   variables['--text-normal'] = '#eddcc8';

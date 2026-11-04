@@ -83,7 +83,7 @@ test('list storage survives reload and layout replacement without becoming layou
 test('failed list writes and malformed storage preserve state and prevent overwriting', async (t) => {
   const { plugin, files, adapter } = setup(t);
   await plugin.updateNodeList({ action: 'create', listId: 'errors', name: 'Errors' });
-  const previous = structuredClone(plugin.getNodeLists());
+  const previous = JSON.parse(JSON.stringify(plugin.getNodeLists()));
   adapter.write = async () => {
     throw new Error('Disk failure');
   };

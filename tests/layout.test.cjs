@@ -14,6 +14,172 @@ function holdWrite(t, adapter) {
   return { entered: entered.promise, release: release.resolve };
 }
 
+function settingsPanelFixture(t, data = {}) {
+  const f = fixture(t, data);
+  const { view } = f;
+  view.sidePanelEl = element();
+  view.sidePanelOpen = true;
+  const builders = {};
+  for (const method of [
+    'buildFindSection',
+    'buildGroupEditorSection',
+    'buildQueryRuleEditorSection',
+    'addLayoutFileSearchRow',
+    'addSideSaveLayoutButton',
+    'buildAttachmentFileTypesControl',
+  ]) {
+    builders[method] = t.mock.method(view, method, (parent) => parent.createDiv({ text: method }));
+  }
+  view.buildSidePanel = Object.getPrototypeOf(view).buildSidePanel;
+  view.buildSidePanel();
+  return { ...f, builders };
+}
+
+test('sidebar order is Search, Settings tabs, Layout and each existing builder is reused once', (t) => {
+  const { view, builders } = settingsPanelFixture(t, {
+    settings: { hide_attachments: false },
+    view_state: {
+      side_panel_sections: { display: false, groups: false, physics: false, selection: false },
+    },
+  });
+  const sections = view.sidePanelEl.children[1].children;
+  assert.deepEqual(
+    sections.map((section) => section.children[0].text),
+    ['Search', 'Settings', 'Layout']
+  );
+  const tabs = [...view.settingsTabs];
+  assert.deepEqual(
+    tabs.map(([id]) => id),
+    ['groups', 'display', 'physics', 'selection']
+  );
+  const settings = sections[1].children[1];
+  assert.equal(settings.children[0].attributes.role, 'tablist');
+  assert.deepEqual(
+    settings.children.slice(1),
+    tabs.map(([, { panel }]) => panel)
+  );
+  const groups = view.settingsTabs.get('groups').panel;
+  const display = view.settingsTabs.get('display').panel;
+  assert.equal(builders.buildGroupEditorSection.mock.calls[0].arguments[0], groups);
+  assert.equal(builders.buildGroupEditorSection.mock.callCount(), 1);
+  assert.deepEqual(
+    builders.buildQueryRuleEditorSection.mock.calls.map((call) => [
+      call.arguments[0],
+      call.arguments[1].key,
+    ]),
+    [
+      [groups, 'blacklist'],
+      [groups, 'whitelist'],
+    ]
+  );
+  assert.equal(builders.buildFindSection.mock.calls[0].arguments[0], sections[0].children[1]);
+  assert.equal(
+    builders.addSideSaveLayoutButton.mock.calls[0].arguments[0],
+    sections[2].children[1]
+  );
+  const descendants = (node) => [node, ...node.children.flatMap(descendants)];
+  const controls = descendants(display);
+  for (const key of [
+    'dim_low_degree_nodes',
+    'show_arrows',
+    'reverse_arrows',
+    'custom_background',
+    'background_color',
+    'grid_color',
+    'grid_opacity',
+    'grid_line_width',
+    'hide_attachments',
+    'include_unlinked_attachments',
+  ])
+    assert(controls.includes(view.sideControls.get(key).input), `${key} stays in Display`);
+  assert(
+    descendants(view.settingsTabs.get('physics').panel).includes(
+      view.sideControls.get('repel_strength').input
+    )
+  );
+  assert(
+    descendants(view.settingsTabs.get('selection').panel).includes(
+      view.sideControls.get('selection_box_modifier').input
+    )
+  );
+  view.selectSettingsTab('display');
+  assert.equal(display.hidden, false, 'legacy collapsed Display does not hide tab content');
+});
+
+test('Settings tabs are accessible, compact, persist through rebuild and never wake or dirty physics', (t) => {
+  const { view, plugin } = settingsPanelFixture(t);
+  const persist = t.mock.method(plugin, 'schedulePersist', () => {});
+  t.mock.method(view, 'kickLayoutSearch', () => assert.fail('No physics kick for tabs'));
+  view.layoutPaused = true;
+  view.layoutAutosaveDirty = false;
+  const groups = view.settingsTabs.get('groups');
+  assert.equal(groups.button.attributes['aria-selected'], 'true');
+  assert.equal(groups.button.attributes.role, 'tab');
+  assert.equal(groups.panel.attributes.role, 'tabpanel');
+  assert.equal(groups.button.attributes['aria-controls'], groups.panel.id);
+  assert.equal(groups.panel.attributes['aria-labelledby'], groups.button.id);
+  const key = (key) => ({ key, preventDefault() {}, stopPropagation() {} });
+  groups.button.events.keydown(key('ArrowRight'));
+  assert.equal(plugin.getSettingsTab(), 'display');
+  assert.equal(view.settingsTabs.get('display').button.focused, true);
+  assert.equal(groups.button.tabIndex, -1);
+  assert.equal(groups.panel.hidden, true);
+  assert.equal(persist.mock.callCount(), 1);
+  view.settingsTabs.get('display').button.events.keydown(key('End'));
+  assert.equal(plugin.getSettingsTab(), 'selection');
+  view.settingsTabs.get('selection').button.events.keydown(key('ArrowRight'));
+  assert.equal(plugin.getSettingsTab(), 'groups');
+  view.settingsTabs.get('groups').button.events.keydown(key('ArrowLeft'));
+  assert.equal(plugin.getSettingsTab(), 'selection');
+  view.settingsTabs.get('selection').button.events.keydown(key('Home'));
+  assert.equal(plugin.getSettingsTab(), 'groups');
+  view.settingsTabs.get('physics').button.events.click();
+  const calls = persist.mock.callCount();
+  view.selectSettingsTab('physics');
+  view.selectSettingsTab('not-a-tab');
+  assert.equal(persist.mock.callCount(), calls);
+  view.buildSidePanel();
+  assert.equal(view.settingsTabs.get('physics').panel.hidden, false);
+  assert.equal(view.layoutPaused, true);
+  assert.equal(view.layoutAutosaveDirty, false);
+  const css = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '../src/static/styles.css'),
+    'utf8'
+  );
+  assert.match(
+    css,
+    /\.graphfrontier-settings-tabs\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/
+  );
+  assert.match(css, /\.graphfrontier-settings-panel\[hidden\]\s*\{\s*display:\s*none/);
+});
+
+test('Settings tab is a preference, excluded from snapshots/files and preserved by bootstrap and layout activation', async (t) => {
+  const { view, plugin, putLayout, writes, flushTimers, preferences } = settingsPanelFixture(t, {
+    view_state: { settings_tab: 'physics' },
+  });
+  assert.equal(plugin.getSettingsTab(), 'physics');
+  assert.equal('settings_tab' in view.captureLayoutSnapshot('data.json').view_state, false);
+  await view.saveCurrentLayout({ silent: true });
+  assert.equal('settings_tab' in JSON.parse(writes.at(-1).contents).view_state, false);
+  assert.equal(plugin.getSettingsTab(), 'physics');
+  putLayout({ view_state: { settings_tab: 'selection' } }, 'other.json');
+  await view.loadSavedLayout({ layoutFileName: 'other.json', silent: true });
+  assert.equal(plugin.getSettingsTab(), 'physics', 'layout tab cannot overwrite preference');
+  assert.equal(view.settingsTabs.get('physics').panel.hidden, false);
+  view.selectSettingsTab('display');
+  await plugin.persistPluginDataOnly();
+  assert.equal(preferences.at(-1).view_state.settings_tab, 'display');
+  await plugin.bootstrapActiveLayoutData();
+  assert.equal(plugin.getSettingsTab(), 'display');
+  view.buildSidePanel();
+  assert.equal(view.settingsTabs.get('display').panel.hidden, false);
+  assert.equal(
+    plugin.normalizeData({ view_state: { settings_tab: 'invalid' } }).view_state.settings_tab,
+    'groups'
+  );
+  flushTimers();
+});
+
 function asymmetricStar(t, settle = true) {
   const f = fixture(t);
   let seed = 3;
@@ -126,7 +292,7 @@ for (const guard of ['closed', 'metadata', 'backups']) {
     assert.equal(step.mock.callCount(), 0);
     assert.equal(view.layoutStillFrames, 5);
     assert.equal(render.mock.callCount(), guard === 'closed' ? 0 : 1);
-    assert.equal(frames.length, guard === 'closed' ? 0 : 1);
+    assert.equal(frames.length, 0, 'guards wait for an event, not perpetual frames');
   });
 }
 
@@ -610,7 +776,7 @@ test('file write failure propagates false, retaining dirty state and old snapsho
     saved_positions: { 'alpha.md': { x: 1, y: 2 }, hidden: { x: 7, y: 8 } },
     saved_layout_settings: { grid_step: 10 },
   });
-  const original = structuredClone(plugin.data);
+  const original = JSON.parse(JSON.stringify(plugin.data));
   const write = t.mock.method(adapter, 'write', async () => {
     throw new Error('Read-only adapter');
   });
@@ -636,7 +802,7 @@ test('successful save commits only after write and stores a complete normalized 
     view_state: { side_panel_sections: { groups: true } },
     groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
   });
-  const before = structuredClone(plugin.data);
+  const before = JSON.parse(JSON.stringify(plugin.data));
   const gate = holdWrite(t, adapter);
   const saving = view.saveCurrentLayout();
   await gate.entered;
@@ -827,7 +993,7 @@ test('nonempty search still forbids save without mutating layout state', async (
   const { plugin, view, writes } = fixture(t);
   view.searchInputValue = 'alpha';
   view.layoutAutosaveDirty = true;
-  const before = structuredClone(plugin.data);
+  const before = JSON.parse(JSON.stringify(plugin.data));
   assert.equal(await view.saveCurrentLayout({ layoutFileName: 'other.json' }), false);
   assert.deepEqual(plugin.data, before);
   assert.equal(writes.length, 0);
@@ -846,7 +1012,7 @@ for (const raw of ['{broken', '', 'null', '[]', 'false', '42']) {
   test(`bootstrap preserves an existing invalid layout: ${JSON.stringify(raw)}`, async (t) => {
     const { plugin, view, files, writes, layoutPath, preferences } = fixture(t);
     files.set(layoutPath(), raw);
-    const before = structuredClone(plugin.data);
+    const before = JSON.parse(JSON.stringify(plugin.data));
     assert.equal((await plugin.readLayoutFileData('data.json')).status, 'error');
     assert.equal(await plugin.bootstrapActiveLayoutData(), false);
     assert.equal(files.get(layoutPath()), raw);
@@ -1091,8 +1257,14 @@ test('entry starts once and the frame loop lets an equilibrium layout sleep norm
   const kick = t.mock.method(view, 'kickLayoutSearch');
   await view.onOpen();
   assert.equal(view.layoutPaused, false);
-  for (let i = 0; i < 12; i += 1) frames.shift()();
+  for (let i = 0; i < 12 && frames.length; i += 1) frames.shift()();
   assert.equal(view.layoutPaused, true);
+  assert.equal(frames.length, 0, 'settled graph stops scheduling frames');
+  view.requestFrame();
+  view.requestFrame();
+  assert.equal(frames.length, 1, 'a real wake coalesces to one frame');
+  frames.shift()();
+  assert.equal(frames.length, 0, 'one settled redraw returns to idle');
   assert.equal(kick.mock.callCount(), 1);
   assert.equal(writes.length, 0);
 });
@@ -1109,7 +1281,7 @@ for (const reason of ['read failure', 'another open root']) {
       app.workspace.getLeavesOfType().push({ view: { isOpen: true } });
       t.mock.method(plugin, 'setActiveLayoutFile', () => assert.fail('No duplicate root reload'));
     }
-    const data = structuredClone(plugin.data);
+    const data = JSON.parse(JSON.stringify(plugin.data));
     const expectedX = reason === 'read failure' ? view.nodeById.get('alpha.md').x : 300;
     await view.onOpen();
     for (let i = 0; i < 5; i += 1) view.stepSimulation();
@@ -1483,6 +1655,31 @@ test('unlinked attachment UI toggle follows Show attachments and uses normal dat
   Object.getPrototypeOf(view).buildSidePanel.call(view);
   assert.equal(view.sideControls.has('include_unlinked_attachments'), true);
   assert.equal(fileTypes.mock.callCount(), 2);
+  assert.equal(view.reverseArrowsRowEl.style.display, 'none');
+  assert.equal(view.backgroundColorRowEl.style.display, 'none');
+  assert.equal(
+    view.sideControls.has('strong_pull_multiplier'),
+    false,
+    'no global force slider in sidebar'
+  );
+  view.sideControls.get('show_arrows').input.events.click();
+  Object.getPrototypeOf(view).syncSidePanelControls.call(view);
+  assert.equal(view.reverseArrowsRowEl.style.display, '');
+  view.sideControls.get('reverse_arrows').input.events.click();
+  view.sideControls.get('show_arrows').input.events.click();
+  Object.getPrototypeOf(view).syncSidePanelControls.call(view);
+  assert.equal(view.reverseArrowsRowEl.style.display, 'none');
+  assert.equal(plugin.getSettings().reverse_arrows, true, 'hiding retains reverse preference');
+  view.sideControls.get('custom_background').input.events.click();
+  Object.getPrototypeOf(view).syncSidePanelControls.call(view);
+  assert.equal(view.backgroundColorRowEl.style.display, '');
+  const background = view.sideControls.get('background_color').input;
+  background.value = '#123456';
+  background.events.input();
+  view.sideControls.get('custom_background').input.events.click();
+  Object.getPrototypeOf(view).syncSidePanelControls.call(view);
+  assert.equal(view.backgroundColorRowEl.style.display, 'none');
+  assert.equal(plugin.getSettings().background_color, '#123456');
 });
 
 test('excluded types remain excluded after disappearing and returning while new types are included', (t) => {
@@ -1520,6 +1717,78 @@ test('excluded types remain excluded after disappearing and returning while new 
       .sort(),
     ['new.PDF', 'note.md']
   );
+});
+
+test('reciprocal references retain actual source and one spring, including projection metadata', (t) => {
+  const { plugin, app, view } = fixture(t, { settings: { hide_orphans: false } });
+  const notes = ['a.md', 'b.md'].map((path) => ({ path, basename: path, extension: 'md' }));
+  app.vault.getMarkdownFiles = () => notes;
+  app.vault.getAbstractFileByPath = (path) => notes.find((note) => note.path === path);
+  app.metadataCache.getFileCache = () => ({});
+  app.metadataCache.resolvedLinks = { 'b.md': { 'a.md': 1 }, 'a.md': { 'b.md': 1 } };
+  const graph = Object.getPrototypeOf(plugin).collectGraphData.call(plugin);
+  assert.deepEqual(graph.edges, [{ source: 'b.md', target: 'a.md', bidirectional: true }]);
+  plugin.collectGraphData = () => graph;
+  view.refreshFromVault({ keepCamera: true });
+  assert.equal(view.edges.length, 1);
+  assert.equal(view.edges[0].bidirectional, true);
+  assert(view.nodes.every((node) => node.degree === 1));
+  const { projectSubgraphs } = loadSource('subgraphs.js');
+  assert.equal(projectSubgraphs(graph, [], null).edges[0].bidirectional, true);
+});
+
+test('new visuals default safely, normalize and round-trip layouts without losing disabled background color', async (t) => {
+  const { plugin, view, putLayout } = fixture(t);
+  view.updateCanvasBackgroundColor = Object.getPrototypeOf(view).updateCanvasBackgroundColor;
+  assert.equal(plugin.getSettings().dim_low_degree_nodes, false);
+  assert.equal(plugin.getSettings().custom_background, false);
+  assert.equal(plugin.getSettings().grid_opacity, null);
+  const patch = {
+    dim_low_degree_nodes: true,
+    custom_background: false,
+    background_color: '#abcdef',
+    grid_color: '#123456',
+    grid_opacity: 0,
+    grid_line_width: 2,
+    show_arrows: true,
+    reverse_arrows: true,
+    strong_pull_multiplier: 20,
+  };
+  Object.assign(plugin.data.settings, patch);
+  plugin.setNodeVisualSetting('alpha.md', 'show_arrows', false);
+  await view.saveCurrentLayout({ silent: true });
+  Object.assign(plugin.data.settings, { background_color: null, show_arrows: false });
+  await view.loadSavedLayout();
+  for (const [key, value] of Object.entries(patch)) assert.equal(plugin.getSettings()[key], value);
+  assert.equal(plugin.data.node_visual_settings['alpha.md'].show_arrows, false);
+  view.updateCanvasBackgroundColor();
+  assert.equal(view.canvasBackgroundColor, view.canvasTheme.background);
+  plugin.data.settings.custom_background = true;
+  view.updateCanvasBackgroundColor();
+  assert.equal(view.canvasBackgroundColor, '#abcdef');
+  plugin.data.settings.custom_background = false;
+  view.updateCanvasBackgroundColor();
+  assert.equal(plugin.data.settings.background_color, '#abcdef');
+  putLayout({ settings: {} });
+  await view.loadSavedLayout();
+  assert.equal(plugin.getSettings().show_arrows, false);
+  assert.equal(plugin.getSettings().reverse_arrows, false);
+  assert.equal(plugin.getSettings().custom_background, false);
+  assert.equal(plugin.getSettings().dim_low_degree_nodes, false);
+  const invalid = plugin.normalizeData({
+    settings: {
+      grid_color: 'red',
+      grid_opacity: 5,
+      grid_line_width: 9,
+      custom_background: 'true',
+      strong_pull_multiplier: 99,
+    },
+  });
+  assert.equal(invalid.settings.grid_color, null);
+  assert.equal(invalid.settings.grid_opacity, 1);
+  assert.equal(invalid.settings.grid_line_width, 2);
+  assert.equal(invalid.settings.custom_background, false);
+  assert.equal(invalid.settings.strong_pull_multiplier, 20);
 });
 
 test('two saved layouts restore independent attachment visibility and exclusions', async (t) => {

@@ -70,7 +70,7 @@ membership. No notes, files, folders or links are modified.
 The parent graph always shows a hollow standard ball with a thicker outer outline.
 There is no in-place expand/collapse. Outside links are aggregated onto the container,
 deduplicated and used by the ordinary node physics. The container supports the normal
-drag, selection, exact/grid/orbit pin, Strong pull, color, aura, size and edge actions.
+drag, selection, exact/grid/orbit pin, Strong pull, color, aura, size and link actions.
 
 Single-click selects the container. Double-click or **Open subgraph in pane** opens its
 contents in a separate Obsidian pane, like a local graph, never an OS popout. The outer
@@ -126,7 +126,11 @@ Flow:
 
 ## Right-Click Context Menu On Node
 
-**Visual settings** provides per-node sliders for node size, edge width,
+The sidebar keeps Search first and Layout last. Its Settings section groups existing controls
+into Groups (including Blacklist/Whitelist), Display (including Attachments), Physics and
+Selection tabs. The chosen tab survives rebuilds and layout changes without changing physics.
+
+**Visual settings** provides per-node sliders for node size, link width,
 text zoom, text size and hover dimming. Notes and attachments use the same size controls.
 Node size supports 0.1-2 in both menus. **Text zoom** supports 1-40 steps in both menus. **Node color** sets the global base color or
 an individual override; individual color takes priority over Groups, then the global base.
@@ -136,22 +140,28 @@ and its 0-5000 scale corresponds to a radius of 0-500 graph units.
 Both controls are individual-only; the gradient uses the node's color.
 The aura does not affect physics or the mouse hit area.
 Each value inherits the main panel setting until changed; one **Reset visual settings**
-action restores all visual inheritance and clears this node's edge painting.
-Gravity nodes omit edge settings, edge painting and Strong pull.
-Hover dimming controls how much this node fades when another node is focused. Edge widths
-are physical screen pixels (0.1-5) and apply to incident edges; if both endpoints override a
+action restores all visual inheritance and clears this node's link painting.
+Gravity nodes omit link settings, link painting and Strong pull.
+Hover dimming controls how much this node fades when another node is focused. Link widths
+are physical screen pixels (0.1-5) and apply to incident links; if both endpoints override a
 width, the larger override wins.
+Link color, opacity and arrow toggles inherit individual > group > global, preferring the stored source at equal priority. Reverse arrows is visual-only and appears only when arrows are on. Strong pull x (1-20) targets the node/eligible selection, or the group when opened from group settings; visual reset never resets force multipliers.
 Visual changes do not restart physics. Overrides follow layout Save, Load and autosave,
 and are included in static HTML export. Grid, graph-wide visibility and physics settings
 are not individual visual overrides.
 
-Notes with a `url` or `path` string in YAML properties have **Open URL** or **Open path**
-actions in their node's right-click menu:
+Notes with `url` or `path` YAML properties have **Open URL** or **Open path** actions
+in their node's right-click menu. Each property accepts a string (as before) or a
+list of strings. List entries can be raw targets or quoted Markdown aliases:
 
 ```yaml
 ---
-url: https://example.com
-path: /home/user/Documents/project
+url:
+  - https://example.com
+  - '[Dashboard](https://example.com/dashboard)'
+path:
+  - '[Project](/home/user/projects/example)'
+  - '[Schema](Schemas/schema.sql)'
 ---
 ```
 
@@ -159,6 +169,12 @@ Either property can be used on its own. URLs open in the default browser. Vault-
 paths open in Obsidian; external files and folders open through the desktop's default application.
 Paths can be absolute, vault-relative, or start with `~/`. External paths must exist on the
 current device. The note and normal node click behavior are unchanged.
+Only HTTP(S) URLs and local paths or `obsidian://open?...` path links are supported.
+Empty or invalid list entries are ignored. Targets always appear in a hover submenu,
+even with one target, so its alias stays visible. Aliases are plain text; raw URLs show host and path, raw paths show the basename.
+Long labels are shortened; hover a choice to see its full target. Quote aliases in YAML,
+including targets containing spaces or parentheses. Plugin settings -> Navigation offers
+the syntax and **Copy example**, which copies YAML only when clicked, without editing a note.
 
 Right-clicking a selected node targets the entire selection. Right-clicking an unselected
 node targets only that node, without changing selection. Empty canvas offers compatible
@@ -180,8 +196,8 @@ grid; on release the node takes the nearest free cell and a notice names the hid
 
 Basic **Visual settings** and reset apply to eligible selected nodes. Each control shows
 its eligible count; mixed values are marked **Mixed**, including colors, without writing
-anything on opening. Edge controls omit gravity nodes. In a multi-node menu, file opening/properties, rename, deletion, linked/orbit-center
-operations, native plugin actions, Strong pull and edge painting remain single-only under
+anything on opening. Link controls omit gravity nodes. In a multi-node menu, file opening/properties, rename, deletion, linked/orbit-center
+operations, native plugin actions and Strong pull activation/clearing remain single-only under
 **Only for <name>**. Deletion never becomes a batch operation. Blank-canvas selection
 menus have no single-only actions.
 
@@ -190,7 +206,7 @@ For one effective target, the menu is arranged in this order:
 - **Copy system root**, then **Copy**: Obsidian URL, vault-relative path, linked names and linked paths.
 - **Open path**, **Open URL**, then **Open**: same tab, new window, default app, system explorer and file navigation.
 - **Pin node**, **Pin to grid**, **Pin linked**, and **Unpin node**. Linked actions include both notes and attachments.
-- **Visual settings**: text size, strong pull and edge painting, including their reset actions.
+- **Visual settings**: text size, link appearance and targeted Strong pull, with visual reset independent of force settings.
 - **Select linked nodes**, **Bookmark**, then **Other**: move, bookmark, merge, add to search and local graph.
 - **Delete** at the bottom uses Obsidian's normal deletion confirmation.
 

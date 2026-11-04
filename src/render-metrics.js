@@ -11,6 +11,39 @@ function getNodeWorldRadius(baseRadius, zoom) {
   return baseRadius / Math.sqrt(Math.max(zoom, 0.0001));
 }
 
+function getLowDegreeAlpha(enabled, degree, highlighted) {
+  return enabled && Number(degree || 0) <= 1 && !highlighted ? 0.65 : 1;
+}
+
+// Open arrowheads share the link's stroke bucket, opacity and screen-space width.
+function getLinkArrowSegments(x1, y1, x2, y2, radius1, radius2, reverse, reciprocal, width) {
+  const length = Math.hypot(x2 - x1, y2 - y1);
+  const size = Math.max(5, Math.min(12, 5 + width));
+  if (length < radius1 + radius2 + size + 4) return [];
+  const ux = (x2 - x1) / length,
+    uy = (y2 - y1) / length;
+  const points = [];
+  const head = (x, y, radius, sign) => {
+    const tx = x - ux * sign * (radius + 2),
+      ty = y - uy * sign * (radius + 2);
+    const bx = tx - ux * sign * size,
+      by = ty - uy * sign * size;
+    points.push(
+      bx - uy * size * 0.5,
+      by + ux * size * 0.5,
+      tx,
+      ty,
+      tx,
+      ty,
+      bx + uy * size * 0.5,
+      by - ux * size * 0.5
+    );
+  };
+  if (!reverse || reciprocal) head(x2, y2, radius2, 1);
+  if (reverse || reciprocal) head(x1, y1, radius1, -1);
+  return points;
+}
+
 // Edge widths are physical screen pixels, independent of zoom.
 function getEdgeCssWidth(physicalWidth, devicePixelRatio) {
   return physicalWidth / Math.max(devicePixelRatio || 1, 0.0001);
@@ -89,6 +122,8 @@ function getFocusEdgeAlpha(baseAlpha, progress) {
 }
 
 module.exports = {
+  getLowDegreeAlpha,
+  getLinkArrowSegments,
   quantizeFocusProgress,
   getFocusEdgeWidth,
   getFocusEdgeColor,

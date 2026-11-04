@@ -10,6 +10,28 @@ const DARK_THEME = Object.freeze({
   gridOpacity: 0.2,
 });
 
+// Native color inputs require six-digit hex, while themes may provide RGB or short hex.
+function getColorInputValue(value, fallback) {
+  const text = String(value || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(text)) return text;
+  const short = /^#([0-9a-f]{3})$/i.exec(text);
+  if (short) return '#' + [...short[1]].map((digit) => digit + digit).join('');
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(text);
+  if (rgb)
+    return (
+      '#' +
+      rgb
+        .slice(1, 4)
+        .map((channel) =>
+          Math.round(Math.max(0, Math.min(255, Number(channel))))
+            .toString(16)
+            .padStart(2, '0')
+        )
+        .join('')
+    );
+  return fallback;
+}
+
 // Resolve inherited variables on the graph element, using its own window for popouts.
 // Called on open, resize and CSS changes, never per node or animation frame.
 function readGraphTheme(element) {
@@ -67,4 +89,4 @@ function getLabelAppearance(
   return { alpha: Math.max(0.45, alpha), fontSize };
 }
 
-module.exports = { DARK_THEME, readGraphTheme, getLabelAppearance };
+module.exports = { DARK_THEME, readGraphTheme, getLabelAppearance, getColorInputValue };

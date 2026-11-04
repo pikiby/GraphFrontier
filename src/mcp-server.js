@@ -53,7 +53,7 @@ function createProtocolServer(api, version) {
     ],
     [
       'get_graph',
-      'Read a bounded page of node metadata or edges, not note contents. Default visibleOnly=true. Follow nextOffset; contextToken detects layout/graph changes.',
+      'Read a bounded page of node metadata or links, not note contents. Default visibleOnly=true. Follow nextOffset; contextToken detects layout/graph changes.',
       {
         ...view,
         ...page,

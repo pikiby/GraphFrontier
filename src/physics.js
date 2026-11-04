@@ -218,8 +218,17 @@ function stepLayoutAutosave(view, moving = false) {
     } finally {
       state.inFlight = false;
       state.retryAtMs = Date.now() + 1000;
+      view.scheduleLayoutAutosave?.();
     }
   })();
+}
+
+function getLayoutAutosaveDelay(view) {
+  const state = layoutAutosaveStates.get(view);
+  if (state?.inFlight) return null;
+  return view.layoutStillFrames < 8
+    ? 1000 / 60
+    : Math.max(1000 / 60, (state?.retryAtMs || 0) - Date.now());
 }
 
 // Simulation restart marker used after manual layout-changing actions.
@@ -849,6 +858,10 @@ function stepCameraSmoothing(view) {
   view.camera.x += (view.cameraTarget.x - view.camera.x) * smooth;
   view.camera.y += (view.cameraTarget.y - view.camera.y) * smooth;
   view.camera.zoom += (view.cameraTarget.zoom - view.camera.zoom) * smooth;
+  for (const key of ['x', 'y', 'zoom']) {
+    if (Math.abs(view.cameraTarget[key] - view.camera[key]) < 0.00001)
+      view.camera[key] = view.cameraTarget[key];
+  }
 }
 
 // Main force simulation step: repel/link/center forces, pin constraints, and autosave settling.
@@ -1374,6 +1387,7 @@ module.exports = {
   stepCameraSmoothing,
   stepSimulation,
   stepLayoutAutosave,
+  getLayoutAutosaveDelay,
   getOrbitRadiusBySpacing,
   getOrbitRadiusForAnchor,
   recomputeOrbitRadii,

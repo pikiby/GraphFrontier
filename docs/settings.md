@@ -2,6 +2,10 @@
 
 GraphFrontier settings are mainly controlled in the right side panel inside the view.
 
+Plugin settings -> `Navigation` explains note YAML `url`/`path` strings, lists and
+quoted aliases (`'[Label](target)'`). `Copy example` copies the displayed YAML on
+click only; it does not create or edit notes. See [quick-open navigation](usage.md).
+
 ## Selection
 
 **Add to search** chooses the modifier for adding a clicked node name to the search
@@ -15,7 +19,7 @@ Local GraphFrontier starts with its settings panel hidden; click **Show** to ope
 - `Existing files only`: hide unresolved links or non-existing targets
 - `Show orphans`: show/hide nodes with no links
 
-The collapsible `Attachments` section sits between `Display` and `Physics` and
+The collapsible `Attachments` section sits inside `Settings` -> `Display` and
 contains `Show attachments`, the visibility toggle for non-Markdown graph nodes.
 When enabled, it reveals `Show unlinked attachments` (off by default, stored per layout).
 When both are enabled, all vault non-Markdown files are included, even without note links.
@@ -33,7 +37,7 @@ Focus, click, or type in the input to open an anchored menu; typing filters the
 scrollable list without moving focus from the inline input. The menu lists actual non-Markdown vault extensions
 and file counts (case-insensitive), including `No extension`. Counts refresh each
 time the control opens. Checked formats are allowed; both linked and unlinked
-attachments obey the filter, and excluded attachments' edges are omitted.
+attachments obey the filter, and excluded attachments' links are omitted.
 The menu is capped at 248px (about six 34px rows), with a separately scrolling
 list and pinned compact `All` / `None` controls. It fits above or below the input
 within the visible viewport, including when the mobile keyboard opens.
@@ -63,13 +67,23 @@ Other settings, overrides, positions and pins are preserved; no replacement over
 
 ## Visual Controls
 
-`Display` groups its controls without titles: general, nodes, text, edges and grid.
+The sidebar order is `Search`, `Settings`, `Layout`. Search and layout actions are unchanged.
+Settings has four compact tabs: `Groups`, `Display`, `Physics`, `Selection`. Groups includes
+the existing Blacklist and Whitelist editors; Display includes Attachments. All controls keep
+their previous behavior. Left/Right arrow keys switch tabs, Home/End select the first/last.
+The selected tab is a global UI preference, not part of named layouts or backup payloads;
+Load and restore keep the current tab. Local Graph keeps its own workspace UI state and
+starts with its sidebar closed, as before.
+
+`Display` groups its controls without titles: general, nodes, text, links, background and grid.
+
+- `Dim low-degree nodes`: off by default. Nodes with established graph degree 0 or 1 use 65% opacity; hover, selection and search highlights remain fully visible. Live canvas and HTML export use the same degree, not a degree recalculated from the screen filter.
 
 - `Existing files only` and `Show orphans`: graph visibility (see above)
 - `Hover dimming`: how strongly non-focused elements are dimmed
-- `Hover color`: color of highlighted edges and of the hover ring. Until a color is picked,
-  highlighted edges keep their own color and move it towards the theme text color, and the
-  ring uses the theme selection color. A picked color is reached smoothly, also by painted edges.
+- `Hover color`: color of highlighted links and of the hover ring. Until a color is picked,
+  highlighted links keep their own color and move it towards the theme text color, and the
+  ring uses the theme selection color. A picked color is reached smoothly, also by painted links.
 - `Node color`: base color for nodes without a group or individual color
 - `Node size`: node radius scale, 0.1-2 in steps of 0.005. The radius is proportional to it at every value, so
   the size ratio between nodes of different degree is kept. As in Obsidian's graph, nodes grow and shrink with the
@@ -77,23 +91,26 @@ Other settings, overrides, positions and pins are preserved; no replacement over
   selection follow the same radius; the color aura stays in graph units.
 - `Text zoom`: how far labels stay visible when zooming out, 1-40 steps
 - `Text size`: base label font size
-- `Edge color`: color of regular edges. It follows the theme until a color is picked.
-  Painted edges and group edge colors take priority.
-- `Edge opacity`: 0-1, default 1, applied to every edge at rest. Highlighted edges become
+- `Link color`: base color of regular links. It follows the theme until a color is picked.
+  Individual colors (including legacy painting) and group link colors take priority.
+- `Link opacity`: 0-1, default 1, applied to every link at rest. Highlighted links become
   fully opaque, as do highlighted nodes and their neighbors.
-  Edges of the same appearance are stroked together, so translucent edges do not darken where
+  Links of the same appearance are stroked together, so translucent links do not darken where
   they cross or overlap. The grid is not affected.
-- `Edge width`: edge thickness in physical screen pixels, 0.1-5, like Obsidian's link
-  thickness, for regular and painted edges alike. It does not change with zoom. Highlighted
-  edges (hover, Find connections, HTML-export selection) grow relative to their own width: to
+- `Link width`: thickness in physical screen pixels, 0.1-5, like Obsidian's link
+  thickness, for regular and painted links alike. It does not change with zoom. Highlighted
+  links (hover, Find connections, HTML-export selection) grow relative to their own width: to
   at least twice as thick and one physical pixel thicker, capped at 12. They keep their
-  own color, edge color or painted color, and move it smoothly towards the theme text color,
+  own color, link color or painted color, and move it smoothly towards the theme text color,
   or towards `Hover color` when set.
 - `Show grid`, `Grid step`: background grid and its world-space spacing
-- `Grid thickness`: grid line width, 0.1-1 CSS px in steps of 0.1, independent of zoom; default 1 preserves the original appearance. Stored per layout and included in static HTML exports; legacy layouts default to 1.
+- `Show arrows`: off by default; references point source to target. Reciprocal references show two heads, with one physical spring. `Reverse arrows` appears only when arrows are enabled and changes visuals only.
+- `Custom background`: off by default (theme). Enable it to reveal a color swatch; disabling retains the chosen color.
+- `Grid color`: theme color until a custom swatch color is selected. `Grid opacity`: 0-1, with theme opacity until changed.
+- `Grid thickness`: grid line width, 0.1-2 CSS px in steps of 0.1, independent of zoom; default 1 preserves the original appearance. Stored per layout and included in static HTML exports; legacy layouts default to 1.
 
 Lines thinner than one canvas pixel are drawn exactly one pixel wide with proportionally lower
-opacity, so very thin edges, grid lines and outlines fade instead of breaking into dashes.
+opacity, so very thin links, grid lines and outlines fade instead of breaking into dashes.
 
 ### Updating from earlier versions
 
@@ -104,32 +121,32 @@ result is marked with `render_model: 2`; new data and layouts are created with t
   `min(4 * max(1, s / 2), 2.2 * s) / 2.2`, limited to 0.1-2. Sizes up to about 1.8 are
   unchanged; larger ones settle at the new maximum 2. High-degree nodes are no longer clipped,
   so they can look larger than before.
-- Edge widths were CSS pixels and are now physical pixels: global, saved-layout and individual
+- Link widths were CSS pixels and are now physical pixels: global, saved-layout and individual
   widths are multiplied by the device pixel ratio of the first device that opens the graph,
   limited to 0.1-5, so lines keep their thickness.
-- The separate painted edge width and the short-lived Sharpness setting are removed.
+- The separate painted link width and the short-lived Sharpness setting are removed.
 - The original values and the device pixel ratio are kept in `legacy_render_settings`.
 
 A layout file that was not opened since the update is converted when it is next loaded.
-Edge color, edge opacity and hover color are stored per layout like other settings and are
+Link color, link opacity and hover color are stored per layout like other settings and are
 included in static HTML exports.
 
 ## Individual Visual Settings
 
 Right-click a node and open **Visual settings** to override applicable visual controls.
 Individual color overrides Groups; otherwise the first matching group overrides the base color.
-One **Reset visual settings** action clears visual overrides and edge painting, not pins or forces.
+One **Reset visual settings** action clears visual overrides and link painting, not pins or forces.
+Link color, opacity and arrows also appear in the shared node/group menu. Individual overrides beat group overrides, then global values; at equal priority the stored source wins, regardless of visual reversal. Width retains its maximum-endpoint rule. An explicit false overrides inherited true. The color picker replaces legacy painting for that target; old painting commands/API remain compatible.
 
 Only this menu exposes **Color aura** (0-5000, corresponding to 0-500 graph units)
 and **Aura brightness** (0-50%, default 22%). Auras default off and do not affect physics.
-Gravity nodes omit edge controls and Strong pull. Overrides are stored with the layout and
+Gravity nodes omit link controls and Strong pull. Overrides are stored with the layout and
 included in static HTML exports.
 
 ## Force And Layout Controls
 
 - `Link strength`: spring force for link attraction
-- `Link distance`: target length for all graph edges
-- `Strong pull x`: multiplier used by strong pull action
+- `Link distance`: target length for all graph links
 - `Orbit distance`: spacing used when distributing orbit-pinned nodes
 - `Repel strength`: node-to-node repulsion force, 0-200; default 51
 - `Repel radius`: cutoff distance for repel calculations, 20-1000; default 265 (larger value means wider repel influence)
@@ -143,9 +160,8 @@ only color changes. Each row has one round button filled with the group color an
 marked with a settings icon; it opens the same visual settings menu used for
 individual nodes, where the group color is changed with the other settings. **Reset visual settings** clears the additional
 visual overrides and keeps its rule color and Strong pull. The same menu also
-provides **Paint edges**, **Strong pull**, and
-**Clear strong pull**. These effects follow group membership; individual node
-settings take priority. Strong pull uses the existing global strength setting.
+provides **Link color**, **Strong pull x**, **Strong pull**, and
+**Clear strong pull**. The multiplier is 1-20: node menus change only the targeted eligible nodes; group menus store a group multiplier and enable Strong pull. Individual multipliers override group values. An explicit node multiplier of 1 overrides a stronger group; Clear strong pull removes the override and inherits again. Old groups/actions without a group multiplier use the existing global fallback. Visual reset preserves Strong pull and its multiplier.
 
 Supported query patterns:
 
@@ -177,7 +193,7 @@ Behavior:
    physics — the eye, solo, this switch, blacklist/whitelist or filters — wakes a settled
    layout so it adapts immediately.
    **Exclude** (default) is the behavior above. **Hide** only stops drawing the nodes and
-   their edges: they keep their place in physics, still push and pull their neighbours,
+   their links: they keep their place in physics, still push and pull their neighbours,
    and reappear where they were. Hidden nodes cannot be hovered, clicked, box-selected or
    found by search, and HTML export and the API leave them out in both modes. Grid cells
    held by hidden pinned nodes stay occupied in both modes. The mode is saved in the

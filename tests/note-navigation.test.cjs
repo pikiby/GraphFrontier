@@ -2,7 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const path = require('node:path');
 const { fixture, loadSource, notices } = require('./helpers/obsidian.cjs');
-const { addNoteNavigationActions, openNoteTarget } = loadSource('note-navigation.js');
+const { addNoteNavigationActions, getNoteTargets, openNoteTarget } =
+  loadSource('note-navigation.js');
 const { mobileVault } = require('./helpers/mobile-vault.cjs');
 
 function menu() {
@@ -10,6 +11,16 @@ function menu() {
     items: [],
     addItem(build) {
       const item = {
+        dom: {
+          attributes: {},
+          setAttribute(name, value) {
+            this.attributes[name] = value;
+          },
+        },
+        setSubmenu() {
+          this.submenu = menu();
+          return this.submenu;
+        },
         setTitle(title) {
           this.title = title;
           return this;
@@ -28,6 +39,145 @@ function menu() {
     },
   };
 }
+
+test('YAML lists parse aliases, nested parentheses, spaces and native separators without rewriting targets', () => {
+  assert.deepEqual(
+    getNoteTargets('url', [
+      ' https://example.com/reports?q=one#chart ',
+      '[Dashboard](https://example.com/a_(b))',
+      '[Two words](https://example.org/some path)',
+    ]),
+    [
+      {
+        target: 'https://example.com/reports?q=one#chart',
+        label: 'example.com/reports?q=one#chart',
+      },
+      { target: 'https://example.com/a_(b)', label: 'Dashboard' },
+      { target: 'https://example.org/some path', label: 'Two words' },
+    ]
+  );
+  assert.deepEqual(
+    getNoteTargets('path', [
+      '[Project](/home/user/projects/example (copy))',
+      '[Schema](Schemas/my schema (v2).sql)',
+      'C:\\Projects\\My project\\schema.sql',
+      '\\\\server\\share\\Project\\',
+      '~/Some project/',
+    ]),
+    [
+      { target: '/home/user/projects/example (copy)', label: 'Project' },
+      { target: 'Schemas/my schema (v2).sql', label: 'Schema' },
+      { target: 'C:\\Projects\\My project\\schema.sql', label: 'schema.sql' },
+      { target: '\\\\server\\share\\Project\\', label: 'Project' },
+      { target: '~/Some project/', label: 'Some project' },
+    ]
+  );
+  assert.deepEqual(getNoteTargets('path', '[Schema](Schemas/schema.sql)'), [
+    { target: 'Schemas/schema.sql', label: 'Schema' },
+  ]);
+});
+
+test('arrays skip empty/nonstring entries and forbidden schemes including Markdown aliases', async () => {
+  for (const type of ['url', 'path']) {
+    assert.deepEqual(getNoteTargets(type, []), []);
+    assert.deepEqual(getNoteTargets(type, [null, false, {}, [], 4, '', ' ', '[Empty]()']), []);
+    const invalid = [
+      'javascript:alert(1)',
+      '[Click](javascript:alert(1))',
+      '[Click](data:text/html,<script>alert(1)</script>)',
+      '[Click](file:///tmp/example)',
+      '[Click](obsidian://new?file=example)',
+    ];
+    assert.deepEqual(getNoteTargets(type, invalid), []);
+  }
+  assert.deepEqual(getNoteTargets('url', ['obsidian://open?file=Note']), []);
+  assert.equal(
+    getNoteTargets('path', ['obsidian://open?file=Note'])[0].target,
+    'obsidian://open?file=Note'
+  );
+  const host = {
+    get require() {
+      return assert.fail('Unsafe paths must not reach Electron');
+    },
+  };
+  for (const target of [
+    'javascript:alert(1)',
+    'data:text/plain,x',
+    'https://example.com',
+    'java\nscript:alert(1)',
+  ])
+    await assert.rejects(openNoteTarget({}, 'path', target, host), /local path/);
+});
+
+test('choice labels are plain text, bounded, and do not alter exact targets', () => {
+  const target = `https://example.com/${'long'.repeat(30)}`;
+  const entries = getNoteTargets('url', [
+    target,
+    '[<img src=x onerror=alert(1)>](https://example.org)',
+    '[A\u202eB\nC](https://example.net)',
+  ]);
+  assert.equal(entries[0].label.length, 48);
+  assert.ok(entries[0].label.endsWith('...'));
+  assert.equal(entries[0].target, target);
+  assert.equal(entries[1].label, '<img src=x onerror=alert(1)>');
+  assert.equal(entries[2].label, 'A B C');
+});
+
+test('multiple destinations use hover submenus with tooltips and captured exact targets', async (t) => {
+  const { app } = fixture(t);
+  const opened = [];
+  const targets = ['/tmp/Project (v2)', 'Schemas/schema with spaces.sql'];
+  const frontmatter = {
+    url: ['[Dashboard](https://example.com/a_(b))', 'https://example.org/report'],
+    path: targets,
+  };
+  app.metadataCache.getFileCache = () => ({ frontmatter });
+  app.vault.getAbstractFileByPath = (target) => ({ path: target, extension: 'sql' });
+  app.workspace.getLeaf = () => ({ openFile: async (file) => opened.push(file.path) });
+  const actions = menu();
+  addNoteNavigationActions(actions, app, {}, { open: (url) => opened.push(url) });
+  assert.deepEqual(opened, []);
+  assert.deepEqual(
+    actions.items[0].submenu.items.map((item) => item.title),
+    ['Dashboard', 'example.org/report']
+  );
+  assert.deepEqual(
+    actions.items[1].submenu.items.map((item) => item.title),
+    ['Project (v2)', 'schema with spaces.sql']
+  );
+  assert.equal(actions.items[0].submenu.items[0].title, 'Dashboard');
+  assert.equal(actions.items[0].submenu.items[0].dom.innerHTML, undefined);
+  assert.equal(actions.items[1].submenu.items[1].title, 'schema with spaces.sql');
+  assert.equal(
+    actions.items[1].submenu.items[1].dom.attributes.title,
+    'Schemas/schema with spaces.sql'
+  );
+  // Frontmatter changes after opening must not retarget an existing menu action.
+  frontmatter.path[1] = '/different';
+  assert.equal(actions.items[1].submenu.items[1].title, 'schema with spaces.sql');
+  await actions.items[0].submenu.items[0].click();
+  await actions.items[1].submenu.items[1].click();
+  assert.deepEqual(opened, ['https://example.com/a_(b)', 'Schemas/schema with spaces.sql']);
+});
+
+test('one valid array entry keeps its alias in a submenu and no valid entries add no menu', async (t) => {
+  const { app } = fixture(t);
+  app.metadataCache.getFileCache = () => ({
+    frontmatter: { url: [null, 'javascript:x', '[Only](https://example.com)'], path: [] },
+  });
+  const actions = menu();
+  const opened = [];
+  addNoteNavigationActions(actions, app, {}, { open: (url) => opened.push(url) });
+  assert.equal(actions.items.length, 1);
+  assert.equal(actions.items[0].title, 'Open URL');
+  assert.equal(actions.items[0].click, undefined);
+  assert.equal(actions.items[0].submenu.items.length, 1);
+  assert.equal(actions.items[0].submenu.items[0].title, 'Only');
+  assert.equal(actions.items[0].submenu.items[0].dom.attributes.title, 'https://example.com');
+  assert.deepEqual(opened, []);
+  await actions.items[0].submenu.items[0].click();
+  assert.deepEqual(opened, ['https://example.com/']);
+});
 
 test('mobile navigation never uses Electron even when emulation exposes require', async (t) => {
   const { vault, file } = mobileVault(t);
@@ -55,6 +205,48 @@ test('mobile navigation never uses Electron even when emulation exposes require'
   await assert.rejects(openNoteTarget(app, 'url', 'javascript:alert(1)', host), /URL must use/);
 });
 
+test('mobile array aliases retain URL/Obsidian/vault routing and reject external files', async (t) => {
+  const { vault, file } = mobileVault(t);
+  file('Schemas/my schema (v2).sql');
+  const opened = [];
+  const app = {
+    vault,
+    workspace: { getLeaf: () => ({ openFile: async (f) => opened.push(f.path) }) },
+    metadataCache: {
+      getFileCache: () => ({
+        frontmatter: {
+          url: ['[Dashboard](https://example.com/report)', 'javascript:alert(1)'],
+          path: [
+            '[Schema](Schemas/my schema (v2).sql)',
+            '[Other](obsidian://open?file=Other)',
+            '[External](/tmp/Project)',
+          ],
+        },
+      }),
+    },
+  };
+  const actions = menu();
+  addNoteNavigationActions(
+    actions,
+    app,
+    {},
+    {
+      get require() {
+        return assert.fail('No Node on mobile');
+      },
+      open: (target) => opened.push(target),
+    }
+  );
+  await actions.items[0].submenu.items[0].click();
+  for (const entry of actions.items[1].submenu.items) await entry.click();
+  assert.deepEqual(opened, [
+    'https://example.com/report',
+    'Schemas/my schema (v2).sql',
+    'obsidian://open?file=Other',
+  ]);
+  assert.match(notices.at(-1), /On mobile/);
+});
+
 test('menu reads current note YAML and provides only applicable quick-open actions', async (t) => {
   const { app } = fixture(t);
   const file = { path: 'note.md', extension: 'md' };
@@ -73,14 +265,16 @@ test('menu reads current note YAML and provides only applicable quick-open actio
     first.items.map((item) => item.title),
     ['Open URL', 'Open path']
   );
-  await first.items[0].click();
-  await first.items[1].click();
+  assert.equal(first.items[0].submenu.items[0].title, 'example.com/');
+  assert.equal(first.items[1].submenu.items[0].title, 'target.md');
+  await first.items[0].submenu.items[0].click();
+  await first.items[1].submenu.items[0].click();
   assert.deepEqual(opened, ['https://example.com/', 'target.md']);
   frontmatter = { url: 'https://example.org', path: ' ' };
   const second = menu();
   addNoteNavigationActions(second, app, file, host);
   assert.equal(second.items.length, 1);
-  await second.items[0].click();
+  await second.items[0].submenu.items[0].click();
   assert.equal(opened.at(-1), 'https://example.org/');
   for (frontmatter of [undefined, {}, { url: null, path: 4 }]) {
     const empty = menu();
@@ -163,7 +357,7 @@ test('Open path dispatches an Obsidian open URI without treating it as a local f
     actions.items.map((item) => item.title),
     ['Open path']
   );
-  await actions.items[0].click();
+  await actions.items[0].submenu.items[0].click();
   assert.deepEqual(opened, [target]);
 });
 
@@ -221,9 +415,9 @@ test('malformed URL is rejected and native path errors are reported without fs',
   };
   const actions = menu();
   addNoteNavigationActions(actions, app, {}, host);
-  await actions.items[0].click();
+  await actions.items[0].submenu.items[0].click();
   assert.match(notices.at(-1), /URL must use/);
-  await actions.items[1].click();
+  await actions.items[1].submenu.items[0].click();
   assert.match(notices.at(-1), /File not found/);
   assert.equal(opened, true);
 });

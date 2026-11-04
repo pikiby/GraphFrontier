@@ -6,11 +6,14 @@ const {
 } = require('./position-history');
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Scope, setIcon } = require('obsidian');
 const { nodeListContains } = require('./node-lists');
+const { observePluginData } = require('./appearance-events');
 const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
 const { ExportModal } = require('./export-modal');
-const { DARK_THEME, readGraphTheme, getLabelAppearance } = require('./theme');
+const { DARK_THEME, readGraphTheme, getLabelAppearance, getColorInputValue } = require('./theme');
 const {
   getNodeScreenRadius,
+  getLowDegreeAlpha,
+  getLinkArrowSegments,
   getNodeWorldRadius,
   getEdgeCssWidth,
   setCrispStroke,
@@ -43,6 +46,7 @@ const {
 
 const {
   DEFAULT_DATA,
+  SETTINGS_TABS,
   normalizeAttachmentExtensions,
   GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
@@ -66,6 +70,7 @@ const {
   stepCameraSmoothing: stepCameraSmoothingPhysics,
   stepSimulation: stepSimulationPhysics,
   stepLayoutAutosave: stepLayoutAutosavePhysics,
+  getLayoutAutosaveDelay,
 } = require('./physics');
 
 const {
@@ -87,6 +92,8 @@ const {
 } = require('./render');
 
 // Black or white icon, whichever reads better over a #rrggbb fill.
+let settingsTabsSequence = 0;
+
 function getContrastIconColor(hexColor) {
   const match = /^#([0-9a-f]{6})$/i.exec(String(hexColor || ''));
   if (!match) return '#ffffff';
@@ -107,6 +114,7 @@ class GraphFrontierView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
+    observePluginData(plugin);
     this.subgraphScope =
       plugin.pendingSubgraphScopes?.get(leaf) || leaf.getViewState?.()?.state?.subgraph || null;
 
@@ -235,6 +243,9 @@ class GraphFrontierView extends ItemView {
     this.isOpen = false;
     this.resizeObserver = null;
     this.frameHandle = null;
+    this.autosaveTimer = null;
+    this.runningFrame = false;
+    this.physicsVisibilityDirty = true;
     this.canvasTheme = { ...DARK_THEME };
     this.canvasBackgroundColor = this.canvasTheme.background;
   }
@@ -345,6 +356,7 @@ class GraphFrontierView extends ItemView {
   }
 
   async onClose() {
+    this.cancelScheduledWork();
     finishPositionAction(this, this.positionDragAction);
     this.positionDragAction = null;
     if (
@@ -354,6 +366,7 @@ class GraphFrontierView extends ItemView {
     )
       this.captureGraphPositions(this.plugin.data);
     this.isOpen = false;
+    this.cancelScheduledWork();
     if (this.frameHandle) {
       this.contentEl.win.cancelAnimationFrame(this.frameHandle);
       this.frameHandle = null;
@@ -388,6 +401,17 @@ class GraphFrontierView extends ItemView {
   }
 
   bindEvents() {
+    this.registerDomEvent(this.contentEl.ownerDocument, 'visibilitychange', () => {
+      if (this.contentEl.ownerDocument.visibilityState === 'hidden') {
+        if (this.frameHandle != null) this.contentEl.win.cancelAnimationFrame(this.frameHandle);
+        this.frameHandle = null;
+        this.scheduleLayoutAutosave();
+      } else {
+        this.resizeCanvas();
+        this.requestFrame();
+      }
+    });
+    this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.requestFrame()));
     // View scopes run before the app scope; null key also matches non-Latin layouts.
     if (Scope) {
       this.scope = new Scope(this.app.scope);
@@ -410,7 +434,10 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(this.canvasEl, 'mousemove', (event) => this.onMouseMove(event));
     this.registerDomEvent(this.canvasEl, 'mousedown', (event) => this.onMouseDown(event));
     this.registerDomEvent(this.canvasEl, 'mouseup', (event) => this.onMouseUp(event));
-    this.registerDomEvent(this.canvasEl, 'mouseleave', () => this.onMouseUp());
+    this.registerDomEvent(this.canvasEl, 'mouseleave', () => {
+      this.hoverNodeId = null;
+      this.onMouseUp();
+    });
     this.registerDomEvent(this.canvasEl, 'touchstart', (event) => this.onTouchStart(event), {
       passive: false,
     });
@@ -462,6 +489,7 @@ class GraphFrontierView extends ItemView {
     this.closeInputSuggestMenu();
     this.sidePanelEl.empty();
     this.sideControls.clear();
+    this.settingsTabs = null;
     this.searchModeToggleEl = null;
     this.searchModeFindLabelEl = null;
     this.searchModeFilterLabelEl = null;
@@ -492,11 +520,49 @@ class GraphFrontierView extends ItemView {
     });
     this.buildFindSection(searchSection);
 
-    const selectionSection = this.createSidePanelSection(body, {
-      id: 'selection',
-      title: 'Selection',
+    const settingsSection = this.createSidePanelSection(body, {
+      id: 'settings',
+      title: 'Settings',
       openByDefault: true,
     });
+    const tabList = settingsSection.createDiv({ cls: 'graphfrontier-settings-tabs' });
+    tabList.setAttribute('role', 'tablist');
+    tabList.setAttribute('aria-label', 'Settings');
+    this.settingsTabs = new Map();
+    const prefix = `graphfrontier-settings-${++settingsTabsSequence}`;
+    for (const id of SETTINGS_TABS) {
+      const label = id[0].toUpperCase() + id.slice(1);
+      const button = tabList.createEl('button', {
+        cls: 'graphfrontier-settings-tab',
+        text: label,
+        type: 'button',
+      });
+      button.id = `${prefix}-${id}`;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', `${button.id}-panel`);
+      const panel = settingsSection.createDiv({ cls: 'graphfrontier-settings-panel' });
+      panel.id = `${button.id}-panel`;
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', button.id);
+      this.settingsTabs.set(id, { button, panel });
+      this.registerDomEvent(button, 'click', () => this.selectSettingsTab(id));
+      this.registerDomEvent(button, 'keydown', (event) => {
+        const index = SETTINGS_TABS.indexOf(id);
+        let next;
+        if (event.key === 'ArrowRight') next = SETTINGS_TABS[(index + 1) % SETTINGS_TABS.length];
+        else if (event.key === 'ArrowLeft')
+          next = SETTINGS_TABS[(index + SETTINGS_TABS.length - 1) % SETTINGS_TABS.length];
+        else if (event.key === 'Home') next = SETTINGS_TABS[0];
+        else if (event.key === 'End') next = SETTINGS_TABS.at(-1);
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.selectSettingsTab(next, true);
+      });
+    }
+    this.syncSettingsTabs();
+
+    const selectionSection = this.settingsTabs.get('selection').panel;
     this.addSideModifierSelect(selectionSection, 'Box select', 'selection_box_modifier', {
       hint: 'Modifier key for box selection drag on empty space',
     });
@@ -513,13 +579,12 @@ class GraphFrontierView extends ItemView {
       hint: 'Modifier key + node click adds its name to search. None disables this action. Selection takes priority; this action takes priority over quick preview.',
     });
 
-    const displaySection = this.createSidePanelSection(body, {
-      id: 'display',
-      title: 'Display',
-      openByDefault: true,
-    });
+    const displaySection = this.settingsTabs.get('display').panel;
     // Display rows are grouped without titles: general, nodes, text, edges, grid.
     const generalGroup = this.createSidePanelGroup(displaySection);
+    this.addSideToggle(generalGroup, 'Dim low-degree nodes', 'dim_low_degree_nodes', 'render', {
+      hint: 'Slightly dim nodes with zero or one link; highlighted nodes stay fully visible',
+    });
     this.addSideToggle(generalGroup, 'Existing files only', 'existing_files_only', 'data', {
       hint: 'Show only files that currently exist in vault',
     });
@@ -528,12 +593,12 @@ class GraphFrontierView extends ItemView {
       hint: 'Show nodes without links (orphans)',
     });
     this.addSideSlider(generalGroup, 'Hover dimming', 'hover_dim_strength', 0, 100, 1, 'render', {
-      hint: 'How strongly non-focused nodes/edges are dimmed',
+      hint: 'How strongly non-focused nodes/links are dimmed',
     });
     this.addSideOptionalColorControl(generalGroup, {
       key: 'hover_highlight_color',
       label: 'Hover color',
-      hint: 'Color of highlighted edges and the hover ring; theme colors until picked',
+      hint: 'Color of highlighted links and the hover ring; theme colors until picked',
       fallback: () => this.canvasTheme?.selection,
       defaultColor: DARK_THEME.selection,
     });
@@ -567,12 +632,36 @@ class GraphFrontierView extends ItemView {
 
     const edgeGroup = this.createSidePanelGroup(displaySection);
     this.addSideEdgeColorControl(edgeGroup);
-    this.addSideSlider(edgeGroup, 'Edge opacity', 'edge_opacity', 0, 1, 0.01, 'render', {
-      hint: 'Opacity of all edges, including painted and highlighted ones',
+    this.addSideSlider(edgeGroup, 'Link opacity', 'edge_opacity', 0, 1, 0.01, 'render', {
+      hint: 'Opacity of all links, including painted and highlighted ones',
     });
-    this.addSideSlider(edgeGroup, 'Edge width', 'edge_width_scale', 0.1, 5, 0.01, 'render', {
-      hint: 'Edge thickness in physical screen pixels, independent of zoom',
+    this.addSideSlider(edgeGroup, 'Link width', 'edge_width_scale', 0.1, 5, 0.01, 'render', {
+      hint: 'Link thickness in physical screen pixels, independent of zoom',
     });
+    this.addSideToggle(edgeGroup, 'Show arrows', 'show_arrows', 'render', {
+      onChange: () => this.syncSidePanelControls(),
+    });
+    this.reverseArrowsRowEl = this.addSideToggle(
+      edgeGroup,
+      'Reverse arrows',
+      'reverse_arrows',
+      'render'
+    );
+    this.reverseArrowsRowEl.style.display = this.plugin.getSettings().show_arrows ? '' : 'none';
+
+    const backgroundGroup = this.createSidePanelGroup(displaySection);
+    this.addSideToggle(backgroundGroup, 'Custom background', 'custom_background', 'render', {
+      onChange: () => this.syncSidePanelControls(),
+    });
+    this.backgroundColorRowEl = this.addSideOptionalColorControl(backgroundGroup, {
+      key: 'background_color',
+      label: 'Background color',
+      fallback: () => this.canvasTheme?.background,
+      defaultColor: '#111418',
+    });
+    this.backgroundColorRowEl.style.display = this.plugin.getSettings().custom_background
+      ? ''
+      : 'none';
 
     const gridGroup = this.createSidePanelGroup(displaySection);
     this.addSideToggle(gridGroup, 'Show grid', 'show_grid', 'render', {
@@ -581,11 +670,20 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(gridGroup, 'Grid step', 'grid_step', 5, 50, 5, 'render', {
       hint: 'Grid cell size in world coordinates',
     });
-    this.addSideSlider(gridGroup, 'Grid thickness', 'grid_line_width', 0.1, 1, 0.1, 'render', {
+    this.addSideOptionalColorControl(gridGroup, {
+      key: 'grid_color',
+      label: 'Grid color',
+      fallback: () => this.canvasTheme?.grid,
+      defaultColor: '#9ea4af',
+    });
+    this.addSideSlider(gridGroup, 'Grid opacity', 'grid_opacity', 0, 1, 0.01, 'render', {
+      fallbackValue: () => this.canvasTheme.gridOpacity,
+    });
+    this.addSideSlider(gridGroup, 'Grid thickness', 'grid_line_width', 0.1, 2, 0.1, 'render', {
       hint: 'Grid line thickness in CSS pixels, independent of zoom',
     });
 
-    const attachmentsSection = this.createSidePanelSection(body, {
+    const attachmentsSection = this.createSidePanelSection(displaySection, {
       id: 'attachments',
       title: 'Attachments',
       openByDefault: true,
@@ -625,29 +723,13 @@ class GraphFrontierView extends ItemView {
         this.plugin.persistNodeVisualSettings();
       });
     }
-    const physicsSection = this.createSidePanelSection(body, {
-      id: 'physics',
-      title: 'Physics',
-      openByDefault: true,
-    });
+    const physicsSection = this.settingsTabs.get('physics').panel;
     this.addSideSlider(physicsSection, 'Link strength', 'base_link_strength', 1, 100, 1, 'render', {
       hint: 'Spring force for graph links',
     });
     this.addSideSlider(physicsSection, 'Link distance', 'link_distance', 1, 50, 1, 'render', {
       hint: 'Target distance for all graph links',
     });
-    this.addSideSlider(
-      physicsSection,
-      'Strong pull x',
-      'strong_pull_multiplier',
-      NODE_MULTIPLIER_MIN,
-      NODE_MULTIPLIER_MAX,
-      1,
-      'render',
-      {
-        hint: 'Multiplier used by Strong pull command',
-      }
-    );
     this.addSideSlider(physicsSection, 'Orbit distance', 'orbit_distance', 1, 100, 1, 'render', {
       hint: 'Desired spacing between nodes pinned to same orbit',
     });
@@ -664,24 +746,15 @@ class GraphFrontierView extends ItemView {
       hint: 'Speed damping per frame; higher means faster stop',
     });
 
-    const groupsSection = this.createSidePanelSection(body, {
-      id: 'groups',
-      title: 'Groups',
-      openByDefault: true,
-    });
+    const groupsSection = this.settingsTabs.get('groups').panel;
     this.buildGroupEditorSection(groupsSection);
 
-    const listsSection = this.createSidePanelSection(body, {
-      id: 'lists',
-      title: 'Blacklist / Whitelist',
-      openByDefault: true,
-    });
-    this.buildQueryRuleEditorSection(listsSection, {
+    this.buildQueryRuleEditorSection(groupsSection, {
       title: 'Blacklist',
       key: 'blacklist',
       hint: 'Hide nodes that match query rules',
     });
-    this.buildQueryRuleEditorSection(listsSection, {
+    this.buildQueryRuleEditorSection(groupsSection, {
       title: 'Whitelist',
       key: 'whitelist',
       hint: 'Show only nodes that match query rules (after blacklist)',
@@ -695,6 +768,28 @@ class GraphFrontierView extends ItemView {
     if (!this.plugin.isLocalGraphFrontier) this.addLayoutFileSearchRow(layoutSection);
     this.addSideSaveLayoutButton(layoutSection);
     this.syncSidePanelControls();
+  }
+
+  syncSettingsTabs() {
+    const selected = this.plugin.getSettingsTab();
+    for (const [id, { button, panel }] of this.settingsTabs || []) {
+      const active = id === selected;
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+      panel.hidden = !active;
+    }
+  }
+
+  selectSettingsTab(id, focus = false) {
+    if (!SETTINGS_TABS.includes(id)) return;
+    this.closeInputSuggestMenu();
+    const changed = this.plugin.getSettingsTab() !== id;
+    this.plugin.data.view_state.settings_tab = id;
+    for (const view of new Set([this, ...this.getScopeLeaves().map((leaf) => leaf.view)])) {
+      if (view?.plugin === this.plugin) view.syncSettingsTabs?.();
+    }
+    if (focus) this.settingsTabs?.get(id)?.button.focus();
+    if (changed) this.plugin.schedulePersist();
   }
 
   createSidePanelSection(parentEl, options = {}) {
@@ -929,8 +1024,8 @@ class GraphFrontierView extends ItemView {
   addSideEdgeColorControl(parentEl) {
     this.addSideOptionalColorControl(parentEl, {
       key: 'edge_color',
-      label: 'Edge color',
-      hint: 'Color of regular edges; painted and group edge colors take priority',
+      label: 'Link color',
+      hint: 'Base link color; individual and group link colors take priority',
       fallback: () => this.canvasTheme?.mutedText,
       defaultColor: DARK_THEME.mutedText,
     });
@@ -946,7 +1041,7 @@ class GraphFrontierView extends ItemView {
     input.addClass('graphfrontier-group-color-input');
     const themeColor = () => {
       const color = String(fallback() || '').trim();
-      return /^#[0-9a-f]{6}$/i.test(color) ? color : defaultColor;
+      return getColorInputValue(color, defaultColor);
     };
     const currentColor = () => this.plugin.getSettings()[key] ?? themeColor();
     input.value = currentColor();
@@ -955,6 +1050,7 @@ class GraphFrontierView extends ItemView {
       this.plugin.data.settings[key] = input.value.toLowerCase();
       this.plugin.persistNodeVisualSettings();
     });
+    return row;
   }
 
   addSideToggle(parentEl, label, key, refreshMode, options = {}) {
@@ -1003,6 +1099,7 @@ class GraphFrontierView extends ItemView {
         this.buildSidePanel();
       }
     });
+    return row;
   }
 
   addSideModifierSelect(parentEl, label, key, options = {}) {
@@ -1073,7 +1170,8 @@ class GraphFrontierView extends ItemView {
     input.min = String(min);
     input.max = String(max);
     input.step = String(step);
-    input.value = String(this.plugin.data.settings[key]);
+    const getValue = () => this.plugin.data.settings[key] ?? options.fallbackValue?.();
+    input.value = String(getValue());
     valueEl.setText(this.formatSliderValue(Number(input.value), step));
 
     this.sideControls.set(key, {
@@ -1083,6 +1181,7 @@ class GraphFrontierView extends ItemView {
       min,
       max,
       step,
+      getValue,
     });
 
     const applyValueFromSlider = () => {
@@ -2072,6 +2171,7 @@ class GraphFrontierView extends ItemView {
   }
 
   markGraphVisibilityDirty() {
+    this.physicsVisibilityDirty = true;
     this.physicsVisibilityCache = null;
     this.visibilityGraphVersion += 1;
     this.contentSearchIndexGraphVersion = -1;
@@ -2082,6 +2182,8 @@ class GraphFrontierView extends ItemView {
   }
 
   markSearchVisibilityDirty() {
+    this.physicsVisibilityDirty = true;
+    this.requestFrame();
     this.physicsVisibilityCache = null;
     this.visibilitySearchVersion += 1;
     this.filterVisibilityCache.searchVisibleVersion = -1;
@@ -2091,6 +2193,9 @@ class GraphFrontierView extends ItemView {
   }
 
   markQueryRuleVisibilityDirty() {
+    this.queryRuleSignatures = null;
+    this.physicsVisibilityDirty = true;
+    this.requestFrame();
     this.physicsVisibilityCache = null;
     this.filterVisibilityCache.parsedRulesSignature = '';
     this.filterVisibilityCache.parsedBlacklistRules = [];
@@ -2103,6 +2208,9 @@ class GraphFrontierView extends ItemView {
   }
 
   getActiveQueryRuleSignature() {
+    const mode = this.ignoreHiddenGroups ? 'physics' : 'drawing';
+    this.queryRuleSignatures ||= {};
+    if (this.queryRuleSignatures[mode] !== undefined) return this.queryRuleSignatures[mode];
     const serializeRules = (rules) => {
       if (!Array.isArray(rules) || rules.length === 0) return '';
       const parts = [];
@@ -2120,7 +2228,8 @@ class GraphFrontierView extends ItemView {
     const hiddenGroups = this.ignoreHiddenGroups
       ? []
       : (this.plugin?.data?.groups || []).filter((group) => group?.hidden);
-    return `b:${serializeRules(blacklistRules)}##w:${serializeRules(whitelistRules)}##h:${serializeRules(hiddenGroups)}`;
+    return (this.queryRuleSignatures[mode] =
+      `b:${serializeRules(blacklistRules)}##w:${serializeRules(whitelistRules)}##h:${serializeRules(hiddenGroups)}`);
   }
 
   getFilterNodeId() {
@@ -2866,7 +2975,8 @@ class GraphFrontierView extends ItemView {
   // Simulation restart marker: called when settings or node positions change.
   kickLayoutSearch() {
     this.layoutEditVersion += 1;
-    return kickLayoutSearchPhysics(this);
+    kickLayoutSearchPhysics(this);
+    this.requestFrame();
   }
 
   markNodeSpatialIndexDirty() {
@@ -3544,13 +3654,20 @@ class GraphFrontierView extends ItemView {
   }
 
   syncSidePanelControls() {
+    this.syncSettingsTabs();
+    if (this.reverseArrowsRowEl)
+      this.reverseArrowsRowEl.style.display = this.plugin.getSettings().show_arrows ? '' : 'none';
+    if (this.backgroundColorRowEl)
+      this.backgroundColorRowEl.style.display = this.plugin.getSettings().custom_background
+        ? ''
+        : 'none';
     if (!this.sidePanelOpen || this.sideControls.size === 0) return;
     const activeEl = this.contentEl.ownerDocument
       ? this.contentEl.ownerDocument.activeElement
       : null;
 
     for (const [key, meta] of this.sideControls.entries()) {
-      const currentValue = this.plugin.data.settings[key];
+      const currentValue = meta.getValue ? meta.getValue() : this.plugin.data.settings[key];
       if (meta.type === 'boolean') {
         if (activeEl !== meta.input) {
           const uiValue =
@@ -3642,9 +3759,14 @@ class GraphFrontierView extends ItemView {
   }
 
   updateCanvasBackgroundColor() {
+    this.appearanceCache = null;
     if (!this.contentEl) return;
     this.canvasTheme = readGraphTheme(this.contentEl);
-    this.canvasBackgroundColor = this.canvasTheme.background;
+    const settings = this.plugin.getSettings();
+    this.canvasBackgroundColor =
+      settings.custom_background && /^#[0-9a-f]{6}$/i.test(settings.background_color)
+        ? settings.background_color
+        : this.canvasTheme.background;
   }
 
   resizeCanvas() {
@@ -3956,6 +4078,7 @@ class GraphFrontierView extends ItemView {
       nextEdges.push({
         source: rawEdge.source,
         target: rawEdge.target,
+        ...(rawEdge.bidirectional ? { bidirectional: true } : {}),
         sourceNode,
         targetNode,
       });
@@ -4052,45 +4175,137 @@ class GraphFrontierView extends ItemView {
    * Simulation layer: attraction/repulsion forces, damping, orbit logic, and autosave after stabilization.
    * ============================================================
    */
+  requestFrame() {
+    if (
+      !this.isOpen ||
+      this.runningFrame ||
+      this.frameHandle != null ||
+      this.contentEl.ownerDocument?.visibilityState === 'hidden'
+    )
+      return;
+    const win = this.contentEl.win;
+    if (typeof win.requestAnimationFrame !== 'function') return;
+    if (this.autosaveTimer != null) {
+      (win.clearTimeout || window.clearTimeout)(this.autosaveTimer);
+      this.autosaveTimer = null;
+    }
+    this.frameHandle = win.requestAnimationFrame(() => {
+      this.frameHandle = null;
+      this.runFrame();
+    });
+  }
+
+  cancelScheduledWork() {
+    if (this.frameHandle != null) this.contentEl.win.cancelAnimationFrame(this.frameHandle);
+    this.frameHandle = null;
+    if (this.autosaveTimer != null)
+      (this.contentEl.win.clearTimeout || window.clearTimeout)(this.autosaveTimer);
+    this.autosaveTimer = null;
+  }
+
+  scheduleLayoutAutosave() {
+    if (this.autosaveTimer != null) return;
+    if (
+      !this.isOpen ||
+      this.runningFrame ||
+      this.frameHandle != null ||
+      !this.layoutAutosaveDirty ||
+      (this.nodes.length && !this.layoutPaused) ||
+      !this.plugin.getSettings().layout_autosave ||
+      this.isSearchFilled() ||
+      this.dragNodeId ||
+      this.dragSelectionOffsets?.size
+    )
+      return;
+    const delay =
+      this.waitingForMetadata || this.plugin.backups?.restoring
+        ? 250
+        : getLayoutAutosaveDelay(this);
+    if (delay === null) return;
+    this.autosaveTimer = (this.contentEl.win.setTimeout || window.setTimeout)(() => {
+      this.autosaveTimer = null;
+      if (!this.isOpen) return;
+      if (
+        !this.waitingForMetadata &&
+        !this.plugin.backups?.restoring &&
+        (!this.nodes.length || this.layoutPaused)
+      )
+        stepLayoutAutosavePhysics(this);
+      this.scheduleLayoutAutosave();
+    }, delay);
+  }
+
+  needsAnimationFrame() {
+    if (
+      !this.waitingForMetadata &&
+      !this.plugin.backups?.restoring &&
+      this.nodes.length &&
+      (!this.layoutPaused || this.dragNodeId || this.dragSelectionOffsets?.size)
+    )
+      return true;
+    return (
+      ['x', 'y', 'zoom'].some((key) => this.camera[key] !== this.cameraTarget[key]) ||
+      this.focusProgress !== (this.getActiveFocusNodeId() ? 1 : 0) ||
+      this.hoverFocusProgress !== (this.hoverNodeId ? 1 : 0) ||
+      this.hoverFadeProgress > 0 ||
+      !!this.clickFlashNodeId
+    );
+  }
+
   runFrame() {
     if (!this.isOpen) return;
-    if (this.plugin.data.legacy_render_settings?.pending_edge_dpr)
-      this.plugin.applyPendingRenderMigration(this.contentEl.win.devicePixelRatio || 1);
-    if (this.subgraphScope && !this.hasValidSubgraphScope() && this.nodes.length)
-      this.refreshFromVault({ keepCamera: true, skipLayoutKick: true });
-    this.finishSubgraphFraming();
-    this.stepCameraSmoothing();
-    if (!this.waitingForMetadata && !this.plugin.backups?.restoring) {
-      if (this.nodes.length) wakeOnPhysicsVisibilityChange(this);
-      const dragging =
-        !!this.dragNodeId ||
-        (this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0);
-      const batch = { moving: false };
-      this.layoutAutosaveBatch = batch;
-      try {
-        if (this.nodes.length && (!this.layoutPaused || dragging)) {
-          const startedAt = performance.now();
-          let lastStepMs = 0;
-          for (let step = 0; step < (dragging ? 1 : 3); step++) {
-            if (step > 0 && performance.now() - startedAt + lastStepMs > 8) break;
-            const stepStartedAt = performance.now();
-            this.stepSimulation();
-            lastStepMs = performance.now() - stepStartedAt;
-            if (this.layoutPaused || this.waitingForMetadata || this.plugin.backups?.restoring)
-              break;
-          }
-        }
-      } finally {
-        this.layoutAutosaveBatch = null;
-      }
-      if (!this.waitingForMetadata && !this.plugin.backups?.restoring) {
-        stepLayoutAutosavePhysics(this, batch.moving);
-      }
+    if (this.frameHandle != null) this.contentEl.win.cancelAnimationFrame(this.frameHandle);
+    this.frameHandle = null;
+    if (this.contentEl.ownerDocument?.visibilityState === 'hidden') {
+      this.scheduleLayoutAutosave();
+      return;
     }
-    this.warmNodeSpatialIndexIfIdle();
-    this.stepFocusSmoothing();
-    this.render();
-    this.frameHandle = this.contentEl.win.requestAnimationFrame(() => this.runFrame());
+    this.runningFrame = true;
+    try {
+      if (this.plugin.data.legacy_render_settings?.pending_edge_dpr)
+        this.plugin.applyPendingRenderMigration(this.contentEl.win.devicePixelRatio || 1);
+      if (this.subgraphScope && !this.hasValidSubgraphScope() && this.nodes.length)
+        this.refreshFromVault({ keepCamera: true, skipLayoutKick: true });
+      this.finishSubgraphFraming();
+      this.stepCameraSmoothing();
+      if (!this.waitingForMetadata && !this.plugin.backups?.restoring) {
+        if (this.physicsVisibilityDirty) {
+          this.physicsVisibilityDirty = false;
+          if (this.nodes.length) wakeOnPhysicsVisibilityChange(this);
+        }
+        const dragging =
+          !!this.dragNodeId ||
+          (this.dragSelectionOffsets instanceof Map && this.dragSelectionOffsets.size > 0);
+        const batch = { moving: false };
+        this.layoutAutosaveBatch = batch;
+        try {
+          if (this.nodes.length && (!this.layoutPaused || dragging)) {
+            const startedAt = performance.now();
+            let lastStepMs = 0;
+            for (let step = 0; step < (dragging ? 1 : 3); step++) {
+              if (step > 0 && performance.now() - startedAt + lastStepMs > 8) break;
+              const stepStartedAt = performance.now();
+              this.stepSimulation();
+              lastStepMs = performance.now() - stepStartedAt;
+              if (this.layoutPaused || this.waitingForMetadata || this.plugin.backups?.restoring)
+                break;
+            }
+          }
+        } finally {
+          this.layoutAutosaveBatch = null;
+        }
+        if (!this.waitingForMetadata && !this.plugin.backups?.restoring) {
+          stepLayoutAutosavePhysics(this, batch.moving);
+        }
+      }
+      this.warmNodeSpatialIndexIfIdle();
+      this.stepFocusSmoothing();
+      this.render();
+    } finally {
+      this.runningFrame = false;
+    }
+    if (this.needsAnimationFrame()) this.requestFrame();
+    else this.scheduleLayoutAutosave();
   }
 
   stepCameraSmoothing() {
@@ -4118,7 +4333,9 @@ class GraphFrontierView extends ItemView {
    */
   render() {
     this.renderCount = (this.renderCount || 0) + 1;
-    return renderFrameRender(this);
+    const result = renderFrameRender(this);
+    this.requestFrame();
+    return result;
   }
 
   drawGrid(ctx) {
@@ -4215,6 +4432,7 @@ class GraphFrontierView extends ItemView {
 
   // Pointer and navigation: hover, node drag, scene pan, zoom, and node open actions.
   onMouseMove(event) {
+    this.requestFrame();
     if (Date.now() < this.ignoreMouseUntilMs) return;
 
     const rect = this.canvasEl.getBoundingClientRect();
@@ -4285,6 +4503,7 @@ class GraphFrontierView extends ItemView {
   }
 
   onMouseDown(event) {
+    this.requestFrame();
     if (Date.now() < this.ignoreMouseUntilMs) return;
     if (event.button !== 0) return;
 
@@ -4371,6 +4590,7 @@ class GraphFrontierView extends ItemView {
   }
 
   onMouseUp(event = null, options = {}) {
+    this.requestFrame();
     const fromTouch = !!(options && options.fromTouch);
     const suppressClick = !!(options && options.suppressClick);
     if (!fromTouch && Date.now() < this.ignoreMouseUntilMs) return;
@@ -4533,6 +4753,7 @@ class GraphFrontierView extends ItemView {
   }
 
   onWheel(event) {
+    this.requestFrame();
     if (Date.now() < this.ignoreMouseUntilMs) return;
 
     event.preventDefault();
@@ -4556,6 +4777,7 @@ class GraphFrontierView extends ItemView {
 
   // Touch navigation on mobile: one finger drags node/pans scene, two fingers pinch+pan camera.
   onTouchStart(event) {
+    this.requestFrame();
     if (!event.touches || event.touches.length === 0) return;
     this.ignoreMouseUntilMs = Date.now() + 700;
     if (event.cancelable) event.preventDefault();
@@ -4577,6 +4799,7 @@ class GraphFrontierView extends ItemView {
   }
 
   onTouchMove(event) {
+    this.requestFrame();
     if (!event.touches || event.touches.length === 0) return;
     this.ignoreMouseUntilMs = Date.now() + 700;
     if (event.cancelable) event.preventDefault();
@@ -4644,6 +4867,7 @@ class GraphFrontierView extends ItemView {
   }
 
   onTouchEnd(event) {
+    this.requestFrame();
     this.ignoreMouseUntilMs = Date.now() + 700;
     if (event && event.cancelable) event.preventDefault();
 
@@ -4760,6 +4984,7 @@ class GraphFrontierView extends ItemView {
   }
 
   updatePinchGesture(event) {
+    this.requestFrame();
     if (!this.touchGesture || this.touchGesture.mode !== 'pinch') return;
 
     const touchA = this.findTouchById(event.touches, this.touchGesture.touchIdA);
@@ -5189,8 +5414,11 @@ class GraphFrontierView extends ItemView {
         rowState.colorInput.value = value;
         rowState.refreshSwatch?.();
       } else if (key === null) {
-        const strongPull = next.settings.strong_pull;
-        next.settings = strongPull == null ? {} : { strong_pull: strongPull };
+        next.settings = Object.fromEntries(
+          Object.entries(next.settings).filter(
+            ([key]) => key === 'strong_pull' || key === 'strong_pull_multiplier'
+          )
+        );
       } else if (value === null) delete next.settings[key];
       else next.settings[key] = value;
       rowState.settings = { ...next.settings };
@@ -5210,7 +5438,10 @@ class GraphFrontierView extends ItemView {
       inherited: (key) => key !== 'node_color' && current()?.settings?.[key] == null,
       set: update,
       reset: () => update(null, null),
-      canReset: () => Object.keys(current()?.settings || {}).some((key) => key !== 'strong_pull'),
+      canReset: () =>
+        Object.keys(current()?.settings || {}).some(
+          (key) => key !== 'strong_pull' && key !== 'strong_pull_multiplier'
+        ),
     };
   }
 
@@ -5237,19 +5468,21 @@ class GraphFrontierView extends ItemView {
         const controls = item.dom.createDiv({
           cls: 'graphfrontier-node-text-size graphfrontier-node-visual-control',
         });
-        const input = controls.createEl('input', {
-          type: spec.type === 'color' ? 'color' : 'range',
+        const input = controls.createEl(spec.type === 'boolean' ? 'button' : 'input', {
+          type: spec.type === 'color' ? 'color' : spec.type === 'boolean' ? 'button' : 'range',
           cls:
             spec.type === 'color'
               ? 'graphfrontier-group-color-input'
-              : 'graphfrontier-sidepanel-slider',
+              : spec.type === 'boolean'
+                ? 'graphfrontier-toggle-btn'
+                : 'graphfrontier-sidepanel-slider',
         });
         input.min = String(spec.min);
         input.max = String(spec.max);
         input.step = String(spec.step);
         input.setAttribute('aria-label', `${group ? 'Group' : 'Node'} ${spec.label.toLowerCase()}`);
         const value =
-          spec.type === 'color'
+          spec.type === 'color' || spec.type === 'boolean'
             ? null
             : controls.createSpan({ cls: 'graphfrontier-sidepanel-value' });
         const sync = () => {
@@ -5265,7 +5498,25 @@ class GraphFrontierView extends ItemView {
             : (current.length ? current : nodes).every(
                 (entry) => getNodeVisualOverride(this.plugin, entry.id, spec.key) === null
               );
-          input.value = String(values[0]);
+          input.value =
+            spec.type === 'color'
+              ? getColorInputValue(values[0] ?? this.canvasTheme?.mutedText, '#9ea4af')
+              : String(values[0] ?? '');
+          if (spec.type === 'boolean') {
+            input.checked = values[0] === true;
+            input.toggleClass('is-on', input.checked);
+            input.setAttribute('aria-pressed', String(input.checked));
+          }
+          if (spec.key === 'reverse_arrows')
+            item.dom.style.display = (
+              group
+                ? group.value('show_arrows')
+                : (current.length ? current : nodes).some((entry) =>
+                    getNodeVisualSetting(this.plugin, entry.id, 'show_arrows')
+                  )
+            )
+              ? ''
+              : 'none';
           value?.setText(mixed ? 'Mixed' : this.formatSliderValue(Number(input.value), spec.step));
           input.setAttribute('aria-valuetext', mixed ? 'Mixed' : String(values[0]));
           input.setAttribute(
@@ -5288,14 +5539,17 @@ class GraphFrontierView extends ItemView {
         for (const eventName of ['click', 'mousedown', 'keydown']) {
           controls.addEventListener(eventName, (event) => event.stopPropagation());
         }
-        input.addEventListener('input', () => {
-          if (group) group.set(spec.key, spec.type === 'color' ? input.value : Number(input.value));
+        input.addEventListener(spec.type === 'boolean' ? 'click' : 'input', () => {
+          if (spec.type === 'boolean') input.checked = !input.checked;
+          const settingValue =
+            spec.type === 'color'
+              ? input.value
+              : spec.type === 'boolean'
+                ? input.checked
+                : Number(input.value);
+          if (group) group.set(spec.key, settingValue);
           for (const entry of this.resolveNodeActionTargets(snapshot).filter(eligible)) {
-            this.plugin.setNodeVisualSetting(
-              entry.id,
-              spec.key,
-              spec.type === 'color' ? input.value : Number(input.value)
-            );
+            this.plugin.setNodeVisualSetting(entry.id, spec.key, settingValue);
           }
           syncControls.forEach((sync) => sync());
         });
@@ -5325,6 +5579,47 @@ class GraphFrontierView extends ItemView {
         syncReset();
       });
     }
+    if (!group && !displayNodes.some((entry) => !entry.meta?.darkEnergy)) return;
+
+    menu.addItem((item) => {
+      item.setTitle('Strong pull x').setIcon('zap');
+      const controls = item.dom.createDiv({ cls: 'graphfrontier-node-visual-control' });
+      const input = controls.createEl('input', {
+        type: 'range',
+        cls: 'graphfrontier-sidepanel-slider',
+      });
+      input.min = String(NODE_MULTIPLIER_MIN);
+      input.max = String(NODE_MULTIPLIER_MAX);
+      input.step = '1';
+      input.setAttribute('aria-label', 'Strong pull multiplier');
+      const value = controls.createSpan({ cls: 'graphfrontier-sidepanel-value' });
+      const sync = () => {
+        const values = group
+          ? [group.value('strong_pull_multiplier')]
+          : displayNodes
+              .filter((entry) => !entry.meta?.darkEnergy)
+              .map((entry) => this.plugin.getNodeMultiplier(entry.id));
+        input.value = String(values[0]);
+        value.setText(values.some((entry) => entry !== values[0]) ? 'Mixed' : input.value);
+      };
+      syncControls.push(sync);
+      sync();
+      for (const eventName of ['click', 'mousedown', 'keydown'])
+        controls.addEventListener(eventName, (event) => event.stopPropagation());
+      input.addEventListener('input', () => {
+        const multiplier = this.plugin.clampStrongPullMultiplier(Number(input.value));
+        if (group) {
+          group.set('strong_pull_multiplier', multiplier);
+          group.set('strong_pull', true);
+        } else
+          for (const entry of this.resolveNodeActionTargets(snapshot)) {
+            if (!entry.meta?.darkEnergy)
+              this.plugin.setNodeMultiplier(entry.id, multiplier, { mode: 'strong-pull' });
+          }
+        sync();
+      });
+    });
+
     if (options.basicOnly || (!group && (!node || node.meta?.darkEnergy))) return;
 
     const isStrongPullNode = group
@@ -5343,11 +5638,14 @@ class GraphFrontierView extends ItemView {
             )
               return;
             const strong = this.plugin.clampStrongPullMultiplier(
-              this.plugin.getSettings().strong_pull_multiplier
+              group
+                ? group.value('strong_pull_multiplier')
+                : this.plugin.getSettings().strong_pull_multiplier
             );
             if (group) group.set('strong_pull', true);
             else this.plugin.setNodeMultiplier(node.id, strong, { mode: 'strong-pull' });
             this.kickLayoutSearch();
+            syncControls.forEach((sync) => sync());
             new Notice(`Strong pull: ${group ? 'group' : node.id} x${strong.toFixed(2)}`);
           })
       );
@@ -5369,24 +5667,11 @@ class GraphFrontierView extends ItemView {
             if (group) group.set('strong_pull', null);
             else this.plugin.clearNodeMultiplier(node.id);
             this.kickLayoutSearch();
+            syncControls.forEach((sync) => sync());
             new Notice(`Strong pull cleared: ${group ? 'group' : node.id}`);
           })
       );
     }
-    menu.addItem((item) =>
-      item
-        .setTitle('Paint edges')
-        .setIcon('palette')
-        .onClick(async () => {
-          if (
-            group
-              ? !group.current()
-              : !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id)
-          )
-            return;
-          await this.promptPickPaintedEdgeColor(node?.id, clientX, clientY, group);
-        })
-    );
   }
 
   addContextSubmenuItem(menu, options) {
@@ -5786,21 +6071,52 @@ class GraphFrontierView extends ItemView {
       })
     );
 
+    const linkContext = {};
     const exportedEdges = sourceEdges.map((edge) => ({
       source: edge.source,
       target: edge.target,
-      width: getEdgeVisualSetting(this.plugin, edge.source, edge.target, 'edge_width_scale'),
+      width: getEdgeVisualSetting(
+        this.plugin,
+        edge.source,
+        edge.target,
+        'edge_width_scale',
+        linkContext
+      ),
+      color: getEdgeVisualSetting(this.plugin, edge.source, edge.target, 'edge_color', linkContext),
+      opacity: getEdgeVisualSetting(
+        this.plugin,
+        edge.source,
+        edge.target,
+        'edge_opacity',
+        linkContext
+      ),
+      showArrows: getEdgeVisualSetting(
+        this.plugin,
+        edge.source,
+        edge.target,
+        'show_arrows',
+        linkContext
+      ),
+      reverseArrows: getEdgeVisualSetting(
+        this.plugin,
+        edge.source,
+        edge.target,
+        'reverse_arrows',
+        linkContext
+      ),
+      bidirectional: !!edge.bidirectional,
       paintedColor:
-        this.plugin.getPaintedEdgeColor(edge.source) ||
-        this.plugin.getPaintedEdgeColor(edge.target) ||
-        null,
+        this.plugin.getPaintedEdgeColor(edge.source, linkContext) ||
+        this.plugin.getPaintedEdgeColor(edge.target, linkContext)
+          ? getEdgeVisualSetting(this.plugin, edge.source, edge.target, 'edge_color', linkContext)
+          : null,
     }));
 
     const width = Math.max(1, Math.floor(this.viewWidth || this.canvasEl.clientWidth || 1));
     const height = Math.max(1, Math.floor(this.viewHeight || this.canvasEl.clientHeight || 1));
     this.updateCanvasBackgroundColor();
     const theme = this.canvasTheme;
-    const bgColor = theme.background;
+    const bgColor = this.canvasBackgroundColor;
     const textColor = theme.text;
     const mutedTextColor = theme.mutedText;
     const edgeAppearance = getEdgeAppearanceRender(this);
@@ -5814,9 +6130,12 @@ class GraphFrontierView extends ItemView {
         zoom: Number(this.camera.zoom) || 1,
       },
       canvas: { width, height },
-      theme: { ...theme },
+      theme: { ...theme, background: bgColor },
       settings: {
+        dimLowDegreeNodes: this.plugin.getSettings().dim_low_degree_nodes,
         showGrid: !!this.plugin.getSettings().show_grid,
+        gridColor: this.plugin.getSettings().grid_color || theme.grid,
+        gridOpacity: this.plugin.getSettings().grid_opacity ?? theme.gridOpacity,
         gridStep: this.plugin.clampGridStep(this.plugin.getSettings().grid_step),
         gridLineWidth: this.plugin.clampGridLineWidth(this.plugin.getSettings().grid_line_width),
         edgeWidth: this.plugin.clampNumber(
@@ -6007,6 +6326,8 @@ class GraphFrontierView extends ItemView {
     (() => {
       const getLabelAppearance = ${getLabelAppearance.toString()};
       const getNodeScreenRadius = ${getNodeScreenRadius.toString()};
+      const getLowDegreeAlpha = ${getLowDegreeAlpha.toString()};
+      const getLinkArrowSegments = ${getLinkArrowSegments.toString()};
       const getNodeWorldRadius = ${getNodeWorldRadius.toString()};
       const getEdgeCssWidth = ${getEdgeCssWidth.toString()};
       const setCrispStroke = ${setCrispStroke.toString()};
@@ -6043,7 +6364,7 @@ class GraphFrontierView extends ItemView {
       const gridStep = Number(EXPORT_DATA.settings?.gridStep) || 20;
       const rawGridLineWidth = Number(EXPORT_DATA.settings?.gridLineWidth);
       const gridLineWidth = Number.isFinite(rawGridLineWidth)
-        ? Math.max(0.1, Math.min(1, rawGridLineWidth))
+        ? Math.max(0.1, Math.min(2, rawGridLineWidth))
         : 1;
       const minZoom = Number(EXPORT_DATA.settings?.minZoom) || 0.1;
       const maxZoom = Number(EXPORT_DATA.settings?.maxZoom) || 12;
@@ -6113,8 +6434,8 @@ class GraphFrontierView extends ItemView {
 
         ctx.save();
         const backingScale = dpr;
-        ctx.strokeStyle = EXPORT_DATA.theme.grid;
-        setCrispStroke(ctx, gridLineWidth, EXPORT_DATA.theme.gridOpacity, backingScale);
+        ctx.strokeStyle = EXPORT_DATA.settings.gridColor || EXPORT_DATA.theme.grid;
+        setCrispStroke(ctx, gridLineWidth, EXPORT_DATA.settings.gridOpacity ?? EXPORT_DATA.theme.gridOpacity, backingScale);
         // Chromium can drop subpixel lines when a crossed grid shares one path.
         const strokeSeparately = ctx.lineWidth < 1;
         if (!strokeSeparately) ctx.beginPath();
@@ -6149,9 +6470,9 @@ class GraphFrontierView extends ItemView {
           const isActive = !!selectedNodeId && (edge.source === selectedNodeId || edge.target === selectedNodeId);
           const physicalWidth = getFocusEdgeWidth(edge.width ?? edgeWidth, isActive ? 1 : 0);
           // Highlighted edges are fully opaque; the rest keep the edge opacity.
-          const alpha = isActive ? 1 : (selectedNodeId ? 0.24 : 1) * edgeOpacity;
+          const alpha = isActive ? 1 : (selectedNodeId ? 0.24 : 1) * (edge.opacity ?? edgeOpacity) * (edge.paintedColor ? 0.65 : 1);
           const color = getFocusEdgeColor(
-            edge.paintedColor || edgeColor,
+            edge.color || edge.paintedColor || edgeColor,
             EXPORT_DATA.theme?.text,
             isActive ? 1 : 0,
             hoverColor
@@ -6164,6 +6485,10 @@ class GraphFrontierView extends ItemView {
             buckets.set(key, bucket);
           }
           bucket.points.push(sourcePoint.x, sourcePoint.y, targetPoint.x, targetPoint.y);
+          if (edge.showArrows) bucket.points.push(...getLinkArrowSegments(sourcePoint.x, sourcePoint.y,
+            targetPoint.x, targetPoint.y, getNodeScreenRadius(sourceNode.radius, camera.zoom),
+            getNodeScreenRadius(targetNode.radius, camera.zoom), edge.reverseArrows, edge.bidirectional,
+            getEdgeCssWidth(physicalWidth, dpr)));
         }
         const ordered = Array.from(buckets.values()).sort((a, b) => a.layer - b.layer);
         ctx.save();
@@ -6211,7 +6536,8 @@ class GraphFrontierView extends ItemView {
           const isHovered = hoveredNodeId === node.id;
           const isSelected = selectedNodeId === node.id;
           const isNeighbor = selectedNodeId && selectedNeighbors.has(node.id);
-          const alpha = selectedNodeId ? (isSelected || isNeighbor ? 1 : (node.dimAlpha ?? 0.32)) : 1;
+          const alpha = (isHovered ? 1 : selectedNodeId ? (isSelected || isNeighbor ? 1 : (node.dimAlpha ?? 0.32)) : 1)
+            * getLowDegreeAlpha(EXPORT_DATA.settings.dimLowDegreeNodes, node.degree, isHovered || isSelected || isNeighbor);
 
           ctx.save();
           ctx.globalAlpha = alpha;
@@ -6463,7 +6789,7 @@ class GraphFrontierView extends ItemView {
           EXPORT_DATA.exportedAt +
           ' · nodes ' +
           EXPORT_DATA.nodes.length +
-          ' · edges ' +
+          ' · links ' +
           EXPORT_DATA.edges.length +
           '\\nSelected: ' +
           selectedText +
@@ -6563,7 +6889,7 @@ class GraphFrontierView extends ItemView {
       await writeVaultExport(this.app.vault, normalizedExportPath, html, options);
       if (!exactPath) {
         new Notice(
-          `Static HTML saved in vault ${normalizedExportPath.includes('/') ? 'at' : 'root:'} ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} edges)`
+          `Static HTML saved in vault ${normalizedExportPath.includes('/') ? 'at' : 'root:'} ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} links)`
         );
       }
       return {
@@ -6636,12 +6962,12 @@ class GraphFrontierView extends ItemView {
     const node = this.getCommandTargetNodeOrNotice();
     if (!node) return;
     if (!this.plugin.getPaintedEdgeColor(node.id)) {
-      new Notice('No painted edges on node');
+      new Notice('No painted links on node');
       return;
     }
     this.plugin.clearPaintedEdgeColor(node.id);
     this.plugin.renderAllViews();
-    new Notice(`Painted edges cleared: ${node.id}`);
+    new Notice(`Painted links cleared: ${node.id}`);
   }
 
   async commandStrongPull() {
@@ -7592,6 +7918,7 @@ class GraphFrontierView extends ItemView {
         snapshot.subgraph_filters[view.subgraphScope.id] = view.captureScopedFilter();
       }
     snapshot.view_state.side_panel_sections = {};
+    delete snapshot.view_state.settings_tab;
     return snapshot;
   }
 

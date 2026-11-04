@@ -185,7 +185,7 @@ class GraphFrontierActions extends LayoutApi {
           args.strongPull !== undefined ||
           NODE_VISUAL_SETTINGS.some((s) => s.edges && args.settings[s.key] !== undefined))
       )
-        fail('INVALID_ARGUMENT', 'Gravity nodes do not have edge or strong-pull settings.');
+        fail('INVALID_ARGUMENT', 'Gravity nodes do not have link or strong-pull settings.');
     }
     for (const node of nodes) {
       if (args.reset) this.plugin.resetNodeVisualSettings(node.id);
@@ -672,9 +672,15 @@ class GraphFrontierActions extends LayoutApi {
     if (args.action === 'open_path' || args.action === 'open_url') {
       const key = args.action === 'open_path' ? 'path' : 'url',
         value = file && app.metadataCache.getFileCache(file)?.frontmatter?.[key];
-      if (typeof value !== 'string' || !value.trim()) fail('UNAVAILABLE', `No ${key} property.`);
-      const { openNoteTarget } = require('./note-navigation');
-      await openNoteTarget(app, key, value.trim(), view.contentEl.win);
+      const { getNoteTargets, openNoteTarget } = require('./note-navigation');
+      const targets = getNoteTargets(key, value);
+      if (!targets.length) fail('UNAVAILABLE', `No valid ${key} property.`);
+      if (targets.length > 1)
+        fail(
+          'UNAVAILABLE',
+          `Multiple ${key} targets. Choose one in the node's ${key === 'url' ? 'Open URL' : 'Open path'} submenu.`
+        );
+      await openNoteTarget(app, key, targets[0].target, view.contentEl.win);
     }
     return { ok: true, action: args.action };
   }

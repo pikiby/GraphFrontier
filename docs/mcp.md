@@ -135,18 +135,18 @@ are shared plugin state, not independent layouts per tab.
 | `list_views`           | `listViews()`              | Vault identity and open graphs                                                            |
 | `get_state`            | `getState(args)`           | Layout, counts, camera and context token                                                  |
 | `get_selection`        | `getSelection(args)`       | Explicit selection, separately from search focus                                          |
-| `get_graph`            | `getGraph(args)`           | Bounded pages of nodes or edges, no note content                                          |
+| `get_graph`            | `getGraph(args)`           | Bounded pages of nodes or links, no note content                                          |
 | `select_nodes`         | `selectNodes(args)`        | Replace selection; empty `nodeIds` clears it                                              |
 | `frame_nodes`          | `frameNodes(args)`         | Frame selected IDs without moving the nodes                                               |
 | `get_configuration`    | `getConfiguration(args)`   | All global settings, rules, gravity nodes, hotkeys, UI state                              |
 | `update_settings`      | `updateSettings(args)`     | Patch any global setting: physics, appearance, attachments, autosave, modifiers           |
 | `get_node_settings`    | `getNodeSettings(args)`    | Individual overrides and effective settings, pins and force                               |
-| `update_node_settings` | `updateNodeSettings(args)` | Individual colors, aura, sizes, labels, edge color and strong pull; reset overrides       |
+| `update_node_settings` | `updateNodeSettings(args)` | Individual colors, aura, sizes, labels, link color and strong pull; reset overrides       |
 | `edit_rules`           | `editRules(args)`          | Add/update/remove/replace/clear groups, blacklist and whitelist                           |
 | `search_nodes`         | `searchNodes(args)`        | Find nodes using existing typed-query matching without changing the UI                    |
 | `set_search`           | `setSearch(args)`          | Set/clear Search, choose find/filter, toggle linked highlighting                          |
 | `highlight_nodes`      | `highlightNodes(args)`     | Highlight explicit IDs and optionally their neighbors                                     |
-| `set_visible_nodes`    | `setVisibleNodes(args)`    | Exact node subset with its internal edges; null clears it                                 |
+| `set_visible_nodes`    | `setVisibleNodes(args)`    | Exact node subset with its internal links; null clears it                                 |
 | `set_camera`           | `setCamera(args)`          | Exact position/zoom or fit; restores a previously read camera                             |
 | `move_nodes`           | `moveNodes(args)`          | Explicit coordinates with keep/exact/grid/none pin behavior                               |
 | `pin_nodes`            | `pinNodes(args)`           | Pin/grid/unpin explicit/all nodes, or pin/grid/orbit/unpin linked nodes and attachments   |
@@ -179,7 +179,7 @@ contains every current global setting and validates the same ranges as the UI.
 Node visual ranges come from the shared `NODE_VISUAL_SETTINGS` catalog. Unknown
 keys and invalid values fail before mutation rather than silently clamping.
 Use `null` to remove an individual visual override, or `reset: true` with
-`settings: {}` to reset the node's visual overrides. Gravity nodes reject edge
+`settings: {}` to reset the node's visual overrides. Gravity nodes reject link
 and strong-pull settings, just like their context menu.
 
 `subgraph_nodes` (`subgraphNodes`) manages layout-only containers. Use `action: "create"`
@@ -263,6 +263,10 @@ position but keeps the node's repulsion, link influence and Strong pull toward
 eligible free nodes. Notes and attachments use the same physics.
 
 Copy actions return text; `clipboard: true` also writes it to the clipboard.
+`node_action` with `open_url` / `open_path` accepts a scalar or one valid YAML list
+target, including a Markdown alias. With multiple targets it returns `UNAVAILABLE`
+and asks for a choice in the node's Open URL / Open path submenu; it never silently
+opens the first target.
 Linked names and paths use commas followed by line breaks, without a trailing
 comma. Exported graph metadata and copy operations are not a general API for
 reading or editing arbitrary file contents.
@@ -398,14 +402,14 @@ changes:
    selection/filter or layout if the requested operation was temporary.
 
 Export reuses the existing HTML generator (pan/zoom, hover and Markdown preview).
-With `nodeIds`, it contains only those nodes and edges whose two endpoints are
+With `nodeIds`, it contains only those nodes and links whose two endpoints are
 both included, even if other nodes are currently visible. Without `nodeIds`, it
 exports current visibility. Node lists are limited to 500 per call; omit them to
 export a larger visible graph. All platforms use vault-relative paths; absolute paths are rejected. A directory gets the default HTML filename.
 Existing export files require `overwrite: true`; the plugin serializes its own exports and refuses to modify an existing file
 without permission. Other applications and symlink targets are governed by the
 Obsidian adapter; no cross-process atomic or physical-path sandbox guarantee is made. MCP exports do not change the remembered
-UI export path. The result reports the actual filename and node/edge counts.
+UI export path. The result reports the actual filename and node/link counts.
 `includeContents` defaults to true, matching the existing export; use false to
 omit note previews. Metadata such as paths/properties is still included.
 
@@ -443,6 +447,10 @@ Build and check with `npm run format:check`, `npm run lint`, `npm test`,
 of optional desktop networking in a mobile-capable plugin remains a separate
 review question; this local implementation does not change the manifest.
 
-Group `settings` also accepts `edge_color` (hex color) and `strong_pull` (boolean).
+Group `settings` also accepts `edge_color`, `edge_opacity`, `show_arrows`, `reverse_arrows`, `strong_pull` and `strong_pull_multiplier` (1-20).
 They follow group membership without writing individual node overrides. Changing
 Strong pull rules or membership in an active Strong pull group wakes the layout.
+`update_ui.sections.settings` controls the collapsible Settings section. Legacy section keys
+remain accepted for compatibility; they do not select tabs. Settings-tab selection is UI-only
+and remains outside named layouts and restored backup payloads.
+Link API fields/tool IDs retain their existing `edge_*`/`edges` names for compatibility. Explicit false overrides inherited true; equal-priority endpoint conflicts prefer the stored source (except maximum-endpoint width). Node multiplier 1 is an explicit override; null clears it. Visual reset preserves force settings. New global fields are `dim_low_degree_nodes`, `custom_background`, `background_color`, `grid_color`, `grid_opacity` (null uses theme), `show_arrows`, `reverse_arrows`; `grid_line_width` now accepts 0.1-2. All persist per layout and export without waking physics.

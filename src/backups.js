@@ -42,6 +42,7 @@ function cleanData(plugin, data) {
       Object.hasOwn(DEFAULT_DATA.view_state, name)
     )
   );
+  delete result.view_state.settings_tab;
   return result;
 }
 
@@ -370,7 +371,9 @@ class BackupManager {
           try {
             for (const [path, text] of updates) await adapter.write(path, text);
             const data = cleanData(p, bundle.data);
+            data.view_state.settings_tab = p.getSettingsTab();
             await p.saveData({ ...data, backups: this.preferences });
+            data.view_state.settings_tab = p.getSettingsTab();
             p.data = data;
             p.nodeListStore.lists = copy(bundle.lists);
             p.nodeListStore.readError = null;
@@ -425,6 +428,8 @@ class BackupManager {
     } finally {
       this.busy = false;
       this.restoring = false;
+      for (const leaf of this.plugin.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE))
+        leaf.view?.requestFrame?.();
       if (this.pending) {
         this.pending = false;
         this.schedule();
