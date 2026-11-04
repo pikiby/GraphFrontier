@@ -64,9 +64,37 @@ test('local graph uses exact path, inbound and outbound neighbors and induced ed
   assert.equal(f.local.localPath, 'two/a.md');
 });
 
+test('local Settings tab is scoped, survives local Load and workspace restore, sidebar stays closed by default', async (t) => {
+  const f = setup(t);
+  assert.equal(f.local.sidePanelOpen, false);
+  assert.equal(f.view.sidePanelOpen, true);
+  f.local.selectSettingsTab('physics');
+  assert.equal(f.local.plugin.getSettingsTab(), 'physics');
+  assert.equal(f.plugin.getSettingsTab(), 'groups');
+  await f.local.saveCurrentLayout({ silent: true });
+  f.local.selectSettingsTab('selection');
+  await f.local.loadSavedLayout({ silent: true });
+  assert.equal(
+    f.local.plugin.getSettingsTab(),
+    'selection',
+    'local layout cannot replace UI preference'
+  );
+  assert.equal(f.local.sidePanelOpen, false);
+  const state = f.local.getState();
+  f.local.selectSettingsTab('display');
+  await f.local.setState(state);
+  assert.equal(
+    f.local.plugin.getSettingsTab(),
+    'selection',
+    'workspace state restores its own scoped UI'
+  );
+  assert.equal(f.plugin.getSettingsTab(), 'groups');
+  assert.equal(f.local.sidePanelOpen, false);
+});
+
 test('facade isolates settings, pins, visual actions, saves and workspace snapshot from global views', async (t) => {
   const f = setup(t);
-  const before = structuredClone(f.plugin.data);
+  const before = JSON.parse(JSON.stringify(f.plugin.data));
   f.local.plugin.setPin('b.md', { x: 55, y: 77 });
   f.local.plugin.setNodeVisualSetting('b.md', 'node_size_scale', 2);
   f.local.plugin.data.settings.show_grid = false;
@@ -238,7 +266,7 @@ test('closing a local view cancels its pending refresh and ignores later schedul
 
 test('switching notes retains departing and shared node coordinates only in local state', (t) => {
   const f = setup(t);
-  const ownerBefore = structuredClone(f.plugin.data);
+  const ownerBefore = JSON.parse(JSON.stringify(f.plugin.data));
   const departing = f.local.nodeById.get('one/a.md');
   departing.x = 345;
   departing.y = -234;
@@ -310,7 +338,7 @@ test('fresh local pane ignores global camera and centers on active note, includi
 
 test('restored local pane preserves its own saved camera', async (t) => {
   const f = setup(t);
-  const data = structuredClone(f.local.plugin.data);
+  const data = JSON.parse(JSON.stringify(f.local.plugin.data));
   Object.assign(data.view_state, { camera_saved: true, pan_x: 31, pan_y: -42, zoom: 1.5 });
   const leaf = { app: f.app, getViewState: () => ({ state: { local: { data } } }) };
   const local = new LocalGraphFrontierView(leaf, f.plugin);

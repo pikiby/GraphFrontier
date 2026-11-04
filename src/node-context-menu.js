@@ -1,5 +1,5 @@
 const { Menu, Notice } = require('obsidian');
-const { openNoteTarget } = require('./note-navigation');
+const { addNoteTargetActions } = require('./note-navigation');
 
 function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   const { app, plugin } = view;
@@ -83,7 +83,14 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   const nativeMenu = new Menu(app);
   if (isFile) app.workspace.trigger?.('file-menu', nativeMenu, file, 'graphfrontier', view.leaf);
 
-  const add = (target, title, icon, callback, enabled = true) => {
+  const add = (
+    target,
+    title,
+    icon,
+    callback,
+    enabled = true,
+    positionAction = /^(Pin|Unpin)/.test(title)
+  ) => {
     if (!enabled) return null;
     let added;
     target.addItem((item) => {
@@ -94,7 +101,7 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
         .onClick(async (event) => {
           try {
             if (!view.resolveNodeActionTargets(singleSnapshot).length) return;
-            if (/^(Pin|Unpin)/.test(title))
+            if (positionAction)
               await view.runPositionAction([node.id, ...view.getLinkedNodeIds(node.id)], () =>
                 callback(event)
               );
@@ -190,19 +197,11 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   if (isFile) menu.addSeparator();
 
   const properties = isFile ? app.metadataCache.getFileCache(file)?.frontmatter : null;
-  for (const [key, title, icon] of [
-    ['path', 'Open path', 'folder-open'],
-    ['url', 'Open URL', 'external-link'],
-  ]) {
-    const value = properties?.[key];
-    add(
-      menu,
-      title,
-      icon,
-      () => openNoteTarget(app, key, value.trim(), view.contentEl.win),
-      typeof value === 'string' && !!value.trim()
-    );
-  }
+  for (const key of ['path', 'url'])
+    addNoteTargetActions(menu, app, key, properties?.[key], view.contentEl.win, {
+      add: (target, title, icon, callback) => add(target, title, icon, callback, true, false),
+      submenu,
+    });
   submenu(
     'Open',
     'folder-open',

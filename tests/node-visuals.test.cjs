@@ -12,6 +12,147 @@ const {
 const render = loadSource('render.js');
 const { buildNodeContextMenu } = loadSource('node-context-menu.js');
 
+test('link inheritance respects priority, explicit false, source conflicts and legacy paint updates', (t) => {
+  const { plugin, view } = fixture(t, {
+    settings: { edge_color: '#111111', show_arrows: true, reverse_arrows: true },
+    painted_edge_colors: { 'alpha.md': '#112233', target: '#abcdef' },
+  });
+  const styles = {
+    'alpha.md': { edge_color: '#222222', edge_opacity: 0.3, show_arrows: true },
+    target: { edge_color: '#333333', edge_opacity: 0.4 },
+  };
+  t.mock.method(plugin, 'getGroupVisualSettings', (id) => styles[id]);
+  const resolve = (key) => getEdgeVisualSetting(plugin, 'alpha.md', 'target', key);
+  assert.equal(resolve('edge_color'), '#112233', 'legacy paint at equal priority prefers source');
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const menu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(menu, view.nodes[0], 0, 0);
+  const picker = menu.items.find((item) => item.title === 'Link color').dom.children[0].children[0];
+  assert.equal(picker.value, '#112233', 'picker shows actual old paint');
+  picker.value = '#445566';
+  picker.events.input();
+  assert.equal(plugin.data.painted_edge_colors['alpha.md'], undefined);
+  assert.equal(resolve('edge_color'), '#445566', 'source new color beats target old paint');
+  plugin.setPaintedEdgeColor('alpha.md', '#778899');
+  assert.equal(resolve('edge_color'), '#778899', 'legacy action is the latest color');
+  assert.equal(plugin.data.node_visual_settings['alpha.md']?.edge_color, undefined);
+  plugin.resetNodeVisualSettings('alpha.md');
+  assert.equal(resolve('edge_color'), '#abcdef', 'target individual beats source group');
+  plugin.resetNodeVisualSettings('target');
+  assert.equal(resolve('edge_color'), '#222222', 'source group wins equal-priority conflict');
+  assert.equal(resolve('edge_opacity'), 0.3);
+  plugin.setNodeVisualSetting('target', 'edge_opacity', 0);
+  plugin.setNodeVisualSetting('target', 'show_arrows', false);
+  plugin.setNodeVisualSetting('target', 'reverse_arrows', false);
+  assert.equal(resolve('edge_opacity'), 0);
+  assert.equal(resolve('show_arrows'), false);
+  assert.equal(resolve('reverse_arrows'), false);
+  plugin.resetNodeVisualSettings('target');
+  styles['alpha.md'] = {};
+  styles.target = {};
+  assert.equal(resolve('edge_color'), '#111111');
+});
+
+test('shared menu toggles use existing buttons, hide Reverse and display inherited theme swatches', (t) => {
+  const { plugin, view } = fixture(t);
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const menu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(menu, view.nodes[0], 0, 0);
+  const row = (label) => menu.items.find((item) => item.title === label);
+  const show = row('Show arrows').dom.children[0].children[0];
+  assert.equal(show.tag, 'button');
+  assert.equal(show.cls, 'graphfrontier-toggle-btn');
+  assert.equal(row('Reverse arrows').dom.style.display, 'none');
+  assert.equal(row('Link color').dom.children[0].children[0].value, view.canvasTheme.mutedText);
+  assert.equal(row('Link color').dom.children[0].children.length, 1, 'no color reset button');
+  view.layoutPaused = true;
+  show.events.click();
+  assert.equal(plugin.data.node_visual_settings['alpha.md'].show_arrows, true);
+  assert.equal(show.attributes['aria-pressed'], 'true');
+  assert.equal(row('Reverse arrows').dom.style.display, '');
+  row('Reverse arrows').dom.children[0].children[0].events.click();
+  assert.equal(plugin.data.node_visual_settings['alpha.md'].reverse_arrows, true);
+  show.events.click();
+  assert.equal(row('Reverse arrows').dom.style.display, 'none');
+  assert.equal(view.layoutPaused, true, 'visual edits do not wake physics');
+});
+
+test('Strong pull slider targets eligible selection, synchronizes actions and visual reset preserves forces', async (t) => {
+  const { plugin, view } = fixture(t);
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const nodes = [
+    { id: 'a' },
+    { id: 'b' },
+    { id: 'gravity', meta: { darkEnergy: true } },
+    { id: 'other' },
+  ];
+  view.nodes = nodes;
+  view.nodeById = new Map(nodes.map((node) => [node.id, node]));
+  view.selectedNodeIds = new Set(['a', 'b', 'gravity']);
+  const menu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(menu, null, 0, 0, view.captureNodeActionTargets(null), {
+    basicOnly: true,
+  });
+  const input = menu.items.find((item) => item.title === 'Strong pull x').dom.children[0]
+    .children[0];
+  assert.equal(input.max, '20');
+  input.value = '20';
+  input.events.input();
+  assert.equal(plugin.getNodeMultiplier('a'), 20);
+  assert.equal(plugin.getNodeMultiplier('b'), 20);
+  assert.equal(plugin.getNodeMultiplier('gravity'), 1);
+  assert.equal(plugin.getNodeMultiplier('other'), 1);
+  assert.equal(plugin.getSettings().strong_pull_multiplier, 5);
+  const single = new obsidian.Menu();
+  view.addVisualSettingsToMenu(single, nodes[0], 0, 0, {
+    ...view.captureNodeActionTargets(nodes[0]),
+    ids: ['a'],
+  });
+  const slider = single.items.find((item) => item.title === 'Strong pull x').dom.children[0]
+    .children[0];
+  single.items.find((item) => item.title === 'Reset visual settings').callback();
+  assert.equal(plugin.getNodeMultiplier('a'), 20);
+  await single.items.find((item) => item.title === 'Clear strong pull').callback();
+  assert.equal(slider.value, '1');
+});
+
+test('group multiplier uses existing force resolver and survives only-visual reset', (t) => {
+  const { plugin, view } = fixture(t, {
+    groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
+  });
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  view.nodes[0].meta = { path: 'alpha.md', fileName: 'alpha.md', tags: [] };
+  const row = { id: 'g', settings: {}, colorInput: { value: '#123456' } };
+  view.groupEditorRows = [row];
+  const menu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(menu, null, 0, 0, { ids: [] }, { group: row });
+  const slider = menu.items.find((item) => item.title === 'Strong pull x').dom.children[0]
+    .children[0];
+  slider.value = '20';
+  slider.events.input();
+  assert.deepEqual(plugin.data.groups[0].settings, {
+    strong_pull: true,
+    strong_pull_multiplier: 20,
+  });
+  assert.equal(plugin.getNodeMultiplier('alpha.md'), 20);
+  assert.equal(plugin.getSettings().strong_pull_multiplier, 5);
+  menu.items.find((item) => item.title === 'Reset visual settings').callback();
+  assert.equal(plugin.getNodeMultiplier('alpha.md'), 20);
+  plugin.setNodeMultiplier('alpha.md', 8);
+  assert.equal(plugin.getNodeMultiplier('alpha.md'), 8, 'individual overrides group force');
+  const individual = new obsidian.Menu();
+  view.addVisualSettingsToMenu(individual, view.nodes[0], 0, 0);
+  const one = individual.items.find((item) => item.title === 'Strong pull x').dom.children[0]
+    .children[0];
+  one.value = '1';
+  one.events.input();
+  assert.equal(one.value, '1');
+  assert.equal(plugin.getNodeMultiplier('alpha.md'), 1, 'explicit one overrides group twenty');
+  assert.equal(plugin.normalizeData(plugin.data).node_force_multipliers['alpha.md'], 1);
+  plugin.clearNodeMultiplier('alpha.md');
+  assert.equal(plugin.getNodeMultiplier('alpha.md'), 20, 'clear returns to group inheritance');
+});
+
 test('saved brightness clamps to 50 and text zoom supports 40 globally and individually', (t) => {
   const { plugin, view } = fixture(t, {
     settings: { aura_brightness: 100, label_zoom_steps: 40 },
@@ -28,13 +169,17 @@ test('saved brightness clamps to 50 and text zoom supports 40 globally and indiv
 
 test('visual settings inherit, isolate, clamp and reset without touching physics or coordinates', (t) => {
   const { plugin, view } = fixture(t);
-  const settings = structuredClone(plugin.data.settings);
+  const settings = JSON.parse(JSON.stringify(plugin.data.settings));
   const nodes = structuredClone(view.nodes);
   view.layoutPaused = true;
   const kick = t.mock.method(view, 'kickLayoutSearch', () => assert.fail('No physics wake'));
   for (const definition of NODE_VISUAL_SETTINGS) {
     const spec =
-      definition.type === 'color' ? { ...definition, min: '#112233', max: '#abcdef' } : definition;
+      definition.type === 'color'
+        ? { ...definition, min: '#112233', max: '#abcdef' }
+        : definition.type === 'boolean'
+          ? { ...definition, min: false, max: true }
+          : definition;
     assert.equal(getNodeVisualSetting(plugin, 'a', spec.key), settings[spec.key]);
     plugin.setNodeVisualSetting('a', spec.key, spec.max);
     assert.equal(getNodeVisualSetting(plugin, 'a', spec.key), spec.max);
@@ -142,16 +287,24 @@ test('one reset clears all visual controls, identical for notes and attachments'
   const menu = buildNodeContextMenu(view, node, 0, 0);
   const visual = menu.items.find((item) => item.title === 'Visual settings').submenu;
   for (const definition of NODE_VISUAL_SETTINGS) {
-    const spec = definition.type === 'color' ? { ...definition, max: '#abcdef' } : definition;
+    const spec =
+      definition.type === 'color'
+        ? { ...definition, max: '#abcdef' }
+        : definition.type === 'boolean'
+          ? { ...definition, max: true }
+          : definition;
     const row = visual.items.find((item) => item.title === spec.label).dom.children[0];
     const [input] = row.children;
     if (spec.type === 'color') {
       assert.equal(input.cls, 'graphfrontier-group-color-input');
       assert.equal(row.children.length, 1);
     }
-    assert(!row.children.some((child) => child.tag === 'button'));
+    assert.equal(
+      row.children.some((child) => child.tag === 'button'),
+      spec.type === 'boolean'
+    );
     input.value = String(spec.max);
-    input.events.input();
+    input.events[spec.type === 'boolean' ? 'click' : 'input']();
     assert.equal(getNodeVisualOverride(plugin, node.id, spec.key), spec.max);
   }
   const resets = visual.items.filter((item) => item.title === 'Reset visual settings');
@@ -431,7 +584,7 @@ test('groups reuse the node visual menu, write group overrides and reset without
     menu.items.map((item) => item.title),
     nodeMenu.items.map((item) => item.title)
   );
-  const before = structuredClone(plugin.data.node_visual_settings);
+  const before = JSON.parse(JSON.stringify(plugin.data.node_visual_settings));
   for (const spec of NODE_VISUAL_SETTINGS) {
     const item = menu.items.find((item) => item.title === spec.label);
     const controls = item.dom.children[0];
@@ -442,11 +595,15 @@ test('groups reuse the node visual menu, write group overrides and reset without
     );
     const input = controls.children[0];
     input.value = String(spec.type === 'color' ? '#abcdef' : spec.max);
-    input.events.input();
-    if (spec.type === 'color') {
+    input.events[spec.type === 'boolean' ? 'click' : 'input']();
+    if (spec.key === 'node_color') {
       assert.equal(plugin.data.groups[0].color, '#abcdef');
       assert.equal(row.colorInput.value, '#abcdef');
-    } else assert.equal(plugin.data.groups[0].settings[spec.key], spec.max);
+    } else
+      assert.equal(
+        plugin.data.groups[0].settings[spec.key],
+        spec.type === 'color' ? '#abcdef' : spec.type === 'boolean' ? true : spec.max
+      );
   }
   assert.deepEqual(plugin.data.node_visual_settings, before);
   const reset = menu.items.find((item) => item.title === 'Reset visual settings');
@@ -480,8 +637,13 @@ test('group uses shared strong-pull and edge-color actions and preserves force o
       .callback();
   await action('Strong pull');
   assert.equal(plugin.data.groups[0].settings.strong_pull, true);
-  view.promptPickPaintedEdgeColor = async (id, x, y, target) => target.set('edge_color', '#abcdef');
-  await action('Paint edges');
+  const color = menu().items.find((item) => item.title === 'Link color').dom.children[0]
+    .children[0];
+  color.value = '#abcdef';
+  color.events.input();
+  assert(
+    !menu().items.some((item) => item.title === 'Paint links' || item.title === 'Paint edges')
+  );
   assert.equal(plugin.data.groups[0].settings.edge_color, '#abcdef');
   assert(!menu().items.some((item) => item.title === 'Clear painted edges'));
   await action('Reset visual settings');

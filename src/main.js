@@ -1,4 +1,5 @@
 const { BackupManager } = require('./backups');
+const { observeNodeLists } = require('./appearance-events');
 const { normalizeLayoutSleep } = require('./physics');
 const {
   RENDER_MODEL,
@@ -11,6 +12,7 @@ const { normalizeDarkEnergy, darkEnergyNodes } = require('./dark-energy');
 const { normalizeSubgraphs, subgraphNodes, normalizeSubgraphSpaces } = require('./subgraphs');
 const {
   NODE_VISUAL_SETTINGS,
+  getNodeGroupVisuals,
   normalizeNodeVisuals,
   normalizeGroupVisuals,
 } = require('./node-visuals');
@@ -27,6 +29,7 @@ const {
   NODE_MULTIPLIER_MAX,
   ZOOM_STEP_FACTOR,
   DEFAULT_DATA,
+  SETTINGS_TABS,
   normalizeAttachmentExtensions,
   MIN_ZOOM,
   MAX_ZOOM,
@@ -142,12 +145,12 @@ function registerGraphFrontierCommands(plugin) {
     },
     {
       id: 'graphfrontier-paint-edges-under-cursor',
-      name: 'Paint edges under cursor',
+      name: 'Paint links under cursor',
       method: 'commandPaintEdges',
     },
     {
       id: 'graphfrontier-clear-painted-edges-under-cursor',
-      name: 'Clear painted edges under cursor',
+      name: 'Clear painted links under cursor',
       method: 'commandClearPaintedEdges',
     },
     {
@@ -655,6 +658,23 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     if (!/^#[0-9a-f]{6}$/i.test(normalized.settings.node_color))
       normalized.settings.node_color = DEFAULT_DATA.settings.node_color;
     for (const settings of [normalized.settings, normalized.saved_layout_settings]) {
+      for (const key of ['background_color', 'grid_color'])
+        settings[key] = /^#[0-9a-f]{6}$/i.test(settings[key]) ? settings[key].toLowerCase() : null;
+      for (const key of [
+        'dim_low_degree_nodes',
+        'custom_background',
+        'show_arrows',
+        'reverse_arrows',
+      ])
+        settings[key] = settings[key] === true;
+      settings.grid_opacity =
+        typeof settings.grid_opacity === 'number' && Number.isFinite(settings.grid_opacity)
+          ? Math.max(0, Math.min(1, settings.grid_opacity))
+          : null;
+      settings.grid_line_width = this.clampGridLineWidth(settings.grid_line_width);
+      settings.strong_pull_multiplier = this.clampStrongPullMultiplier(
+        settings.strong_pull_multiplier
+      );
       if (!/^#[0-9a-f]{6}$/i.test(settings.attachment_node_color))
         settings.attachment_node_color = null;
       settings.edge_color = /^#[0-9a-f]{6}$/i.test(settings.edge_color)
@@ -804,7 +824,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
     for (const [nodeId, rawValue] of Object.entries(multipliers)) {
       const multiplier = this.clampMultiplier(rawValue);
-      if (multiplier > 1) normalized.node_force_multipliers[nodeId] = multiplier;
+      if (multiplier > 1 || Number(rawValue) === 1)
+        normalized.node_force_multipliers[nodeId] = multiplier;
     }
     for (const [nodeId, rawValue] of Object.entries(strongPullNodes)) {
       if (rawValue) normalized.strong_pull_nodes[nodeId] = true;
@@ -883,6 +904,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       nextSidePanelSections[sectionId] = !!rawState;
     }
     normalized.view_state.side_panel_sections = nextSidePanelSections;
+    normalized.view_state.settings_tab = SETTINGS_TABS.includes(viewState.settings_tab)
+      ? viewState.settings_tab
+      : DEFAULT_DATA.view_state.settings_tab;
     normalized.view_state.camera_saved = viewState.camera_saved === true;
     normalized.view_state.search_query =
       typeof viewState.search_query === 'string' && this.parseGroupQuery(viewState.search_query)
@@ -933,7 +957,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   clampGridLineWidth(value) {
-    return this.clampNumber(value, 0.1, 1, DEFAULT_DATA.settings.grid_line_width);
+    return this.clampNumber(value, 0.1, 2, DEFAULT_DATA.settings.grid_line_width);
   }
 
   clampMultiplier(value) {
@@ -972,6 +996,11 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     return nextSidePanelSections;
   }
 
+  getSettingsTab() {
+    const tab = this.data?.view_state?.settings_tab;
+    return SETTINGS_TABS.includes(tab) ? tab : DEFAULT_DATA.view_state.settings_tab;
+  }
+
   applySidePanelSectionsState(targetData, sidePanelSectionsState = null) {
     if (!targetData || typeof targetData !== 'object') return targetData;
     if (!targetData.view_state || typeof targetData.view_state !== 'object') {
@@ -982,6 +1011,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         ? sidePanelSectionsState
         : this.getSidePanelSectionsState();
     targetData.view_state.side_panel_sections = Object.assign({}, normalizedSections);
+    targetData.view_state.settings_tab = this.getSettingsTab();
     return targetData;
   }
 
@@ -1163,6 +1193,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       normalizedData.view_state = Object.assign({}, DEFAULT_DATA.view_state);
     }
     normalizedData.view_state.side_panel_sections = {};
+    delete normalizedData.view_state.settings_tab;
     try {
       const contents = `${JSON.stringify(normalizedData, null, 2)}\n`;
       await this.ensureLayoutsFolder();
@@ -1438,7 +1469,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       value !== null &&
       (spec.type === 'color'
         ? !/^#[0-9a-f]{6}$/i.test(value)
-        : typeof value !== 'number' || !Number.isFinite(value))
+        : spec.type === 'boolean'
+          ? typeof value !== 'boolean'
+          : typeof value !== 'number' || !Number.isFinite(value))
     )
       return;
     if (key === 'label_font_size') {
@@ -1446,9 +1479,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       return;
     }
     const settings = { ...this.data.node_visual_settings?.[nodeId] };
+    if (key === 'edge_color') delete this.data.painted_edge_colors?.[nodeId];
     if (value === null) delete settings[key];
     else
-      settings[key] = spec.type === 'color' ? value : Math.max(spec.min, Math.min(spec.max, value));
+      settings[key] =
+        spec.type === 'color' || spec.type === 'boolean'
+          ? value
+          : Math.max(spec.min, Math.min(spec.max, value));
     this.data.node_visual_settings = { ...this.data.node_visual_settings, [nodeId]: settings };
     if (!Object.keys(settings).length) delete this.data.node_visual_settings[nodeId];
     this.persistNodeVisualSettings();
@@ -1470,6 +1507,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   persistNodeVisualSettings() {
+    this.appearanceVersion = (this.appearanceVersion || 0) + 1;
     for (const leaf of this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE)) {
       if (!leaf.view) continue;
       leaf.view.layoutEditVersion = (leaf.view.layoutEditVersion || 0) + 1;
@@ -1481,10 +1519,16 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   getNodeMultiplier(nodeId, context) {
+    const group =
+      this.data.node_force_multipliers[nodeId] == null
+        ? this.getGroupVisualSettings(nodeId, context)
+        : null;
     const stored =
       this.data.node_force_multipliers[nodeId] ??
-      (this.getGroupVisualSettings(nodeId, context)?.strong_pull
-        ? this.clampStrongPullMultiplier(this.getSettings().strong_pull_multiplier)
+      (group?.strong_pull
+        ? this.clampStrongPullMultiplier(
+            group.strong_pull_multiplier ?? this.getSettings().strong_pull_multiplier
+          )
         : 1);
     const multiplier = this.clampMultiplier(stored);
     return multiplier > 1 ? multiplier : 1;
@@ -1511,10 +1555,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
   setNodeMultiplier(nodeId, value, options = {}) {
     const multiplier = this.clampMultiplier(value);
-    if (multiplier <= 1) {
-      this.clearNodeMultiplier(nodeId);
-      return;
-    }
     this.data.node_force_multipliers[nodeId] = multiplier;
     if (options.mode === 'strong-pull') {
       this.data.strong_pull_nodes[nodeId] = true;
@@ -1542,10 +1582,11 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this.schedulePersist();
   }
 
-  getPaintedEdgeColor(nodeId) {
+  getPaintedEdgeColor(nodeId, context) {
     const colorText = String(
       this.data.painted_edge_colors?.[nodeId] ??
-        this.getGroupVisualSettings(nodeId)?.edge_color ??
+        this.data.node_visual_settings?.[nodeId]?.edge_color ??
+        getNodeGroupVisuals(this, nodeId, context)?.edge_color ??
         ''
     ).trim();
     if (!/^#([0-9a-f]{6})$/i.test(colorText)) return null;
@@ -1554,14 +1595,20 @@ module.exports = class GraphFrontierPlugin extends Plugin {
 
   setPaintedEdgeColor(nodeId, color) {
     const normalizedColor = this.normalizeGroupColor(color);
+    if (this.data.node_visual_settings?.[nodeId])
+      delete this.data.node_visual_settings[nodeId].edge_color;
     this.data.painted_edge_colors[nodeId] = normalizedColor;
+    this.appearanceVersion = (this.appearanceVersion || 0) + 1;
     this.schedulePersist();
   }
 
   clearPaintedEdgeColor(nodeId) {
-    if (!this.data.painted_edge_colors?.[nodeId]) return;
-    delete this.data.painted_edge_colors[nodeId];
-    this.schedulePersist();
+    if (
+      !this.data.painted_edge_colors?.[nodeId] &&
+      this.data.node_visual_settings?.[nodeId]?.edge_color == null
+    )
+      return;
+    this.setNodeVisualSetting(nodeId, 'edge_color', null);
   }
 
   // View sync across all open GraphFrontier tabs (refresh/render/recompute).
@@ -1632,6 +1679,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   getNodeLists() {
+    observeNodeLists(this.owner || this);
     return this.nodeListStore?.lists || EMPTY_NODE_LISTS;
   }
 
@@ -1646,6 +1694,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       for (const leaf of this.app.workspace.getLeavesOfType(type)) {
         const view = leaf.view;
         if (!view?.isOpen) continue;
+        view.groupColorCache = null;
+        view.appearanceCache = null;
         view.markQueryRuleVisibilityDirty();
         const query = view.searchInputEl?.value ?? view.searchInputValue;
         if (view.parseSearchQuery(query).source === 'list') view.syncSearchMatchesLive();
@@ -1676,7 +1726,12 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       JSON.stringify(
         groups
           .filter((group) => group.settings?.strong_pull != null)
-          .map((group) => [group.query, group.enabled, group.settings.strong_pull])
+          .map((group) => [
+            group.query,
+            group.enabled,
+            group.settings.strong_pull,
+            group.settings.strong_pull_multiplier,
+          ])
       );
     const previousPull = pullRules(this.data.groups);
     const normalizedGroups = [];
@@ -2080,7 +2135,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       }
     }
 
-    const edgeSet = new Set();
+    const edgeSet = new Map();
     const edges = [];
     const touchedNodeIds = new Set();
     const resolved = this.app.metadataCache.resolvedLinks || {};
@@ -2131,13 +2186,17 @@ module.exports = class GraphFrontierPlugin extends Plugin {
             ? `${sourcePath}\u0000${targetPath}`
             : `${targetPath}\u0000${sourcePath}`;
 
-        if (edgeSet.has(pair)) continue;
-        edgeSet.add(pair);
-
-        edges.push({
+        const existing = edgeSet.get(pair);
+        if (existing) {
+          if (existing.source !== sourcePath) existing.bidirectional = true;
+          continue;
+        }
+        const edge = {
           source: sourcePath,
           target: targetPath,
-        });
+        };
+        edgeSet.set(pair, edge);
+        edges.push(edge);
         touchedNodeIds.add(sourcePath);
         touchedNodeIds.add(targetPath);
       }

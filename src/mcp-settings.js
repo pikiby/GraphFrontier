@@ -2,6 +2,7 @@ const { PluginSettingTab, Setting, Notice, Platform } = require('obsidian');
 
 const { NodeListsPanel } = require('./node-lists-modal');
 const { BackupsPanel } = require('./backups-modal');
+const { NOTE_NAVIGATION_EXAMPLE } = require('./note-navigation');
 
 const DEFAULT_MCP_SETTINGS = { enabled: false, port: 27125, token: '' };
 
@@ -157,6 +158,9 @@ class GraphFrontierMcpSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass('graphfrontier-settings');
+    this.renderNavigation(
+      this.section('Navigation', 'Quick-open destinations from note YAML properties.')
+    );
     this.renderMcp(
       this.section('Local MCP', 'Connect a local AI client to the graph. Access requires a token.')
     );
@@ -192,6 +196,25 @@ class GraphFrontierMcpSettingTab extends PluginSettingTab {
       cls: 'setting-item-description graphfrontier-settings-description',
     });
     return section.createDiv();
+  }
+
+  renderNavigation(containerEl) {
+    new Setting(containerEl)
+      .setName('Note URL and path')
+      .setDesc(
+        'Use a string or a list of strings in url/path. Aliases use "[Label](target)"; quote the whole alias in YAML. Targets always appear in Open URL / Open path submenus, even with one target, so aliases stay visible. URLs require HTTP(S); paths support local files and obsidian://open links (external files are desktop-only).'
+      )
+      .addButton((button) =>
+        button.setButtonText('Copy example').onClick(async () => {
+          try {
+            await containerEl.win.navigator.clipboard.writeText(NOTE_NAVIGATION_EXAMPLE);
+            new Notice('YAML example copied');
+          } catch {
+            new Notice('Cannot access clipboard');
+          }
+        })
+      );
+    containerEl.createEl('pre').createEl('code', { text: NOTE_NAVIGATION_EXAMPLE });
   }
 
   renderMcp(containerEl) {

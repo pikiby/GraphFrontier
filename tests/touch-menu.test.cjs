@@ -38,7 +38,11 @@ test('touch and mouse share background creation menu and world position', () => 
 test('single touch schedules long press on empty background as well as nodes', () => {
   for (const node of [null, { id: 'test.md' }]) {
     let scheduled;
+    let frames = 0;
     const view = {
+      requestFrame() {
+        frames++;
+      },
       clearTouchLongPressTimer() {},
       getTouchScreenPoint: () => ({ x: 1, y: 2 }),
       startSingleTouchGesture: () => node,
@@ -48,6 +52,7 @@ test('single touch schedules long press on empty background as well as nodes', (
     };
     proto.onTouchStart.call(view, { touches: [{ clientX: 10, clientY: 20 }] });
     assert.deepEqual(scheduled, [node?.id ?? null, 10, 20]);
+    assert.equal(frames, 1, 'touch input wakes a settled view');
   }
 });
 

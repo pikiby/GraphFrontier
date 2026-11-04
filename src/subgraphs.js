@@ -88,7 +88,7 @@ function projectSubgraphs(graph, groups = [], scope = null) {
     (node) => projectNodeId(node.id, parents, scope) === node.id
   );
   const visibleIds = new Set(visible.map((node) => node.id));
-  const pairs = new Set();
+  const pairs = new Map();
   const edges = [];
   for (const edge of graph.edges) {
     if (!nodes.has(edge.source) || !nodes.has(edge.target)) continue;
@@ -103,9 +103,14 @@ function projectSubgraphs(graph, groups = [], scope = null) {
     )
       continue;
     const pair = JSON.stringify([source, target].sort());
-    if (pairs.has(pair)) continue;
-    pairs.add(pair);
-    edges.push({ ...edge, source, target });
+    const existing = pairs.get(pair);
+    if (existing) {
+      if (existing.source !== source || edge.bidirectional) existing.bidirectional = true;
+      continue;
+    }
+    const projected = { ...edge, source, target };
+    pairs.set(pair, projected);
+    edges.push(projected);
   }
   return { nodes: visible, edges };
 }

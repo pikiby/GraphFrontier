@@ -15,6 +15,7 @@ function element() {
     children: [],
     events: {},
     attributes: {},
+    style: {},
     win: { cancelAnimationFrame() {} },
     empty() {
       this.children.length = 0;
@@ -274,8 +275,8 @@ function fixture(t, data = {}) {
   if (!('render_model' in data) && !('legacy_render_settings' in data))
     data = { render_model: 2, ...data };
   plugin.data = plugin.normalizeData(data);
-  plugin.loadData = async () => structuredClone(data);
-  plugin.saveData = async (next) => preferences.push(structuredClone(next));
+  plugin.loadData = async () => JSON.parse(JSON.stringify(data));
+  plugin.saveData = async (next) => preferences.push(JSON.parse(JSON.stringify(next)));
   const graph = { nodes: [{ id: 'alpha.md', label: 'alpha' }], edges: [] };
   plugin.collectGraphData = () => graph;
   const view = new GraphFrontierView({ app }, plugin);

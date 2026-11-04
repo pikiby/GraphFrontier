@@ -9,7 +9,7 @@ GraphFrontier is an interactive graph workspace for Obsidian, with its own rende
 Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, combine selections into named subgraphs, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
 Include attachments as ordinary graph nodes, filter them by file type, and apply
-selection actions to multiple nodes at once. See the [0.8.9 release notes](docs/releases/0.8.9.md).
+selection actions to multiple nodes at once. See the [0.9.0 release notes](docs/releases/0.9.0.md).
 
 Use it to:
 
@@ -22,6 +22,16 @@ Use it to:
 
 **Get started:** install GraphFrontier from Obsidian's Community plugins, then run
 **Open GraphFrontier**. [Installation and updates](docs/installation.md).
+
+## New In 0.9.0
+
+- Reworked physics and on-demand rendering, with settled-layout restoration and reduced repeated force/style calculations.
+- Tabbed settings and group visibility: **Hide** keeps hidden nodes in physics; **Exclude** removes them. Alt-click the eye to solo a group.
+- Proportional node sizes, zoom-independent link widths, link colors, opacity and arrows, plus custom backgrounds and grid styling.
+- Multiple YAML URL/path destinations with readable aliases in quick-open submenus.
+
+Earlier layouts receive a one-time node-size/link-width migration. High-degree nodes may
+look larger because the old radius ceiling is gone. See [upgrade details](docs/releases/0.9.0.md#upgrading-and-compatibility).
 
 ## Local GraphFrontier
 
@@ -49,7 +59,7 @@ connections.
       <img src="docs/media/pin_node_grid.gif" alt="Pin node to grid demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Pin nodes to the grid</strong></p>
-      <p>Snap nodes to grid points and adjust grid line thickness from 0.1 to 1 pixel.</p>
+      <p>Snap nodes to grid points and adjust grid line thickness from 0.1 to 2 CSS pixels.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
@@ -141,13 +151,13 @@ connections.
       <img src="docs/media/paint_links.gif" alt="Paint links demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Color a node's links</strong></p>
-      <p>Color a node's links and adjust their painted width separately.</p>
+      <p>Set link color, opacity, width and arrows globally, by group or per node.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
-      <img src="docs/media/hide_edges.gif" alt="Hide edges demo" width="100%">
+      <img src="docs/media/hide_edges.gif" alt="Hide links demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Reduce unwanted link clutter</strong></p>
-      <p>Reduce regular or painted edge widths without deleting notes or changing links.</p>
+      <p>Adjust link opacity and width without deleting notes or changing links.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
@@ -184,8 +194,10 @@ affect; actions that require a single node remain separate.
 ## Groups And Node Lists
 
 Style matching nodes with group rules. Groups change color by default; the sliders
-icon opens additional controls for size, aura, labels, edge color and Strong pull.
-Individual node settings take priority over group settings.
+icon opens additional controls for size, aura, labels, link color and Strong pull.
+Individual node settings take priority over group settings. Use the eye to hide a group,
+or Alt-click it to solo; choose **Hide** to retain physical influence or **Exclude**
+to remove hidden nodes from physics.
 
 Create and edit node lists in **Settings -> GraphFrontier -> Node lists**, or use
 **Add to list** on selected nodes. Use `list:<id>` as a group filter. Lists define
@@ -282,7 +294,7 @@ See the [installation guide](docs/installation.md) for source builds and trouble
 
 - **Getting started:** [Installation](docs/installation.md), [Usage](docs/usage.md), [Settings](docs/settings.md).
 - **Advanced:** [Hotkeys and commands](docs/hotkeys.md), [Physics model](docs/physics.md), [Local API and embedded MCP](docs/mcp.md), [Development and project structure](docs/development.md).
-- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.8.9](docs/releases/0.8.9.md), [release history](docs/releases/).
+- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.9.0](docs/releases/0.9.0.md), [release history](docs/releases/).
 
 ## Support
 

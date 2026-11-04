@@ -94,13 +94,17 @@ test('node menu follows requested sections and puts Delete last', (t) => {
     'Node color',
     'Color aura',
     'Aura brightness',
-    'Edge width',
+    'Link width',
+    'Link color',
+    'Link opacity',
+    'Show arrows',
+    'Reverse arrows',
     'Text zoom',
     'Text size',
     'Hover dimming',
     'Reset visual settings',
+    'Strong pull x',
     'Strong pull',
-    'Paint edges',
   ]);
   assert.deepEqual(titles(item(menu, 'Other').submenu), [
     'Move file to',
@@ -310,4 +314,100 @@ test('local GraphFrontier action keeps the snapshot guard on stale graph state',
   view.nodeById.delete(node.id);
   await item(other, 'Open local GraphFrontier').callback();
   assert.equal(calls, 0);
+});
+
+test('quick-open arrays keep per-node selection scope, exact targets and stale action guards', async (t) => {
+  const { view, app, node, plugin } = setup(t);
+  const opened = [];
+  const frontmatter = {
+    url: ['[Dashboard](https://example.com/a_(b))', 'https://example.org/report'],
+    path: ['[Schema](Schemas/my schema (v2).sql)', 'Other/schema.sql'],
+  };
+  app.metadataCache.getFileCache = () => ({ frontmatter });
+  view.contentEl.win.open = (target) => opened.push(target);
+  app.workspace.getLeaf = () => ({ openFile: async (file) => opened.push(file.path) });
+  app.vault.getAbstractFileByPath = (target) => ({ path: target, extension: 'sql' });
+  view.selectedNodeIds = new Set([node.id, 'linked.md']);
+  const selection = buildNodeContextMenu(view, node, 10, 20);
+  assert.equal(item(selection, 'Open URL'), undefined, 'never open every selected note');
+  const only = selection.items.find((entry) => entry.title?.startsWith('Only for ')).submenu;
+  const urls = item(only, 'Open URL').submenu;
+  const paths = item(only, 'Open path').submenu;
+  assert.deepEqual(titles(urls), ['Dashboard', 'example.org/report']);
+  assert.deepEqual(titles(paths), ['Schema', 'schema.sql']);
+  assert.equal(paths.items[0].dom.attributes.title, 'Schemas/my schema (v2).sql');
+  frontmatter.url[0] = 'https://different.example';
+  await urls.items[0].callback();
+  await paths.items[0].callback();
+  assert.deepEqual(opened, ['https://example.com/a_(b)', 'Schemas/my schema (v2).sql']);
+  view.nodeById.delete(node.id);
+  await urls.items[1].callback();
+  assert.equal(opened.length, 2);
+  view.nodeById.set(node.id, node);
+  plugin.data.active_layout_name = 'other.json';
+  await urls.items[1].callback();
+  assert.equal(opened.length, 2, 'switching layouts invalidates existing choices');
+});
+
+test('navigation aliases starting with Pin or Unpin never dispatch position actions', async (t) => {
+  const { view, app, node, writes } = setup(t);
+  const opened = [];
+  const longTarget = `https://example.com/${'report'.repeat(20)}`;
+  app.metadataCache.getFileCache = () => ({
+    frontmatter: {
+      url: [
+        '[Pin dashboard](https://example.com/dashboard)',
+        '[Unpin project](https://example.com/project)',
+        '[<img src=x onerror=alert(1)>](https://example.com/plain)',
+        longTarget,
+      ],
+    },
+  });
+  view.contentEl.win.open = (target) => opened.push(target);
+  view.runPositionAction = () => assert.fail('A label is not a position command');
+  view.kickLayoutSearch = () => assert.fail('Navigation must not wake physics');
+  const urls = item(buildNodeContextMenu(view, node, 10, 20), 'Open URL').submenu;
+  assert.equal(urls.items[2].title, '<img src=x onerror=alert(1)>');
+  assert.equal(urls.items[2].dom.innerHTML, undefined);
+  assert.ok(urls.items[3].title.endsWith('...'));
+  assert.equal(urls.items[3].dom.attributes.title, longTarget);
+  for (const entry of urls.items) await entry.callback();
+  assert.deepEqual(opened, [
+    'https://example.com/dashboard',
+    'https://example.com/project',
+    'https://example.com/plain',
+    longTarget,
+  ]);
+  assert.equal(writes.length, 0);
+});
+
+test('single URL and path aliases remain visible in submenus for scalars and lists', async (t) => {
+  const { view, app, node } = setup(t);
+  const opened = [];
+  view.contentEl.win.open = (target) => opened.push(target);
+  app.vault.getAbstractFileByPath = (target) => ({ path: target, extension: 'md' });
+  app.workspace.getLeaf = () => ({ openFile: async (file) => opened.push(file.path) });
+  for (const array of [false, true]) {
+    const wrap = (value) => (array ? [value] : value);
+    app.metadataCache.getFileCache = () => ({
+      frontmatter: {
+        url: wrap('[grafana](https://example.com/dashboard)'),
+        path: wrap('[Project](Projects/my project.md)'),
+      },
+    });
+    const menu = buildNodeContextMenu(view, node, 10, 20);
+    for (const [title, label, target] of [
+      ['Open URL', 'grafana', 'https://example.com/dashboard'],
+      ['Open path', 'Project', 'Projects/my project.md'],
+    ]) {
+      const parent = item(menu, title);
+      assert.equal(parent.callback, undefined, 'parent never opens the only target');
+      assert.deepEqual(titles(parent.submenu), [label]);
+      const choice = parent.submenu.items[0];
+      assert.equal(choice.dom.attributes.title, target);
+      await choice.callback();
+      assert.equal(opened.at(-1), target);
+    }
+  }
+  assert.equal(opened.length, 4);
 });

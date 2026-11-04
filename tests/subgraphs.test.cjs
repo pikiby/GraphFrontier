@@ -488,7 +488,7 @@ test('container context retains ordinary node actions and offers pane/rename/Ung
   assert(!titles.some((title) => /expand|collapse|Add selected|Remove from|Dissolve/i.test(title)));
   const visual = menu.items.find((item) => item.title === 'Visual settings').submenu;
   assert(visual.items.some((item) => item.title === 'Strong pull'));
-  assert(visual.items.some((item) => /edge/i.test(item.title)));
+  assert(visual.items.some((item) => item.title === 'Link color'));
   assert.equal(f.view.toggleSubgraph, undefined);
 });
 

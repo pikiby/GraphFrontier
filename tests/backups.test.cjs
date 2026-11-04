@@ -124,6 +124,25 @@ test('restore checks confirmation snapshot, restores lists and layouts and keeps
   assert.equal(f.contents.get(f.manager.path), raw);
   assert.equal(f.manager.blocked, false);
 });
+
+test('backup payloads omit Settings tab and restore preserves the current UI preference', async (t) => {
+  const f = await setup(t);
+  f.plugin.data.view_state.settings_tab = 'physics';
+  await f.manager.write();
+  const raw = f.contents.get(f.manager.path),
+    bundle = JSON.parse(raw);
+  assert.equal('settings_tab' in bundle.data.view_state, false);
+  for (const layout of bundle.layouts)
+    assert.equal('settings_tab' in layout.data.view_state, false);
+  f.view.selectSettingsTab('selection');
+  await f.manager.restore(raw);
+  assert.equal(f.plugin.getSettingsTab(), 'selection');
+  for (const layout of bundle.layouts)
+    assert.equal(
+      'settings_tab' in JSON.parse(f.files.get(f.layoutPath(layout.name))).view_state,
+      false
+    );
+});
 test('partial restore failure rolls working files back and protects backup', async (t) => {
   const f = await setup(t);
   await f.manager.write();

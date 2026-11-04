@@ -11,6 +11,8 @@ const {
   getCrispCoordinate,
   getFocusEdgeWidth,
   getFocusEdgeColor,
+  getLowDegreeAlpha,
+  getLinkArrowSegments,
 } = loadSource('render-metrics.js');
 const { getNodeVisualSetting } = loadSource('node-visuals.js');
 
@@ -62,6 +64,107 @@ function edgeView(t, settings = {}) {
   view.viewHeight = 400;
   return { view, plugin };
 }
+
+test('low-degree dimming uses established degree and highlights restore full opacity', (t) => {
+  const { view, plugin } = edgeView(t, { dim_low_degree_nodes: true });
+  view.nodes[0].degree = 0;
+  view.nodes[1].degree = 2;
+  const { ctx } = strokeRecorder();
+  const alphas = [];
+  ctx.fill = function () {
+    alphas.push(this.globalAlpha);
+  };
+  render.drawNodes(view, ctx);
+  assert.deepEqual(alphas, [0.65, 1]);
+  alphas.length = 0;
+  view.hoverNodeId = 'a';
+  render.drawNodes(view, ctx);
+  assert.equal(alphas[0], 1);
+  alphas.length = 0;
+  view.hoverNodeId = null;
+  view.selectedNodeIds.add('a');
+  render.drawNodes(view, ctx);
+  assert.equal(alphas[0], 1);
+  view.selectedNodeIds.clear();
+  view.searchMode = 'find';
+  view.searchMatchedNodeIds = new Set(['a']);
+  alphas.length = 0;
+  render.drawNodes(view, ctx);
+  assert.equal(alphas[0], 1);
+  plugin.data.settings.dim_low_degree_nodes = false;
+  for (const degree of [0, 1, 2]) assert.equal(getLowDegreeAlpha(false, degree, false), 1);
+});
+
+test('arrows follow stored source, reverse only visuals and reciprocal links draw both heads', (t) => {
+  const forward = getLinkArrowSegments(0, 0, 100, 0, 5, 7, false, false, 1);
+  const reverse = getLinkArrowSegments(0, 0, 100, 0, 5, 7, true, false, 1);
+  assert.equal(forward[2], 91);
+  assert.equal(reverse[2], 7);
+  assert.equal(getLinkArrowSegments(0, 0, 100, 0, 5, 7, false, true, 1).length, 16);
+  assert.deepEqual(getLinkArrowSegments(0, 0, 2, 0, 5, 7, false, true, 1), []);
+  const { view, plugin } = edgeView(t, { show_arrows: true });
+  const original = JSON.stringify(view.edges);
+  for (const [reciprocal, expected] of [
+    [false, 3],
+    [true, 5],
+  ]) {
+    view.edges[0].bidirectional = reciprocal;
+    const { ctx, segments } = strokeRecorder();
+    render.drawEdges(view, ctx);
+    assert.deepEqual(segments, [expected]);
+  }
+  delete view.edges[0].bidirectional;
+  plugin.data.settings.reverse_arrows = true;
+  const { ctx } = strokeRecorder();
+  render.drawEdges(view, ctx);
+  assert.equal(JSON.stringify(view.edges), original);
+});
+
+test('prepared link styles avoid group/workspace lookups and refresh on mutable settings', (t) => {
+  const { view, plugin } = edgeView(t, { show_arrows: true });
+  view.nodes.push({ id: 'c', x: 100, y: 0, degree: 2 });
+  view.nodeById.set('c', view.nodes[2]);
+  view.edges.push({ source: 'b', target: 'c' }, { source: 'a', target: 'c' });
+  const groups = t.mock.method(plugin, 'getGroupVisualSettings');
+  const leaves = t.mock.method(plugin.app.workspace, 'getLeavesOfType');
+  render.drawEdges(view, strokeRecorder().ctx);
+  assert.equal(groups.mock.callCount(), 0);
+  assert.equal(leaves.mock.callCount(), 0);
+  const cached = view.appearanceCache;
+  render.drawEdges(view, strokeRecorder().ctx);
+  assert.equal(view.appearanceCache, cached);
+  plugin.data.settings.edge_opacity = 0.25;
+  const mutationLookups = leaves.mock.callCount();
+  const next = strokeRecorder();
+  render.drawEdges(view, next.ctx);
+  assert.equal(groups.mock.callCount(), 0);
+  assert.equal(
+    leaves.mock.callCount(),
+    mutationLookups,
+    'only mutation notification may enumerate views'
+  );
+  assert.notEqual(view.appearanceCache, cached);
+  assert(next.strokes.every((stroke) => stroke.alpha <= 0.25));
+});
+
+test('grid preserves theme opacity by default and uses optional color, opacity and thickness 2', (t) => {
+  const { view, plugin } = edgeView(t);
+  view.canvasTheme = { ...view.canvasTheme, grid: '#223344', gridOpacity: 0.17 };
+  const first = strokeRecorder();
+  render.drawGrid(view, first.ctx);
+  assert.equal(first.strokes[0].style, '#223344');
+  assert.equal(first.strokes[0].alpha, 0.17);
+  Object.assign(plugin.data.settings, {
+    grid_color: '#abcdef',
+    grid_opacity: 0,
+    grid_line_width: 2,
+  });
+  const next = strokeRecorder();
+  render.drawGrid(view, next.ctx);
+  assert.equal(next.strokes[0].style, '#abcdef');
+  assert.equal(next.strokes[0].alpha, 0);
+  assert.equal(next.strokes[0].width, 2);
+});
 
 test('line and edge-color settings normalize; removed settings are dropped', (t) => {
   const legacy = fixture(t, { settings: { edge_width_scale: 1 } }).plugin.getSettings();
@@ -348,13 +451,25 @@ test('HTML export carries physical edge widths, edge color and opacity', async (
       edge_width_scale: 3,
       edge_color: '#ff0000',
       edge_opacity: 0.4,
+      dim_low_degree_nodes: true,
+      custom_background: true,
+      background_color: '#123456',
+      grid_color: '#334455',
+      grid_opacity: 0.3,
+      grid_line_width: 2,
+      show_arrows: true,
+      reverse_arrows: true,
     },
   });
+  view.updateCanvasBackgroundColor = Object.getPrototypeOf(view).updateCanvasBackgroundColor;
   view.canvasEl = { clientWidth: 600, clientHeight: 400 };
   view.ctx = {};
   view.nodes.push({ id: 'b', label: 'B', x: 50, y: 50, degree: 1 });
   view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
   view.edges = [{ source: 'alpha.md', target: 'b' }];
+  plugin.setNodeVisualSetting('b', 'show_arrows', false);
+  plugin.setNodeVisualSetting('b', 'edge_opacity', 0);
+  plugin.setNodeVisualSetting('b', 'edge_color', '#abcdef');
   app.vault.getAbstractFileByPath = () => null;
   const { vault, contents } = mobileVault(t, false);
   Object.assign(app.vault, vault);
@@ -365,13 +480,29 @@ test('HTML export carries physical edge widths, edge color and opacity', async (
   assert.equal(payload.settings.edgeWidth, 3);
   assert.equal(payload.settings.edgeColor, '#ff0000');
   assert.equal(payload.settings.edgeOpacity, 0.4);
+  assert.equal(payload.theme.background, '#123456');
+  assert.equal(payload.settings.gridColor, '#334455');
+  assert.equal(payload.settings.gridOpacity, 0.3);
+  assert.equal(payload.settings.gridLineWidth, 2);
+  assert.equal(payload.settings.dimLowDegreeNodes, true);
+  assert.equal(payload.edges[0].showArrows, false);
+  assert.equal(payload.edges[0].reverseArrows, true);
+  assert.equal(payload.edges[0].opacity, 0);
+  assert.equal(payload.edges[0].color, '#abcdef');
+  assert.equal(payload.nodes[0].degree, view.nodes[0].degree);
   assert(!('renderResolutionScale' in payload.settings));
   assert(!('paintedEdgeWidth' in payload.settings));
   assert(!('paintedWidth' in payload.edges[0]));
   assert.equal(payload.edges[0].width, 3);
   assert.equal(plugin.getSettings().edge_color, '#ff0000');
   // The same metric helpers are embedded and the generated script compiles.
-  for (const name of ['getNodeScreenRadius', 'getNodeWorldRadius', 'setCrispStroke'])
+  for (const name of [
+    'getNodeScreenRadius',
+    'getNodeWorldRadius',
+    'setCrispStroke',
+    'getLowDegreeAlpha',
+    'getLinkArrowSegments',
+  ])
     assert.match(html, new RegExp(`const ${name} = function ${name}\\(`));
   const script = html.match(/<script>([\s\S]*)<\/script>/)[1];
   assert.doesNotThrow(() => new vm.Script(script));
@@ -459,7 +590,7 @@ test('legacy render settings migrate once, keeping originals', (t) => {
 
     // Once marked, neither another call nor a reload converts again.
     assert.equal(plugin.applyPendingRenderMigration(3), false);
-    const reloaded = plugin.normalizeData(structuredClone(plugin.data));
+    const reloaded = plugin.normalizeData(JSON.parse(JSON.stringify(plugin.data)));
     assert.equal(reloaded.settings.node_size_scale, 2);
     assert.equal(reloaded.settings.edge_width_scale, Math.min(5, 0.6 * dpr));
     assert.equal(reloaded.render_model, 2);
@@ -468,7 +599,7 @@ test('legacy render settings migrate once, keeping originals', (t) => {
 
   // A pending record survives reload without migrating node sizes twice.
   const { plugin } = fixture(t, structuredClone(legacyData));
-  const again = plugin.normalizeData(structuredClone(plugin.data));
+  const again = plugin.normalizeData(JSON.parse(JSON.stringify(plugin.data)));
   assert.equal(again.settings.node_size_scale, 2);
   assert.equal(again.legacy_render_settings.pending_edge_dpr, true);
 

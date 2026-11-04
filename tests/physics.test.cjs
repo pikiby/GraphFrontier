@@ -147,6 +147,7 @@ test('group multiplier context shares leaves only within a frame and respects la
   ]) {
     leaves = present ? [{ view }] : [];
     plugin.data.groups = [{ ...plugin.data.groups[0], settings: { strong_pull: strongPull } }];
+    lookup.mock.resetCalls();
     view.stepSimulation();
     assert.equal(lookup.mock.callCount(), 1);
     assert.equal(multiplier.mock.callCount(), 3);

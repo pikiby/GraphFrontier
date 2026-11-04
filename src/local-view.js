@@ -8,6 +8,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 // belong to this leaf, not to the installed plugin or its named layouts.
 function createLocalFacade(owner, leaf, initial) {
   const facade = Object.create(owner);
+  facade.owner = owner;
   facade.isLocalGraphFrontier = true;
   facade.data = owner.normalizeData(clone(initial || owner.data));
   facade.data.subgraphs = [];
@@ -22,6 +23,8 @@ function createLocalFacade(owner, leaf, initial) {
     facade.data.view_state.zoom = 1;
   }
   facade._persistRevision = 0;
+  facade.appearanceVersion = 0;
+  facade.groupStyleVersion = 0;
   facade._persistTimer = null;
   facade._refreshTimer = null;
   facade._pendingRefreshOptions = {};
@@ -61,6 +64,7 @@ function createLocalFacade(owner, leaf, initial) {
   facade.renderAllViews = () => facade.getScopeView()?.render();
   facade.recomputeOrbitRadiiAllViews = () => facade.getScopeView()?.recomputeOrbitRadii();
   facade.persistNodeVisualSettings = () => {
+    facade.appearanceVersion = (facade.appearanceVersion || 0) + 1;
     const view = facade.getScopeView();
     if (view) {
       view.layoutEditVersion += 1;
@@ -202,7 +206,9 @@ class LocalGraphFrontierView extends GraphFrontierView {
       if (!options.silent) new Notice('No saved local layout');
       return false;
     }
-    this.plugin.data = this.plugin.normalizeData(clone(this.localSaved));
+    const nextData = this.plugin.normalizeData(clone(this.localSaved));
+    nextData.view_state.settings_tab = this.plugin.getSettingsTab();
+    this.plugin.data = nextData;
     this.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
     this.restoreLayoutViewState();
     if (this.isOpen) {

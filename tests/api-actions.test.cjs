@@ -62,6 +62,45 @@ function setup(t) {
   return f;
 }
 
+test('quick-open API accepts scalar/alias/single lists and refuses ambiguous or empty lists', async (t) => {
+  const f = setup(t);
+  const opened = [];
+  let frontmatter;
+  f.app.metadataCache.getFileCache = () => ({ frontmatter });
+  f.view.contentEl.win.open = (target) => opened.push(target);
+  f.app.workspace.getLeaf = () => ({ openFile: async (file) => opened.push(file.path) });
+  const action = (key) =>
+    f.api.nodeAction({ ...f.ref(), nodeId: 'alpha.md', action: `open_${key}` });
+  for (const value of [
+    'https://example.com/a_(b)',
+    '[Dashboard](https://example.com/a_(b))',
+    [null, 'javascript:x', '[Dashboard](https://example.com/a_(b))'],
+  ]) {
+    frontmatter = { url: value };
+    await action('url');
+  }
+  frontmatter = { path: ['[Schema](Schemas/my schema (v2).sql)'] };
+  await action('path');
+  assert.deepEqual(opened, [
+    'https://example.com/a_(b)',
+    'https://example.com/a_(b)',
+    'https://example.com/a_(b)',
+    'Schemas/my schema (v2).sql',
+  ]);
+  for (const key of ['url', 'path']) {
+    frontmatter = {
+      [key]: key === 'url' ? ['https://one.example', 'https://two.example'] : ['one.md', 'two.md'],
+    };
+    await assert.rejects(action(key), {
+      code: 'UNAVAILABLE',
+      message: /Multiple .*Choose one.*submenu/,
+    });
+    frontmatter = { [key]: [] };
+    await assert.rejects(action(key), { code: 'UNAVAILABLE', message: /No valid/ });
+  }
+  assert.equal(opened.length, 4, 'ambiguous API calls do not open an arbitrary first choice');
+});
+
 test('export locations describe the vault without accessing the desktop filesystem', async (t) => {
   const f = setup(t);
   Object.defineProperty(f.view.contentEl.win, 'require', {
@@ -84,7 +123,7 @@ test('every current global setting has a typed MCP field; invalid patches are at
     Object.keys(definition.schema.shape.settings.shape).sort(),
     Object.keys(DEFAULT_DATA.settings).sort()
   );
-  const before = structuredClone(f.plugin.data);
+  const before = JSON.parse(JSON.stringify(f.plugin.data));
   for (const settings of [
     { node_color: 'red' },
     { attachment_node_color: 'red' },
@@ -370,12 +409,14 @@ test('UI state/hotkeys, pause/resume and copying linked names reuse plugin funct
   f.api.updateUi({
     ...f.ref(),
     panelOpen: false,
-    sections: { physics: false },
+    sections: { physics: false, settings: false },
     commandId: 'graphfrontier-clear-selection',
     hotkey: 'Ctrl+K',
   });
   assert.equal(f.view.sidePanelOpen, false);
   assert.equal(f.plugin.getSidePanelSectionsState().physics, false);
+  assert.equal(f.plugin.getSidePanelSectionsState().settings, false);
+  assert.equal(f.plugin.getSettingsTab(), 'groups', 'legacy section keys do not select tabs');
   assert.equal(f.plugin.getCommandHotkey('graphfrontier-clear-selection'), 'Mod+K');
   await f.api.graphAction({ ...f.ref(), action: 'pause' });
   assert.equal(f.view.layoutPaused, true);
@@ -575,7 +616,7 @@ test('a valid backup can recover a corrupt destination, preserving its damaged b
 
 test('removed individual attachment multiplier is rejected atomically by the API', (t) => {
   const f = setup(t);
-  const before = structuredClone(f.plugin.data);
+  const before = JSON.parse(JSON.stringify(f.plugin.data));
   assert.throws(
     () =>
       f.api.updateNodeSettings({
@@ -1038,4 +1079,78 @@ test('force multiplier edits wake physics', (t) => {
   f.view.layoutPaused = true;
   f.plugin.clearNodeMultiplier('alpha.md');
   assert.equal(f.view.layoutPaused, false);
+});
+
+test('new visual API fields validate, clear both color stores and keep explicit force one', async (t) => {
+  const f = setup(t),
+    ref = f.ref();
+  f.view.layoutPaused = true;
+  f.api.updateSettings({
+    ...ref,
+    settings: {
+      dim_low_degree_nodes: true,
+      show_arrows: true,
+      reverse_arrows: true,
+      custom_background: true,
+      background_color: '#112233',
+      grid_color: null,
+      grid_opacity: null,
+      grid_line_width: 2,
+    },
+  });
+  assert.equal(f.view.layoutPaused, true);
+  f.api.editRules({
+    ...ref,
+    list: 'groups',
+    action: 'replace',
+    rules: [
+      {
+        id: 'g',
+        query: 'name:alpha',
+        color: '#123456',
+        settings: { edge_color: '#334455', show_arrows: true },
+      },
+    ],
+  });
+  f.api.updateNodeSettings({
+    ...ref,
+    nodeIds: ['alpha.md'],
+    settings: { edge_color: '#abcdef', show_arrows: false, reverse_arrows: false, edge_opacity: 0 },
+  });
+  let result = f.api.updateNodeSettings({
+    ...ref,
+    nodeIds: ['alpha.md'],
+    settings: {},
+    edgeColor: null,
+  });
+  assert.equal(f.plugin.data.node_visual_settings['alpha.md'].edge_color, undefined);
+  assert.equal(result.nodes[0].edgeColor, '#334455', 'clear inherits group color');
+  assert.equal(result.nodes[0].effective.show_arrows, false);
+  f.plugin.setNodeVisualSetting('alpha.md', 'edge_color', '#abcdef');
+  t.mock.method(f.view, 'getCommandTargetNodeOrNotice', () => f.view.nodeById.get('alpha.md'));
+  await f.view.commandClearPaintedEdges();
+  assert.equal(f.plugin.getPaintedEdgeColor('alpha.md'), '#334455');
+  f.api.editRules({
+    ...ref,
+    list: 'groups',
+    action: 'update',
+    rules: [{ id: 'g', settings: { strong_pull: true, strong_pull_multiplier: 20 } }],
+  });
+  result = f.api.updateNodeSettings({ ...ref, nodeIds: ['alpha.md'], settings: {}, multiplier: 1 });
+  assert.equal(result.nodes[0].multiplier, 1);
+  assert.equal(f.plugin.normalizeData(f.plugin.data).node_force_multipliers['alpha.md'], 1);
+  result = f.api.updateNodeSettings({
+    ...ref,
+    nodeIds: ['alpha.md'],
+    settings: {},
+    multiplier: null,
+  });
+  assert.equal(result.nodes[0].multiplier, 20);
+  for (const settings of [
+    { strong_pull_multiplier: 21 },
+    { grid_line_width: 2.1 },
+    { grid_opacity: 1.1 },
+    { show_arrows: 1 },
+  ])
+    assert.throws(() => f.api.updateSettings({ ...ref, settings }), { code: 'INVALID_ARGUMENT' });
 });

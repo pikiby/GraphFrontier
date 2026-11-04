@@ -14,7 +14,10 @@ const page = {
   limit: number(1, 500).int().optional(),
 };
 const visuals = Object.fromEntries(
-  NODE_VISUAL_SETTINGS.map((s) => [s.key, s.type === 'color' ? color : number(s.min, s.max)])
+  NODE_VISUAL_SETTINGS.map((s) => [
+    s.key,
+    s.type === 'color' ? color : s.type === 'boolean' ? z.boolean() : number(s.min, s.max),
+  ])
 );
 const settings = Object.fromEntries(
   Object.entries(DEFAULT_DATA.settings).map(([key, value]) => [
@@ -30,17 +33,20 @@ Object.assign(settings, visuals, {
   attachment_node_color: color.nullable(),
   edge_color: color.nullable(),
   hover_highlight_color: color.nullable(),
+  background_color: color.nullable(),
+  grid_color: color.nullable(),
+  grid_opacity: number(0, 1).nullable(),
   edge_opacity: number(0, 1),
   excluded_attachment_extensions: z.array(z.string().max(4096)).max(4096),
   grid_step: number(5, 50).multipleOf(5),
-  grid_line_width: number(0.1, 1).multipleOf(0.1),
+  grid_line_width: number(0.1, 2).multipleOf(0.1),
   base_link_strength: number(1, 100),
   link_distance: number(1, 50),
   repel_strength: number(0, 200),
   repel_radius: number(20, 1000),
   center_strength: number(1, 100),
   damping: number(0.01, 0.9),
-  strong_pull_multiplier: number(1, 10),
+  strong_pull_multiplier: number(1, 20),
   orbit_distance: number(1, 100),
   search_mode: z.enum(['find', 'filter']),
   group_hide_mode: z.enum(['hide', 'exclude']),
@@ -59,6 +65,7 @@ const rule = z
       ...Object.fromEntries(Object.entries(visuals).filter(([key]) => key !== 'node_color')),
       edge_color: color,
       strong_pull: z.boolean(),
+      strong_pull_multiplier: number(1, 20),
     }).optional(),
   })
   .strict();
@@ -116,7 +123,7 @@ const tools = [
       ),
       reset: z.boolean().optional(),
       edgeColor: color.nullable().optional(),
-      multiplier: number(1, 10).nullable().optional(),
+      multiplier: number(1, 20).nullable().optional(),
       strongPull: z.boolean().optional(),
     },
     'updateNodeSettings',
@@ -164,7 +171,7 @@ const tools = [
   ],
   [
     'set_visible_nodes',
-    'Set an exact node subset; only edges between these nodes remain visible. null clears this extra filter. Saved with layouts; intersects blacklist/whitelist.',
+    'Set an exact node subset; only links between these nodes remain visible. null clears this extra filter. Saved with layouts; intersects blacklist/whitelist.',
     { ...ref, nodeIds: ids.nullable() },
     'setVisibleNodes',
   ],
@@ -330,10 +337,16 @@ const tools = [
       panelOpen: z.boolean().optional(),
       sections: patch(
         Object.fromEntries(
-          ['search', 'selection', 'display', 'physics', 'groups', 'lists', 'layout'].map((k) => [
-            k,
-            z.boolean(),
-          ])
+          [
+            'search',
+            'settings',
+            'selection',
+            'display',
+            'physics',
+            'groups',
+            'lists',
+            'layout',
+          ].map((k) => [k, z.boolean()])
         )
       ).optional(),
       commandId: z.enum(HOTKEY_COMMANDS.map((c) => c.id)).optional(),
