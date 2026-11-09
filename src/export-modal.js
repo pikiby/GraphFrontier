@@ -6,7 +6,7 @@ class VaultFolderSuggest extends (AbstractInputSuggest || class {}) {
   constructor(modal) {
     super(modal.app, modal.folderInput);
     this.modal = modal;
-    this.limit = 8;
+    this.limit = 50;
   }
 
   getSuggestions(query) {
@@ -21,9 +21,25 @@ class VaultFolderSuggest extends (AbstractInputSuggest || class {}) {
         return [];
       }
     });
-    return ['', ...paths.sort((a, b) => a.localeCompare(b))].filter((path) =>
-      (path || 'Vault root').toLowerCase().includes(search)
-    );
+    // A folder whose own name matches comes before folders that only contain the text deeper
+    // in their path; shallower folders come first within each rank.
+    const rank = (path) => {
+      const lower = path.toLowerCase();
+      const name = lower.slice(lower.lastIndexOf('/') + 1);
+      if (name === search || lower === search) return 0;
+      if (name.startsWith(search) || lower.startsWith(search)) return 1;
+      if (name.includes(search)) return 2;
+      return lower.includes(search) ? 3 : -1;
+    };
+    const depth = (path) => path.split('/').length;
+    const matches = paths
+      .map((path) => ({ path, rank: rank(path) }))
+      .filter((entry) => entry.rank >= 0)
+      .sort(
+        (a, b) => a.rank - b.rank || depth(a.path) - depth(b.path) || a.path.localeCompare(b.path)
+      )
+      .map((entry) => entry.path);
+    return 'vault root'.includes(search) ? ['', ...matches] : matches;
   }
 
   renderSuggestion(path, el) {

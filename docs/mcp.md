@@ -114,7 +114,7 @@ membership without requiring an open graph or a layout context token:
 }
 ```
 
-Create a list in **Node lists...**, or use `action: "create"` with `name` and an
+Create a list in **Sets → Custom lists** in the side panel, or use `action: "create"` with `name` and an
 optional `listId`. Other actions are `rename`, `delete`, `remove`, and `replace`.
 Add/remove are idempotent; replace accepts the complete current membership,
 including an empty array. Paths must be vault-relative; missing files are

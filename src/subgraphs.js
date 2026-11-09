@@ -1,6 +1,21 @@
 const SUBGRAPH_PREFIX = 'graphfrontier:subgraph:';
 const LOCAL_COORDINATES = 'local-v1';
 
+// Where the members were when combined, in the parent's coordinates, and their orbits around
+// nodes outside the subgraph. Ungroup restores both; invalid data is dropped.
+function normalizeOrigin(origin) {
+  if (!origin || !Number.isFinite(origin.x) || !Number.isFinite(origin.y)) return null;
+  const orbitPins = {};
+  for (const [id, orbit] of Object.entries(origin.orbit_pins || {}))
+    if (
+      typeof orbit?.anchor_id === 'string' &&
+      Number.isFinite(orbit.radius) &&
+      Number.isFinite(orbit.angle)
+    )
+      orbitPins[id] = { ...orbit };
+  return { x: origin.x, y: origin.y, orbit_pins: orbitPins };
+}
+
 function normalizeSubgraphs(items) {
   const groups = [];
   const ids = new Set();
@@ -13,6 +28,7 @@ function normalizeSubgraphs(items) {
     )
       continue;
     ids.add(item.id);
+    const origin = normalizeOrigin(item.origin);
     groups.push({
       id: item.id,
       name: String(item.name || 'Subgraph').trim() || 'Subgraph',
@@ -28,6 +44,7 @@ function normalizeSubgraphs(items) {
       ],
       x: Number.isFinite(item.x) ? item.x : 0,
       y: Number.isFinite(item.y) ? item.y : 0,
+      ...(origin ? { origin } : {}),
     });
   }
   const parents = new Map();
@@ -126,6 +143,9 @@ function translateMembers(data, members, dx, dy) {
     if (group) {
       group.x += dx;
       group.y += dy;
+      // A nested subgraph's origin lives in the same space as its container.
+      if (group.origin)
+        group.origin = { ...group.origin, x: group.origin.x + dx, y: group.origin.y + dy };
     }
     const gravity = data.dark_energy.find((item) => item.id === id);
     if (gravity) {

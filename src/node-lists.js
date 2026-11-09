@@ -1,13 +1,40 @@
 const MAX_MEMBERS = 100000;
 const membershipCache = new WeakMap();
 
+// `list:` takes an ID or a name, so a group keeps matching a list deleted and created again.
+function findNodeList(lists, value) {
+  const key = String(value || '').trim();
+  const lower = key.toLowerCase();
+  return (
+    lists.find((list) => list.id === key) ||
+    lists.find((list) => list.name === key) ||
+    lists.find((list) => list.name.toLowerCase() === lower) ||
+    null
+  );
+}
+
 function nodeListContains(lists, listId, nodeId) {
   let index = membershipCache.get(lists);
   if (!index) {
-    index = new Map(lists.map((list) => [list.id, new Set(list.nodeIds)]));
+    index = new Map();
     membershipCache.set(lists, index);
   }
-  return index.get(listId)?.has(nodeId) || false;
+  if (!index.has(listId)) index.set(listId, new Set(findNodeList(lists, listId)?.nodeIds || []));
+  return index.get(listId).has(nodeId);
+}
+
+// New lists take their ID from the name when it has usable characters, so `list:<id>` groups
+// also match a list created again under the same name.
+function listIdFromName(name, lists) {
+  const base = name
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+  if (!base) return `list_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  let id = base;
+  for (let suffix = 2; lists.some((list) => list.id === id); suffix += 1) id = `${base}-${suffix}`;
+  return id;
 }
 
 function validatePaths(paths) {
@@ -83,15 +110,14 @@ class NodeListStore {
     return result;
   }
 
-  update({ action, listId, name, nodeIds }) {
+  update({ action, listId, name, nodeIds, position }) {
     return this.transact((lists) => {
       if (action === 'create' || action === 'rename') {
         if (typeof name !== 'string' || !name.trim() || name.length > 300)
           throw new Error('Enter a list name (up to 300 characters).');
       }
       if (action === 'create') {
-        const id =
-          listId || `list_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const id = listId || listIdFromName(name, lists);
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id) || lists.some((list) => list.id === id))
           throw new Error('Invalid or duplicate list ID.');
         const list = { id, name: name.trim(), nodeIds: validatePaths(nodeIds || []) };
@@ -104,6 +130,13 @@ class NodeListStore {
       if (action === 'delete') {
         lists.splice(index, 1);
         return null;
+      }
+      // Reordering comes from the list editor; MCP does not expose it.
+      if (action === 'move') {
+        if (!Number.isInteger(position) || position < 0 || position >= lists.length)
+          throw new Error('Invalid list position.');
+        lists.splice(position, 0, ...lists.splice(index, 1));
+        return list;
       }
       if (action === 'rename') list.name = name.trim();
       else {
@@ -137,4 +170,4 @@ class NodeListStore {
   }
 }
 
-module.exports = { NodeListStore, validatePaths, nodeListContains };
+module.exports = { NodeListStore, validatePaths, nodeListContains, findNodeList };

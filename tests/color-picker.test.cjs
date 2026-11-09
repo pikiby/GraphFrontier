@@ -662,16 +662,16 @@ test('group swatch button shows the group color and opens its settings', (t) => 
   view.buildGroupEditorSection(dom.element('div'));
   const row = view.groupEditorRows[0];
   assert.equal(row.colorInput.hidden, true, 'separate color input is not shown');
-  assert.equal(row.settingsBtn.icon, 'settings-2');
-  assert.equal(row.settingsBtn.attributes['aria-label'], 'Group color and settings');
-  assert.equal(row.settingsBtn.style.backgroundColor, '#f5e0a0');
-  assert.equal(row.settingsBtn.style.color, '#000000', 'dark icon over a light fill');
-  row.settingsBtn.fire('click', { preventDefault() {}, stopPropagation() {} });
+  assert.equal(row.button.icon, 'settings-2');
+  assert.equal(row.button.attributes['aria-label'], 'Group color and settings');
+  assert.equal(row.button.style.backgroundColor, '#f5e0a0');
+  assert.equal(row.button.style.color, '#000000', 'dark icon over a light fill');
+  row.button.fire('click', { preventDefault() {}, stopPropagation() {} });
   assert.equal(opened, 1);
   view.groupVisualMenuTarget(row).set('node_color', '#102030');
   assert.equal(plugin.data.groups[0].color, '#102030');
-  assert.equal(row.settingsBtn.style.backgroundColor, '#102030');
-  assert.equal(row.settingsBtn.style.color, '#ffffff', 'light icon over a dark fill');
+  assert.equal(row.button.style.backgroundColor, '#102030');
+  assert.equal(row.button.style.color, '#ffffff', 'light icon over a dark fill');
   assert.equal(getContrastIconColor('#ffffff'), '#000000');
   assert.equal(getContrastIconColor('#000000'), '#ffffff');
 });
@@ -730,11 +730,11 @@ test('groups section shows a Hide/Exclude toggle in place of its title', (t) => 
   const section = dom.element('div');
   view.buildGroupEditorSection(section);
   assert.equal(
-    view.groupHideModeHideLabelEl.textContent ?? view.groupHideModeHideLabelEl.text,
+    view.groupHideModeSwitch.leftLabel.textContent ?? view.groupHideModeSwitch.leftLabel.text,
     'Hide'
   );
   assert.equal(
-    view.groupHideModeExcludeLabelEl.textContent ?? view.groupHideModeExcludeLabelEl.text,
+    view.groupHideModeSwitch.rightLabel.textContent ?? view.groupHideModeSwitch.rightLabel.text,
     'Exclude'
   );
   const texts = [];
@@ -745,25 +745,25 @@ test('groups section shows a Hide/Exclude toggle in place of its title', (t) => 
   walk(section);
   assert.ok(texts.includes('Filtering:'), 'caption precedes the toggle');
   assert.match(
-    view.groupHideModeHideLabelEl.getAttribute?.('title') ??
-      view.groupHideModeHideLabelEl.attr?.title ??
+    view.groupHideModeSwitch.leftLabel.getAttribute?.('title') ??
+      view.groupHideModeSwitch.leftLabel.attr?.title ??
       '',
     /keep their place/
   );
   assert.match(
-    view.groupHideModeExcludeLabelEl.getAttribute?.('title') ??
-      view.groupHideModeExcludeLabelEl.attr?.title ??
+    view.groupHideModeSwitch.rightLabel.getAttribute?.('title') ??
+      view.groupHideModeSwitch.rightLabel.attr?.title ??
       '',
     /removed from drawing and physics/
   );
   const states = {};
-  view.groupHideModeToggleEl.toggleClass = (name, on) => (states[name] = on);
+  view.groupHideModeSwitch.toggle.toggleClass = (name, on) => (states[name] = on);
   view.syncGroupHideModeToggleUi();
   assert.equal(states['is-on'], true, 'Exclude is the default position');
-  view.groupHideModeToggleEl.fire('click');
+  view.groupHideModeSwitch.toggle.fire('click');
   assert.equal(plugin.getSettings().group_hide_mode, 'hide');
   view.syncGroupHideModeToggleUi();
   assert.equal(states['is-on'], false);
-  view.groupHideModeToggleEl.fire('click');
+  view.groupHideModeSwitch.toggle.fire('click');
   assert.equal(plugin.getSettings().group_hide_mode, 'exclude');
 });

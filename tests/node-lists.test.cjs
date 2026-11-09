@@ -64,6 +64,23 @@ test('list membership is atomic, idempotent and retains unresolved paths', async
   assert.deepEqual(view.nodes, nodes);
 });
 
+test('moving a list changes only its position', async (t) => {
+  const { plugin } = setup(t);
+  for (const listId of ['a', 'b', 'c'])
+    await plugin.updateNodeList({ action: 'create', listId, name: listId.toUpperCase() });
+  await plugin.updateNodeList({ action: 'move', listId: 'c', position: 0 });
+  assert.deepEqual(
+    plugin.getNodeLists().map((list) => list.id),
+    ['c', 'a', 'b']
+  );
+  await plugin.updateNodeList({ action: 'move', listId: 'c', position: 2 });
+  assert.deepEqual(
+    plugin.getNodeLists().map((list) => list.id),
+    ['a', 'b', 'c']
+  );
+  await assert.rejects(plugin.updateNodeList({ action: 'move', listId: 'a', position: 3 }));
+});
+
 test('list storage survives reload and layout replacement without becoming layout data', async (t) => {
   const { plugin, adapter } = setup(t);
   await plugin.updateNodeList({
@@ -153,6 +170,31 @@ test('group visuals inherit per field with individual overrides first and no mat
     getNodeVisualSetting(plugin, 'alpha.md', 'aura_radius'),
     plugin.getSettings().aura_radius
   );
+});
+
+test('a list group keeps working after its list is deleted and created again', async (t) => {
+  const { plugin, view } = setup(t);
+  const matches = (query) =>
+    view.nodeMatchesParsedGroup(view.nodes[0].meta, plugin.parseGroupQuery(query), view.nodes[0]);
+  // A group that names the list, and one written by Create group with the generated ID.
+  const created = await plugin.updateNodeList({ action: 'create', name: 'ERROR' });
+  assert.equal(created.id, 'ERROR');
+  await plugin.updateNodeList({ action: 'delete', listId: 'ERROR' });
+  // A random ID, as in lists created before IDs came from names.
+  await plugin.updateNodeList({
+    action: 'create',
+    listId: 'list_old',
+    name: 'ERROR',
+    nodeIds: ['alpha.md'],
+  });
+  assert.equal(matches('list:ERROR'), true);
+  assert.equal(matches('list:error'), true);
+  assert.equal(matches('list:list_old'), true);
+  assert.equal(matches('list:other'), false);
+  // Names without usable characters keep a random ID; taken IDs get a suffix.
+  assert.match((await plugin.updateNodeList({ action: 'create', name: 'Ошибки' })).id, /^list_/);
+  assert.equal((await plugin.updateNodeList({ action: 'create', name: 'ERROR' })).id, 'ERROR');
+  assert.equal((await plugin.updateNodeList({ action: 'create', name: 'ERROR' })).id, 'ERROR-2');
 });
 
 test('list matching works in shared query matcher and search API without changing membership', async (t) => {

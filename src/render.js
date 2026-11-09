@@ -10,7 +10,7 @@ const LINK_STYLE_KEYS = NODE_VISUAL_SETTINGS.filter((setting) => setting.edges).
   ({ key }) => key
 );
 const APPEARANCE_KEYS = NODE_VISUAL_SETTINGS.map(({ key }) => key).concat('attachment_node_color');
-const { nodeListContains } = require('./node-lists');
+const { nodeListContains, findNodeList } = require('./node-lists');
 const {
   getFocusEdgeWidth,
   getFocusEdgeColor,
@@ -248,14 +248,13 @@ function getGroupStyleMap(view) {
     if (!group || group.enabled === false) continue;
     const parsed = view.plugin.parseGroupQuery(group.query);
     if (!parsed) continue;
+    if (parsed.type === 'line') view.plugin.requestNoteLines?.();
     parsedGroups.push({
       parsed,
       color: view.plugin.normalizeGroupColor(group.color),
       settings: group.settings || {},
       members:
-        parsed.type === 'list'
-          ? new Set(lists.find((list) => list.id === parsed.value)?.nodeIds || [])
-          : null,
+        parsed.type === 'list' ? new Set(findNodeList(lists, parsed.value)?.nodeIds || []) : null,
     });
   }
   const colorByNodeId = new Map();
@@ -429,6 +428,18 @@ function getGroupColorForNode(view, node) {
   return colorByNodeId instanceof Map ? colorByNodeId.get(node.id) || null : null;
 }
 
+// `line:` works as in Obsidian search: every word, or "quoted phrase", occurs in one line of
+// the note. Parentheses around the words are optional. Note lines are stored lowercased.
+function lineQueryMatches(lines, query) {
+  const text = String(query || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\((.*)\)$/s, '$1');
+  const terms = [...text.matchAll(/"([^"]+)"|(\S+)/g)].map((match) => match[1] || match[2]);
+  if (!terms.length || !Array.isArray(lines)) return false;
+  return lines.some((line) => terms.every((term) => line.includes(term)));
+}
+
 // Match helper used by group-color rules (path/file/tag/line/section/property).
 function nodeMatchesParsedGroup(meta, parsed, node = null, lists = []) {
   if (parsed.type === 'list') {
@@ -453,8 +464,7 @@ function nodeMatchesParsedGroup(meta, parsed, node = null, lists = []) {
     return Array.isArray(meta.tags) && meta.tags.some((tag) => includesCI(tag));
   if (parsed.type === 'section')
     return Array.isArray(meta.sections) && meta.sections.some((section) => includesCI(section));
-  if (parsed.type === 'line')
-    return Array.isArray(meta.lines) && meta.lines.some((line) => includesCI(line));
+  if (parsed.type === 'line') return lineQueryMatches(meta.lines, parsed.value);
   if (parsed.type === 'property') {
     const key = String(parsed.propertyKey || '')
       .trim()
@@ -1051,6 +1061,7 @@ module.exports = {
   getGroupStyleMap,
   getPreparedAppearance,
   nodeMatchesParsedGroup,
+  lineQueryMatches,
   drawGrid,
   drawHiddenGridMarkers,
   drawEdges,

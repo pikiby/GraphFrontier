@@ -41,7 +41,7 @@ its direct neighbors, with independent settings, pins and layout state. Settings
 start hidden; use **Show** to open them. Named layouts and subgraph containers
 remain available in the global graph.
 
-**Selection → Add to search** sets the modifier for adding a node name to search
+**Sets → Add to search** sets the modifier for adding a node name to search
 (default: **Alt + click**). Name filtering keeps all same-name nodes and their
 connections.
 
@@ -137,7 +137,7 @@ connections.
       <img src="docs/media/blacklist.gif" alt="Control visible notes with blacklists and whitelists" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Control which notes appear</strong></p>
-      <p>Hide blacklist matches or show whitelist matches without changing your notes.</p>
+      <p>Exclude matching notes or include only matching notes without changing your notes.</p>
     </td>
     <td width="50%" valign="top" align="left" style="background-color: transparent; border: none;">
       <img src="docs/media/node_visuals.gif" alt="Customize individual node appearance" width="100%">
@@ -199,8 +199,8 @@ Individual node settings take priority over group settings. Use the eye to hide 
 or Alt-click it to solo; choose **Hide** to retain physical influence or **Exclude**
 to remove hidden nodes from physics.
 
-Create and edit node lists in **Settings -> GraphFrontier -> Node lists**, or use
-**Add to list** on selected nodes. Use `list:<id>` as a group filter. Lists define
+Create node lists in **Sets → Custom lists** in the side panel, edit members in
+**Settings -> GraphFrontier -> Node lists**, or use **Add to list** on selected nodes. Use `list:<id>` as a group filter. Lists define
 membership; groups define appearance. External scripts can update membership
 through the API/MCP without editing your notes.
 

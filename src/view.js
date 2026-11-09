@@ -6,6 +6,14 @@ const {
 } = require('./position-history');
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Scope, setIcon } = require('obsidian');
 const { nodeListContains } = require('./node-lists');
+const {
+  createEditorRow,
+  setEditorRowReady,
+  bindEditorRowDrag,
+  moveEditorRow,
+  keepMenuOpen,
+  createModeSwitch,
+} = require('./panel-controls');
 const { observePluginData } = require('./appearance-events');
 const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
 const { ExportModal } = require('./export-modal');
@@ -23,6 +31,8 @@ const {
   getFocusEdgeColor,
 } = require('./render-metrics');
 const { buildNodeContextMenu } = require('./node-context-menu');
+const { NodeListsTab } = require('./node-lists-tab');
+const { LayoutList } = require('./layout-list');
 const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
 const { DarkEnergyModal } = require('./dark-energy-modal');
 const {
@@ -86,6 +96,7 @@ const {
   getLabelMinimumSize: getLabelMinimumSizeRender,
   getGroupColorForNode: getGroupColorForNodeRender,
   nodeMatchesParsedGroup: nodeMatchesParsedGroupRender,
+  lineQueryMatches,
   drawGrid: drawGridRender,
   drawEdges: drawEdgesRender,
   drawNodes: drawNodesRender,
@@ -173,30 +184,18 @@ class GraphFrontierView extends ItemView {
         : {};
     this.sidePanelSectionState = Object.assign({}, savedSidePanelSections);
     this.groupEditorRows = [];
-    this.draggingGroupRow = null;
-    this.blacklistEditorRows = [];
-    this.whitelistEditorRows = [];
-    this.draggingQueryRuleRow = null;
+    this.queryRuleEditorRows = [];
+    this.queryRuleSummaryEl = null;
+    this.queryRuleCountsKey = '';
     this.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
     this.searchInputValue = 'name:';
     this.searchSelectedNodeId = null;
     this.searchMatchedNodeIds = new Set();
-    this.searchModeToggleEl = null;
-    this.searchModeFindLabelEl = null;
-    this.searchModeFilterLabelEl = null;
+    this.searchModeSwitch = null;
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
     this.searchSuggestSuppressUntilMs = 0;
-    this.layoutFileSearchInputValue = this.plugin.getActiveLayoutFileName();
-    this.layoutFileSelectedName = this.layoutFileSearchInputValue;
-    this.layoutFileSearchInputEl = null;
-    this.layoutFileSearchClearButtonEl = null;
-    this.layoutFileSuggestSuppressUntilMs = 0;
-    this.layoutFileSuggestRequestToken = 0;
-    this.contentSearchIndex = new Map();
-    this.contentSearchBuildToken = 0;
-    this.contentSearchIndexGraphVersion = -1;
-    this.contentSearchBuildGraphVersion = -1;
+    this.layoutList = null;
     this.focusNodeId = null;
     this.focusProgress = 0;
     this.hoverFocusNodeId = null;
@@ -230,7 +229,7 @@ class GraphFrontierView extends ItemView {
     this.filterVisibilityCache = {
       parsedRulesSignature: '',
       parsedBlacklistRules: [],
-      parsedWhitelistRules: [],
+      parsedIncludeRuleSets: [],
       queryRuleVisibleGraphVersion: -1,
       queryRuleVisibleRulesSignature: '',
       queryRuleVisibleNodeIds: null,
@@ -379,8 +378,8 @@ class GraphFrontierView extends ItemView {
     this.persistCameraState();
 
     const autosaveEnabled = !!this.plugin.data.settings.layout_autosave;
-    if (autosaveEnabled && this.layoutAutosaveDirty && !this.isSearchFilled()) {
-      if (!(await this.saveCurrentLayout({ silent: true }))) {
+    if (autosaveEnabled) {
+      if (!(await this.autosaveBeforeLeavingLayout())) {
         new Notice('Failed to save layout on close. Changes are still unsaved.');
       }
     } else if (
@@ -397,7 +396,7 @@ class GraphFrontierView extends ItemView {
     this.clearTouchLongPressTimer();
     this.closeInputSuggestMenu();
     this.closeQuickPreview();
-    this.plugin.schedulePersist();
+    this.plugin.schedulePersist(250, { layout: false });
   }
 
   bindEvents() {
@@ -487,16 +486,15 @@ class GraphFrontierView extends ItemView {
   buildSidePanel() {
     if (!this.sidePanelEl) return;
     this.closeInputSuggestMenu();
+    // The panel itself scrolls; a rebuild keeps the reader where they were.
+    const scrollTop = this.sidePanelEl.scrollTop || 0;
     this.sidePanelEl.empty();
     this.sideControls.clear();
     this.settingsTabs = null;
-    this.searchModeToggleEl = null;
-    this.searchModeFindLabelEl = null;
-    this.searchModeFilterLabelEl = null;
+    this.searchModeSwitch = null;
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
-    this.layoutFileSearchInputEl = null;
-    this.layoutFileSearchClearButtonEl = null;
+    this.layoutList = null;
     this.sidePanelEl.toggleClass('is-open', this.sidePanelOpen);
 
     const header = this.sidePanelEl.createDiv({ cls: 'graphfrontier-sidepanel-header' });
@@ -562,7 +560,14 @@ class GraphFrontierView extends ItemView {
     }
     this.syncSettingsTabs();
 
-    const selectionSection = this.settingsTabs.get('selection').panel;
+    const setsSection = this.settingsTabs.get('sets').panel;
+    // Sets: collapsible Selection modifiers and Custom lists subgroups, as in Groups.
+    const selectionSection = this.createSidePanelSection(setsSection, {
+      id: 'selection',
+      title: 'Selection',
+      openByDefault: true,
+    });
+    selectionSection.addClass('graphfrontier-subgroup-section');
     this.addSideModifierSelect(selectionSection, 'Box select', 'selection_box_modifier', {
       hint: 'Modifier key for box selection drag on empty space',
     });
@@ -584,13 +589,6 @@ class GraphFrontierView extends ItemView {
     const generalGroup = this.createSidePanelGroup(displaySection);
     this.addSideToggle(generalGroup, 'Dim low-degree nodes', 'dim_low_degree_nodes', 'render', {
       hint: 'Slightly dim nodes with zero or one link; highlighted nodes stay fully visible',
-    });
-    this.addSideToggle(generalGroup, 'Existing files only', 'existing_files_only', 'data', {
-      hint: 'Show only files that currently exist in vault',
-    });
-    this.addSideToggle(generalGroup, 'Show orphans', 'hide_orphans', 'data', {
-      inverted: true,
-      hint: 'Show nodes without links (orphans)',
     });
     this.addSideSlider(generalGroup, 'Hover dimming', 'hover_dim_strength', 0, 100, 1, 'render', {
       hint: 'How strongly non-focused nodes/links are dimmed',
@@ -683,46 +681,6 @@ class GraphFrontierView extends ItemView {
       hint: 'Grid line thickness in CSS pixels, independent of zoom',
     });
 
-    const attachmentsSection = this.createSidePanelSection(displaySection, {
-      id: 'attachments',
-      title: 'Attachments',
-      openByDefault: true,
-    });
-    attachmentsSection.addClass('graphfrontier-attachments-content');
-    this.addSideToggle(attachmentsSection, 'Show attachments', 'hide_attachments', 'data', {
-      inverted: true,
-      rebuildPanelOnChange: true,
-      hint: 'Show non-markdown files as attachment nodes',
-    });
-    if (!this.plugin.data.settings.hide_attachments) {
-      this.buildAttachmentFileTypesControl(attachmentsSection);
-      this.addSideToggle(
-        attachmentsSection,
-        'Show unlinked attachments',
-        'include_unlinked_attachments',
-        'data',
-        {
-          hint: 'Include all vault non-markdown files when Show attachments is on; Show orphans still applies',
-        }
-      );
-      const colorRow = attachmentsSection.createDiv({ cls: 'graphfrontier-sidepanel-row' });
-      colorRow.createSpan({ text: 'Attachment node color', cls: 'graphfrontier-sidepanel-label' });
-      const colorInput = colorRow.createEl('input', { type: 'color' });
-      colorInput.setAttribute('aria-label', 'Attachment node color');
-      colorInput.addClass('graphfrontier-group-color-input');
-      const inheritedColor = () =>
-        this.plugin.getSettings().attachment_node_color ?? this.plugin.getSettings().node_color;
-      colorInput.value = inheritedColor();
-      this.sideControls.set('attachment_node_color', {
-        type: 'color',
-        input: colorInput,
-        getValue: inheritedColor,
-      });
-      this.registerDomEvent(colorInput, 'input', () => {
-        this.plugin.data.settings.attachment_node_color = colorInput.value;
-        this.plugin.persistNodeVisualSettings();
-      });
-    }
     const physicsSection = this.settingsTabs.get('physics').panel;
     this.addSideSlider(physicsSection, 'Link strength', 'base_link_strength', 1, 100, 1, 'render', {
       hint: 'Spring force for graph links',
@@ -747,27 +705,96 @@ class GraphFrontierView extends ItemView {
     });
 
     const groupsSection = this.settingsTabs.get('groups').panel;
-    this.buildGroupEditorSection(groupsSection);
+    // Groups and Filters are collapsible subgroups of the Groups tab.
+    const groupListSection = this.createSidePanelSection(groupsSection, {
+      id: 'groups',
+      title: 'Groups',
+      openByDefault: true,
+    });
+    groupListSection.addClass('graphfrontier-subgroup-section');
+    this.buildGroupEditorSection(groupListSection);
 
-    this.buildQueryRuleEditorSection(groupsSection, {
-      title: 'Blacklist',
-      key: 'blacklist',
-      hint: 'Hide nodes that match query rules',
+    // Filters: always-active Exclude (blacklist) and Include only (whitelist) query rules,
+    // then which files become nodes.
+    const filtersSection = this.createSidePanelSection(groupsSection, {
+      id: 'filters',
+      title: 'Filters',
+      openByDefault: true,
     });
-    this.buildQueryRuleEditorSection(groupsSection, {
-      title: 'Whitelist',
-      key: 'whitelist',
-      hint: 'Show only nodes that match query rules (after blacklist)',
+    filtersSection.addClass('graphfrontier-subgroup-section');
+    // Rules and file toggles are side panel groups, so a divider separates them as in Display.
+    this.buildQueryRuleEditorSection(this.createSidePanelGroup(filtersSection));
+    this.buildFileFilterControls(filtersSection);
+
+    const customListsSection = this.createSidePanelSection(setsSection, {
+      id: 'lists',
+      title: 'Custom lists',
+      openByDefault: true,
     });
+    customListsSection.addClass('graphfrontier-subgroup-section');
+    this.nodeListsTab = new NodeListsTab(this, customListsSection.createDiv());
+    this.nodeListsTab.render();
 
     const layoutSection = this.createSidePanelSection(body, {
       id: 'layout',
       title: 'Layout',
       openByDefault: true,
     });
-    if (!this.plugin.isLocalGraphFrontier) this.addLayoutFileSearchRow(layoutSection);
+    if (!this.plugin.isLocalGraphFrontier) this.buildLayoutList(layoutSection);
     this.addSideSaveLayoutButton(layoutSection);
     this.syncSidePanelControls();
+    this.sidePanelEl.scrollTop = scrollTop;
+  }
+
+  // File filters: missing files, orphans and attachments. Attachment options appear only
+  // while Show attachments is on.
+  buildFileFilterControls(parentEl) {
+    const filesGroup = this.createSidePanelGroup(parentEl);
+    this.addSideToggle(filesGroup, 'Show only groups', 'show_only_groups', 'render', {
+      hint: 'Hide notes that match no group; has no effect while there are no groups',
+      onChange: () => this.plugin.markQueryRulesDirty(),
+    });
+    this.addSideToggle(filesGroup, 'Existing files only', 'existing_files_only', 'data', {
+      hint: 'Show only files that currently exist in vault',
+    });
+    this.addSideToggle(filesGroup, 'Show orphans', 'hide_orphans', 'data', {
+      inverted: true,
+      hint: 'Show nodes without links (orphans)',
+    });
+    this.addSideToggle(filesGroup, 'Show attachments', 'hide_attachments', 'data', {
+      inverted: true,
+      rebuildPanelOnChange: true,
+      hint: 'Show non-markdown files as attachment nodes',
+    });
+    if (!this.plugin.data.settings.hide_attachments) {
+      this.buildAttachmentFileTypesControl(filesGroup);
+      this.addSideToggle(
+        filesGroup,
+        'Show unlinked attachments',
+        'include_unlinked_attachments',
+        'data',
+        {
+          hint: 'Include all vault non-markdown files when Show attachments is on; Show orphans still applies',
+        }
+      );
+      const colorRow = filesGroup.createDiv({ cls: 'graphfrontier-sidepanel-row' });
+      colorRow.createSpan({ text: 'Attachment node color', cls: 'graphfrontier-sidepanel-label' });
+      const colorInput = colorRow.createEl('input', { type: 'color' });
+      colorInput.setAttribute('aria-label', 'Attachment node color');
+      colorInput.addClass('graphfrontier-group-color-input');
+      const inheritedColor = () =>
+        this.plugin.getSettings().attachment_node_color ?? this.plugin.getSettings().node_color;
+      colorInput.value = inheritedColor();
+      this.sideControls.set('attachment_node_color', {
+        type: 'color',
+        input: colorInput,
+        getValue: inheritedColor,
+      });
+      this.registerDomEvent(colorInput, 'input', () => {
+        this.plugin.data.settings.attachment_node_color = colorInput.value;
+        this.plugin.persistNodeVisualSettings();
+      });
+    }
   }
 
   syncSettingsTabs() {
@@ -789,7 +816,7 @@ class GraphFrontierView extends ItemView {
       if (view?.plugin === this.plugin) view.syncSettingsTabs?.();
     }
     if (focus) this.settingsTabs?.get(id)?.button.focus();
-    if (changed) this.plugin.schedulePersist();
+    if (changed) this.plugin.schedulePersist(250, { layout: false });
   }
 
   createSidePanelSection(parentEl, options = {}) {
@@ -831,7 +858,7 @@ class GraphFrontierView extends ItemView {
         {},
         this.sidePanelSectionState
       );
-      this.plugin.schedulePersist();
+      this.plugin.schedulePersist(250, { layout: false });
     };
 
     applyOpenState(isOpen, false);
@@ -1248,29 +1275,9 @@ class GraphFrontierView extends ItemView {
       cls: 'graphfrontier-sidepanel-save',
       text: 'Save layout',
     });
-    saveButton.setAttr('title', 'Save positions, settings, and pin states');
+    saveButton.setAttr('title', 'Save positions, settings, and pin states to the active layout');
 
-    this.registerDomEvent(saveButton, 'click', async () => {
-      if (this.isSearchFilled()) {
-        new Notice('Clear search field to save');
-        return;
-      }
-      const targetLayoutFileName = this.getLayoutFileNameFromInputValue(
-        this.layoutFileSearchInputEl
-          ? this.layoutFileSearchInputEl.value
-          : this.layoutFileSearchInputValue
-      );
-      await this.saveCurrentLayout({ layoutFileName: targetLayoutFileName });
-    });
-
-    const loadButton = buttonsWrap.createEl('button', {
-      cls: 'graphfrontier-sidepanel-save',
-      text: 'Load layout',
-    });
-    loadButton.setAttr('title', 'Load last saved positions, settings, and pin states');
-    this.registerDomEvent(loadButton, 'click', async () => {
-      await this.loadSavedLayout();
-    });
+    this.registerDomEvent(saveButton, 'click', () => this.saveCurrentLayout());
 
     const exportButton = buttonsWrap.createEl('button', {
       cls: 'graphfrontier-sidepanel-save',
@@ -1282,180 +1289,34 @@ class GraphFrontierView extends ItemView {
     });
   }
 
-  addLayoutFileSearchRow(parentEl) {
-    this.syncLayoutFileSelectionFromPlugin();
-    const row = parentEl.createDiv({ cls: 'graphfrontier-find-row graphfrontier-layout-file-row' });
-    const inputWrap = row.createDiv({
-      cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor',
-    });
-    const inputEl = inputWrap.createEl('input', {
-      cls: 'graphfrontier-find-input',
-      type: 'text',
-      placeholder: 'Select layout file...',
-    });
-    inputEl.value = this.layoutFileSearchInputValue;
-    this.layoutFileSearchInputEl = inputEl;
-
-    this.layoutFileSearchClearButtonEl = null;
-
-    const deleteLayoutByName = async (layoutFileName) => {
-      const normalizedName = this.plugin.normalizeLayoutFileName(layoutFileName);
-      if (!normalizedName) return;
-      const result = await this.plugin.deleteLayoutFile(normalizedName);
-      if (!result || result.ok !== true) {
-        const reason = String(result?.reason || '');
-        if (reason === 'last-layout') new Notice('Cannot delete the last layout');
-        else if (reason === 'not-found') new Notice('Layout file not found');
-        else new Notice('Failed to delete layout');
-        return;
-      }
-
-      if (result.activeChanged) {
-        this.syncLayoutFileSelectionFromPlugin();
-        this.plugin.refreshAllViews({ forceSavedPositions: true, skipLayoutKick: true });
-        this.buildSidePanel();
-        this.plugin.renderAllViews();
-        return;
-      }
-
-      this.layoutFileSuggestSuppressUntilMs = Date.now() + 220;
-      this.closeInputSuggestMenu();
-      inputEl.focus();
-      this.contentEl.win.setTimeout(() => {
-        this.layoutFileSuggestSuppressUntilMs = 0;
-        void openLayoutSuggestionPopup('');
-      }, 0);
-    };
-
-    const openLayoutSuggestionPopup = async (rawQueryOverride = null) => {
-      if (Date.now() < this.layoutFileSuggestSuppressUntilMs) return;
-      const requestToken = ++this.layoutFileSuggestRequestToken;
-      const effectiveQuery =
-        rawQueryOverride == null ? String(inputEl.value || '') : String(rawQueryOverride || '');
-      const suggestionPack = await this.getLayoutFileSuggestionPack(effectiveQuery);
-      if (requestToken !== this.layoutFileSuggestRequestToken) return;
-      const items = Array.isArray(suggestionPack?.items) ? suggestionPack.items : [];
-      if (items.length <= 0) {
-        this.closeInputSuggestMenu();
-        return;
-      }
-      const itemsWithDeleteAction = items.map((item) =>
-        String(item?.kind || '') === 'layout-file'
-          ? Object.assign({}, item, {
-              actionLabel: 'x',
-              actionTitle: `Delete layout "${String(item?.title || item?.value || '').trim()}"`,
-              onAction: () => {
-                void deleteLayoutByName(String(item?.value || ''));
-              },
-            })
-          : item
-      );
-      this.showInputSuggestMenu(
-        inputEl,
-        itemsWithDeleteAction,
-        (selectedText) => {
-          void this.selectActiveLayoutFileByName(String(selectedText || ''));
-        },
-        { title: suggestionPack?.menuTitle || '' }
-      );
-    };
-
-    this.registerDomEvent(inputEl, 'input', () => {
-      this.layoutFileSearchInputValue = String(inputEl.value || '');
-      this.layoutFileSelectedName = '';
-      this.syncLayoutFileSearchClearButtonVisibility();
-      openLayoutSuggestionPopup();
-    });
-    this.registerDomEvent(inputEl, 'keydown', (event) => {
-      const hasActiveMenu =
-        !!this.inputSuggestMenu && this.inputSuggestInputEl && this.inputSuggestInputEl === inputEl;
-      if (hasActiveMenu && event.key === 'ArrowDown') {
-        event.preventDefault();
-        this.moveInputSuggestSelection(1);
-        return;
-      }
-      if (hasActiveMenu && event.key === 'ArrowUp') {
-        event.preventDefault();
-        this.moveInputSuggestSelection(-1);
-        return;
-      }
-      if (hasActiveMenu && event.key === 'Escape') {
-        event.preventDefault();
-        this.closeInputSuggestMenu();
-        return;
-      }
-      if (event.key !== 'Enter') return;
-      event.preventDefault();
-      if (hasActiveMenu && this.selectInputSuggestActive()) return;
-      this.closeInputSuggestMenu();
-    });
-    this.registerDomEvent(inputEl, 'blur', () => {
-      if (!String(inputEl.value || '').trim()) {
-        this.syncLayoutFileSelectionFromPlugin();
-      }
-      this.contentEl.win.setTimeout(() => {
-        if (!this.inputSuggestInputEl || this.inputSuggestInputEl !== inputEl) return;
-        this.closeInputSuggestMenu();
-      }, 0);
-    });
-    this.registerDomEvent(inputEl, 'click', () => {
-      openLayoutSuggestionPopup('');
-    });
-    this.registerDomEvent(inputEl, 'focus', () => {
-      openLayoutSuggestionPopup('');
-    });
-    this.syncLayoutFileSearchClearButtonVisibility();
+  buildLayoutList(parentEl) {
+    this.layoutList = new LayoutList(
+      this,
+      parentEl.createDiv({ cls: 'graphfrontier-layout-list' })
+    );
+    void this.layoutList.render();
   }
 
-  syncLayoutFileSearchClearButtonVisibility() {
-    if (!this.layoutFileSearchClearButtonEl) return;
-    const textValue = this.layoutFileSearchInputEl
-      ? this.layoutFileSearchInputEl.value
-      : this.layoutFileSearchInputValue;
-    const isVisible = String(textValue || '').trim().length > 0;
-    this.layoutFileSearchClearButtonEl.toggleClass('is-visible', isVisible);
-  }
-
-  syncLayoutFileSelectionFromPlugin() {
-    const activeLayoutName = this.plugin.getActiveLayoutFileName();
-    const activeLayoutDisplayName = this.getLayoutDisplayName(activeLayoutName);
-    this.layoutFileSearchInputValue = activeLayoutDisplayName;
-    this.layoutFileSelectedName = activeLayoutName;
-    if (this.layoutFileSearchInputEl) this.layoutFileSearchInputEl.value = activeLayoutDisplayName;
-    this.syncLayoutFileSearchClearButtonVisibility();
-  }
-
-  async getLayoutFileSuggestionPack(rawQueryText) {
-    const listPath = this.plugin.getLayoutsFolderRelativePath();
-    const names = await this.plugin.listLayoutFileNames();
-
-    const queryText = String(rawQueryText || '')
-      .trim()
-      .toLowerCase();
-    const filteredNames =
-      queryText.length <= 0
-        ? names
-        : names.filter((fileName) => {
-            const lowerFileName = fileName.toLowerCase();
-            const lowerDisplayName = this.getLayoutDisplayName(fileName).toLowerCase();
-            return lowerFileName.includes(queryText) || lowerDisplayName.includes(queryText);
-          });
-    const items = filteredNames.map((fileName) => ({
-      title: this.getLayoutDisplayName(fileName),
-      value: fileName,
-      description: listPath,
-      kind: 'layout-file',
-    }));
-    return {
-      menuTitle: 'Layouts',
-      items,
-    };
+  // Autosave waits until nodes settle, so leaving a layout first saves what is still pending:
+  // closing the view and switching to another layout both use this.
+  async autosaveBeforeLeavingLayout() {
+    if (
+      !this.plugin.data.settings.layout_autosave ||
+      !(this.layoutAutosaveDirty || this.plugin.hasUnsavedLayoutData?.()) ||
+      this.isSearchFilled()
+    )
+      return true;
+    return this.saveCurrentLayout({ silent: true });
   }
 
   async selectActiveLayoutFileByName(layoutFileName) {
     const selectedName = String(layoutFileName || '').trim();
     if (!selectedName) return false;
-    return this.loadSavedLayout({ layoutFileName: selectedName, silent: true });
+    if (!(await this.autosaveBeforeLeavingLayout())) {
+      new Notice('Failed to save layout. Switch cancelled; changes are still unsaved.');
+      return false;
+    }
+    return this.loadSavedLayout({ layoutFileName: selectedName, silent: true, keepCamera: true });
   }
 
   getLayoutDisplayName(layoutFileName) {
@@ -1463,18 +1324,7 @@ class GraphFrontierView extends ItemView {
     return rawName.replace(/\.json$/iu, '');
   }
 
-  getLayoutFileNameFromInputValue(rawInputValue) {
-    const rawText = String(rawInputValue || '').trim();
-    if (!rawText) return this.plugin.getActiveLayoutFileName();
-    const selectedFileName = String(this.layoutFileSelectedName || '').trim();
-    if (selectedFileName) {
-      const selectedDisplay = this.getLayoutDisplayName(selectedFileName).toLowerCase();
-      if (selectedDisplay === rawText.toLowerCase()) return selectedFileName;
-    }
-    return this.plugin.normalizeLayoutFileName(rawText);
-  }
-
-  // Search block: find/filter mode controls, source picker (name/content), and node suggestions.
+  // Search block: find/filter mode controls, query type prefix, and node suggestions.
   buildFindSection(parentEl) {
     const section = parentEl.createDiv({ cls: 'graphfrontier-find' });
 
@@ -1482,21 +1332,8 @@ class GraphFrontierView extends ItemView {
     const controlsLeft = controlsRow.createDiv({
       cls: 'graphfrontier-find-mode-controls graphfrontier-find-mode-controls-left',
     });
-    const findLabel = controlsLeft.createSpan({
-      cls: 'graphfrontier-find-mode-label',
-      text: 'Find',
-    });
-    this.searchModeFindLabelEl = findLabel;
-    const modeToggle = controlsLeft.createEl('button', {
-      cls: 'graphfrontier-toggle-btn graphfrontier-search-mode-toggle',
-      attr: { 'aria-label': 'Search mode toggle' },
-    });
-    this.searchModeToggleEl = modeToggle;
-    const filterLabel = controlsLeft.createSpan({
-      cls: 'graphfrontier-find-mode-label',
-      text: 'Filter',
-    });
-    this.searchModeFilterLabelEl = filterLabel;
+    this.searchModeSwitch = createModeSwitch(controlsLeft, { left: 'Find', right: 'Filter' });
+    const modeToggle = this.searchModeSwitch.toggle;
     this.syncSearchModeToggleUi();
 
     const searchRow = section.createDiv({ cls: 'graphfrontier-find-row' });
@@ -1670,14 +1507,10 @@ class GraphFrontierView extends ItemView {
       this.searchConnectionsToggleEl.toggleClass('is-on', enabled);
       this.searchConnectionsToggleEl.setAttr('aria-checked', String(enabled));
     }
-    if (!this.searchModeToggleEl) return;
+    if (!this.searchModeSwitch) return;
     const safeMode = this.searchMode === 'filter' ? 'filter' : 'find';
-    this.searchModeToggleEl.toggleClass('is-on', safeMode === 'filter');
-    this.searchModeToggleEl.setAttr('aria-label', `Search mode: ${safeMode}`);
-    if (this.searchModeFindLabelEl)
-      this.searchModeFindLabelEl.toggleClass('is-active', safeMode === 'find');
-    if (this.searchModeFilterLabelEl)
-      this.searchModeFilterLabelEl.toggleClass('is-active', safeMode === 'filter');
+    this.searchModeSwitch.sync(safeMode === 'filter');
+    this.searchModeSwitch.toggle.setAttr('aria-label', `Search mode: ${safeMode}`);
   }
 
   parseDropdownQuery(rawQueryText, options = {}) {
@@ -1866,7 +1699,7 @@ class GraphFrontierView extends ItemView {
       }));
     }
 
-    if (!['path', 'file', 'tag', 'line', 'section'].includes(parsed.source)) return [];
+    if (!['path', 'file', 'tag', 'section'].includes(parsed.source)) return [];
     const values = this.plugin.getGroupValueSuggestions(parsed.source, parsed.query, '', limit);
     return values.map((value) => ({
       title: value,
@@ -2014,8 +1847,10 @@ class GraphFrontierView extends ItemView {
       return Array.isArray(meta.tags) && meta.tags.some((tag) => includesCI(tag));
     if (parsed.source === 'section')
       return Array.isArray(meta.sections) && meta.sections.some((section) => includesCI(section));
-    if (parsed.source === 'line')
-      return Array.isArray(meta.lines) && meta.lines.some((line) => includesCI(line));
+    if (parsed.source === 'line') {
+      this.plugin.requestNoteLines?.();
+      return lineQueryMatches(meta.lines, parsed.query);
+    }
     if (parsed.source === 'property') {
       const key = String(parsed.parsedGroup?.propertyKey || '')
         .trim()
@@ -2034,16 +1869,6 @@ class GraphFrontierView extends ItemView {
       .trim()
       .toLowerCase();
     if (!queryText) return matches;
-
-    if (parsed.source === 'content') {
-      if (!this.ensureContentSearchIndexForCurrentGraph(parsed)) return matches;
-      for (const node of this.nodes) {
-        if (node?.meta?.isAttachment) continue;
-        const contentText = this.contentSearchIndex.get(node.id);
-        if (contentText && contentText.includes(queryText)) matches.add(node.id);
-      }
-      return matches;
-    }
 
     if (parsed.source === 'name') {
       for (const node of this.nodes) {
@@ -2065,36 +1890,14 @@ class GraphFrontierView extends ItemView {
     return matches;
   }
 
-  shouldUseContentSearchIndex(parsed = null) {
-    const safeParsed =
-      parsed ||
-      this.parseSearchQuery(this.searchInputEl ? this.searchInputEl.value : this.searchInputValue);
-    return safeParsed && safeParsed.source === 'content' && !!String(safeParsed.query || '').trim();
-  }
-
-  ensureContentSearchIndexForCurrentGraph(parsed = null) {
-    if (!this.shouldUseContentSearchIndex(parsed)) return false;
-    if (this.contentSearchIndexGraphVersion === this.visibilityGraphVersion) return true;
-    this.scheduleContentSearchIndexRebuild();
-    return false;
-  }
-
-  cancelContentSearchIndexBuild() {
-    if (this.contentSearchBuildGraphVersion === -1) return;
-    this.contentSearchBuildToken += 1;
-    this.contentSearchBuildGraphVersion = -1;
-  }
-
   syncSearchMatchesLive() {
     const rawText = this.searchInputEl ? this.searchInputEl.value : this.searchInputValue;
     const parsed = this.parseSearchQuery(rawText);
     if (!parsed.query || (parsed.source === 'name' && this.searchMode === 'filter')) {
-      this.cancelContentSearchIndexBuild();
       this.searchMatchedNodeIds = new Set();
       this.markSearchVisibilityDirty();
       return;
     }
-    if (parsed.source !== 'content') this.cancelContentSearchIndexBuild();
     this.searchMatchedNodeIds = this.getMatchedNodeIdsForParsedSearch(parsed);
     this.markSearchVisibilityDirty();
   }
@@ -2158,7 +1961,7 @@ class GraphFrontierView extends ItemView {
     if (this.searchInputEl) this.searchInputEl.value = this.searchInputValue;
     this.markSearchVisibilityDirty();
     this.syncSearchClearButtonVisibility();
-    this.plugin.schedulePersist();
+    this.plugin.schedulePersist(250, { layout: false });
   }
 
   syncSearchClearButtonVisibility() {
@@ -2174,7 +1977,6 @@ class GraphFrontierView extends ItemView {
     this.physicsVisibilityDirty = true;
     this.physicsVisibilityCache = null;
     this.visibilityGraphVersion += 1;
-    this.contentSearchIndexGraphVersion = -1;
     this.filterVisibilityCache.queryRuleVisibleGraphVersion = -1;
     this.filterVisibilityCache.queryRuleVisibleNodeIds = null;
     this.filterVisibilityCache.finalVisibleKey = '';
@@ -2199,12 +2001,13 @@ class GraphFrontierView extends ItemView {
     this.physicsVisibilityCache = null;
     this.filterVisibilityCache.parsedRulesSignature = '';
     this.filterVisibilityCache.parsedBlacklistRules = [];
-    this.filterVisibilityCache.parsedWhitelistRules = [];
+    this.filterVisibilityCache.parsedIncludeRuleSets = [];
     this.filterVisibilityCache.queryRuleVisibleGraphVersion = -1;
     this.filterVisibilityCache.queryRuleVisibleRulesSignature = '';
     this.filterVisibilityCache.queryRuleVisibleNodeIds = null;
     this.filterVisibilityCache.finalVisibleKey = '';
     this.filterVisibilityCache.finalVisibleNodeIds = null;
+    this.refreshQueryRuleCounts();
   }
 
   getActiveQueryRuleSignature() {
@@ -2228,8 +2031,9 @@ class GraphFrontierView extends ItemView {
     const hiddenGroups = this.ignoreHiddenGroups
       ? []
       : (this.plugin?.data?.groups || []).filter((group) => group?.hidden);
+    const groupOnly = this.plugin.getSettings().show_only_groups ? this.plugin.data.groups : [];
     return (this.queryRuleSignatures[mode] =
-      `b:${serializeRules(blacklistRules)}##w:${serializeRules(whitelistRules)}##h:${serializeRules(hiddenGroups)}`);
+      `b:${serializeRules(blacklistRules)}##w:${serializeRules(whitelistRules)}##h:${serializeRules(hiddenGroups)}##g:${serializeRules(groupOnly)}`);
   }
 
   getFilterNodeId() {
@@ -2320,7 +2124,8 @@ class GraphFrontierView extends ItemView {
     const raw = this.canonicalGraphData || { nodes: [], edges: [] };
     const nodes = new Map([...raw.nodes, ...subgraphNodes(groups)].map((node) => [node.id, node]));
     const blacklist = this.getBlockingQueryRules();
-    const whitelist = this.getCompleteQueryRulesByKey('whitelist');
+    const includeSets = this.getIncludeRuleSets();
+    const included = (node) => includeSets.every((rules) => matches(node, rules));
     const matches = (node, rules) =>
       rules.some((rule) => this.nodeMatchesParsedGroup(node.meta || {}, rule, node));
     const blockedGroups = new Set(
@@ -2337,11 +2142,7 @@ class GraphFrontierView extends ItemView {
     const api = this.apiVisibleNodeIds;
     const eligible = new Set();
     for (const node of nodes.values()) {
-      if (
-        node.meta?.subgraph ||
-        blocked(node) ||
-        (!node.meta?.darkEnergy && whitelist.length && !matches(node, whitelist))
-      )
+      if (node.meta?.subgraph || blocked(node) || (!node.meta?.darkEnergy && !included(node)))
         continue;
       const projectedId = representative(node.id);
       if (api && !api.has(node.id) && !api.has(projectedId)) continue;
@@ -2390,9 +2191,9 @@ class GraphFrontierView extends ItemView {
       if (!node.meta?.subgraph || !this.nodeById.has(node.id) || blocked(node)) continue;
       const empty = !node.meta.subgraph.members.length;
       if (
-        ((!blacklist.length && !whitelist.length && !api && !search) ||
-          (whitelist.length
-            ? matches(node, whitelist)
+        ((!blacklist.length && !includeSets.length && !api && !search) ||
+          (includeSets.length
+            ? included(node)
             : empty || api?.has(node.id) || search?.has(node.id))) &&
         (!api || api.has(node.id)) &&
         (!search || search.has(node.id))
@@ -2470,59 +2271,47 @@ class GraphFrontierView extends ItemView {
       return this.filterVisibilityCache.queryRuleVisibleNodeIds;
     }
 
-    if (this.filterVisibilityCache.parsedRulesSignature !== ruleSignature) {
-      this.filterVisibilityCache.parsedBlacklistRules = this.getBlockingQueryRules();
-      this.filterVisibilityCache.parsedWhitelistRules =
-        this.getCompleteQueryRulesByKey('whitelist');
-      this.filterVisibilityCache.parsedRulesSignature = ruleSignature;
+    const cache = this.filterVisibilityCache;
+    if (cache.parsedRulesSignature !== ruleSignature) {
+      cache.parsedBlacklistRules = this.getBlockingQueryRules();
+      cache.parsedIncludeRuleSets = this.getIncludeRuleSets();
+      cache.parsedRulesSignature = ruleSignature;
     }
 
-    const blacklistRules = this.filterVisibilityCache.parsedBlacklistRules;
-    const whitelistRules = this.filterVisibilityCache.parsedWhitelistRules;
-    if (blacklistRules.length === 0 && whitelistRules.length === 0) {
-      this.filterVisibilityCache.queryRuleVisibleGraphVersion = this.visibilityGraphVersion;
-      this.filterVisibilityCache.queryRuleVisibleRulesSignature = ruleSignature;
-      this.filterVisibilityCache.queryRuleVisibleNodeIds = null;
-      return null;
-    }
-
-    const visibleNodeIds = new Set(this.nodes.map((node) => node.id));
-    if (blacklistRules.length > 0) {
+    const blacklistRules = cache.parsedBlacklistRules;
+    const includeSets = cache.parsedIncludeRuleSets;
+    let visibleNodeIds = null;
+    if (blacklistRules.length || includeSets.length) {
+      visibleNodeIds = new Set();
       for (const node of this.nodes) {
         const meta = this.nodeMetaById.get(node.id) || node.meta || null;
-        if (!meta) continue;
-        for (const parsedRule of blacklistRules) {
-          if (this.nodeMatchesParsedGroup(meta, parsedRule, node)) {
-            visibleNodeIds.delete(node.id);
-            break;
-          }
-        }
+        // A node without metadata matches no rule, so only Include only sets can hide it.
+        if (
+          meta
+            ? this.nodePassesQueryRules(node, meta, blacklistRules, includeSets)
+            : !includeSets.length
+        )
+          visibleNodeIds.add(node.id);
       }
     }
-
-    if (whitelistRules.length > 0) {
-      const whitelistMatchedNodeIds = new Set();
-      for (const node of this.nodes) {
-        if (!visibleNodeIds.has(node.id)) continue;
-        const meta = this.nodeMetaById.get(node.id) || node.meta || null;
-        if (!meta) continue;
-        for (const parsedRule of whitelistRules) {
-          if (this.nodeMatchesParsedGroup(meta, parsedRule, node)) {
-            whitelistMatchedNodeIds.add(node.id);
-            break;
-          }
-        }
-      }
-      this.filterVisibilityCache.queryRuleVisibleGraphVersion = this.visibilityGraphVersion;
-      this.filterVisibilityCache.queryRuleVisibleRulesSignature = ruleSignature;
-      this.filterVisibilityCache.queryRuleVisibleNodeIds = whitelistMatchedNodeIds;
-      return whitelistMatchedNodeIds;
-    }
-
-    this.filterVisibilityCache.queryRuleVisibleGraphVersion = this.visibilityGraphVersion;
-    this.filterVisibilityCache.queryRuleVisibleRulesSignature = ruleSignature;
-    this.filterVisibilityCache.queryRuleVisibleNodeIds = visibleNodeIds;
+    cache.queryRuleVisibleGraphVersion = this.visibilityGraphVersion;
+    cache.queryRuleVisibleRulesSignature = ruleSignature;
+    cache.queryRuleVisibleNodeIds = visibleNodeIds;
     return visibleNodeIds;
+  }
+
+  // Include only rules, and with Show only groups the group queries: a visible node matches
+  // one rule of every such set.
+  getIncludeRuleSets() {
+    return [
+      this.getCompleteQueryRulesByKey('whitelist'),
+      this.plugin.getSettings().show_only_groups ? this.getCompleteQueryRulesByKey('groups') : [],
+    ].filter((rules) => rules.length);
+  }
+
+  nodePassesQueryRules(node, meta, blockingRules, includeSets) {
+    const matches = (rules) => rules.some((rule) => this.nodeMatchesParsedGroup(meta, rule, node));
+    return !matches(blockingRules) && includeSets.every(matches);
   }
 
   // Hidden groups block their nodes exactly like blacklist rules.
@@ -2553,7 +2342,7 @@ class GraphFrontierView extends ItemView {
       this.physicsVisibilityCache = {
         parsedRulesSignature: '',
         parsedBlacklistRules: [],
-        parsedWhitelistRules: [],
+        parsedIncludeRuleSets: [],
         queryRuleVisibleGraphVersion: -1,
         queryRuleVisibleRulesSignature: '',
         queryRuleVisibleNodeIds: null,
@@ -3035,7 +2824,7 @@ class GraphFrontierView extends ItemView {
   // Alt-click solos a group. The previous hidden set lives in the view, not in layout data:
   // solo is a temporary inspection mode, and its undo need not survive a reload.
   toggleGroupVisibility(rowState, solo = false) {
-    const rows = this.groupEditorRows.filter((entry) => this.isGroupRowComplete(entry));
+    const rows = this.groupEditorRows.filter((entry) => this.isQueryRowComplete(entry));
     if (!solo) {
       this.groupSoloState = null;
       rowState.hidden = !rowState.hidden;
@@ -3056,14 +2845,79 @@ class GraphFrontierView extends ItemView {
   buildGroupEditorSection(parentEl) {
     const section = parentEl.createDiv({ cls: 'graphfrontier-groups' });
     this.buildGroupHideModeToggle(section);
-
-    this.groupEditorRows = [];
     this.groupSoloState = null;
-    const existingGroups = Array.isArray(this.plugin.data.groups) ? this.plugin.data.groups : [];
-    for (const group of existingGroups) {
-      this.addGroupEditorRow(section, group);
-    }
-    this.addGroupEditorRow(section, null);
+    const editor = this.createQueryRowEditor(section, {
+      name: 'groups',
+      placeholder: 'Enter group...',
+      icon: 'settings-2',
+      label: 'Group color and settings',
+      deleteTitle: 'Delete group',
+      decorate: (rowState, group) => this.decorateGroupRow(editor, rowState, group),
+      fillMenu: (menu, rowState, rect) => {
+        this.addVisualSettingsToMenu(
+          menu,
+          null,
+          rect.left,
+          rect.bottom,
+          { ids: [] },
+          { group: rowState }
+        );
+        this.addStrongPullSliderToMenu(menu, { ids: [] }, { group: rowState });
+      },
+      save: (entries) =>
+        this.plugin.updateGroups(
+          entries.map(({ rowState, query }) => ({
+            id: rowState.id,
+            query,
+            color: this.plugin.normalizeGroupColor(rowState.colorInput.value),
+            enabled: true,
+            ...(rowState.hidden ? { hidden: true } : {}),
+            ...(Object.keys(rowState.settings).length
+              ? { settings: { ...rowState.settings } }
+              : {}),
+          }))
+        ),
+    });
+    this.groupEditorRows = editor.rows;
+    const groups = Array.isArray(this.plugin.data.groups) ? this.plugin.data.groups : [];
+    for (const group of groups) this.addQueryRow(editor, group);
+    this.addQueryRow(editor, null);
+  }
+
+  // The settings button shows the group color; the eye sits inside the query field.
+  decorateGroupRow(editor, rowState, group) {
+    rowState.colorInput = rowState.row.createEl('input', {
+      cls: 'graphfrontier-group-color-value',
+      type: 'color',
+    });
+    rowState.colorInput.value = this.plugin.normalizeGroupColor(group?.color || '#7aa2f7');
+    rowState.colorInput.hidden = true;
+    rowState.hidden = group?.hidden === true;
+    rowState.settings = { ...(group?.settings || {}) };
+    rowState.refreshSwatch = () => {
+      const color = this.plugin.normalizeGroupColor(rowState.colorInput.value);
+      rowState.button.style.backgroundColor = color;
+      rowState.button.style.color = getContrastIconColor(color);
+    };
+    rowState.refreshSwatch();
+
+    const visibilityBtn = rowState.inputWrap.createEl('button', {
+      cls: 'graphfrontier-group-visibility',
+    });
+    rowState.visibilityBtn = visibilityBtn;
+    rowState.controls.push(visibilityBtn);
+    this.refreshGroupVisibilityButton(rowState);
+    // Keep focus and the suggestion menu away from the query field when using the eye.
+    this.registerDomEvent(visibilityBtn, 'mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    this.registerDomEvent(visibilityBtn, 'click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.toggleGroupVisibility(rowState, event.altKey);
+      this.persistQueryRows(editor);
+    });
   }
 
   // Hide keeps hidden groups in physics; Exclude removes them like blacklist rules.
@@ -3078,77 +2932,67 @@ class GraphFrontierView extends ItemView {
       cls: 'graphfrontier-sidepanel-label graphfrontier-group-mode-caption',
       text: 'Filtering:',
     });
-    this.groupHideModeHideLabelEl = controls.createSpan({
-      cls: 'graphfrontier-find-mode-label',
-      text: 'Hide',
-      attr: { title: GROUP_HIDE_MODE_HINTS.hide },
-    });
-    const toggle = controls.createEl('button', {
-      cls: 'graphfrontier-toggle-btn graphfrontier-search-mode-toggle',
-      attr: { type: 'button' },
-    });
-    this.groupHideModeToggleEl = toggle;
-    this.groupHideModeExcludeLabelEl = controls.createSpan({
-      cls: 'graphfrontier-find-mode-label',
-      text: 'Exclude',
-      attr: { title: GROUP_HIDE_MODE_HINTS.exclude },
+    this.groupHideModeSwitch = createModeSwitch(controls, {
+      left: 'Hide',
+      right: 'Exclude',
+      leftTitle: GROUP_HIDE_MODE_HINTS.hide,
+      rightTitle: GROUP_HIDE_MODE_HINTS.exclude,
     });
     this.syncGroupHideModeToggleUi();
-    this.registerDomEvent(toggle, 'click', () => {
+    this.registerDomEvent(this.groupHideModeSwitch.toggle, 'click', () => {
       const next = this.plugin.getSettings().group_hide_mode === 'hide' ? 'exclude' : 'hide';
       this.plugin.setGroupHideMode(next);
     });
   }
 
   syncGroupHideModeToggleUi() {
-    if (!this.groupHideModeToggleEl) return;
+    if (!this.groupHideModeSwitch) return;
     const mode = this.plugin.getSettings().group_hide_mode === 'hide' ? 'hide' : 'exclude';
-    this.groupHideModeToggleEl.toggleClass('is-on', mode === 'exclude');
-    this.groupHideModeToggleEl.setAttr('aria-label', `Hidden groups: ${mode}`);
-    this.groupHideModeToggleEl.setAttr('title', GROUP_HIDE_MODE_HINTS[mode]);
-    this.groupHideModeHideLabelEl?.toggleClass('is-active', mode === 'hide');
-    this.groupHideModeExcludeLabelEl?.toggleClass('is-active', mode === 'exclude');
+    this.groupHideModeSwitch.sync(mode === 'exclude');
+    this.groupHideModeSwitch.toggle.setAttr('aria-label', `Hidden groups: ${mode}`);
+    this.groupHideModeSwitch.toggle.setAttr('title', GROUP_HIDE_MODE_HINTS[mode]);
   }
 
-  parseGroupForm(group) {
-    return {
-      id: group?.id || null,
-      query: String(group?.query || ''),
-      color: this.plugin.normalizeGroupColor(group?.color || '#7aa2f7'),
-      hidden: group?.hidden === true,
-      settings: { ...(group?.settings || {}) },
-    };
+  // Editors never show more than one empty row: the one being edited, otherwise the last.
+  // Focus alone is not trusted to clear rows later, since a window blur keeps activeElement.
+  removeExtraEmptyRows(rowStates, isEmpty) {
+    const active = this.contentEl.ownerDocument?.activeElement;
+    const emptyRows = rowStates.filter(isEmpty);
+    const kept = emptyRows.find((rowState) => rowState.queryInput === active) || rowStates.at(-1);
+    for (const rowState of emptyRows) {
+      if (rowState === kept) continue;
+      rowStates.splice(rowStates.indexOf(rowState), 1);
+      rowState.row.remove();
+    }
   }
 
-  isGroupRowComplete(rowState) {
-    const queryText = String(rowState.queryInput.value || '').trim();
-    if (!queryText) return false;
-    const parsed = this.plugin.parseGroupQuery(queryText);
-    if (!parsed) return false;
-    return !!String(parsed.value || '').trim();
+  // Groups and Filters share one query-row editor: suggestions, saving on input, Enter and
+  // blur, a single empty row, handle drag, and a menu button with the row's Delete action.
+  createQueryRowEditor(sectionEl, options) {
+    return { sectionEl, rows: [], ...options };
   }
 
-  isGroupRowEmpty(rowState) {
-    const queryText = String(rowState.queryInput.value || '').trim();
-    return !queryText;
+  isQueryRowComplete(rowState) {
+    const parsed = this.plugin.parseGroupQuery(String(rowState.queryInput.value || '').trim());
+    return !!String(parsed?.value || '').trim();
   }
 
-  refreshGroupRowState(rowState) {
-    const complete = this.isGroupRowComplete(rowState);
-    const empty = this.isGroupRowEmpty(rowState);
-    rowState.dragHandle.style.visibility = complete ? 'visible' : 'hidden';
-    rowState.settingsBtn.style.display = complete ? '' : 'none';
-    rowState.visibilityBtn.style.display = complete ? '' : 'none';
-    rowState.row.draggable = complete;
-    rowState.row.toggleClass('is-empty', empty);
+  isQueryRowEmpty(rowState) {
+    return !String(rowState.queryInput.value || '').trim();
+  }
+
+  refreshQueryRow(editor, rowState) {
+    const complete = this.isQueryRowComplete(rowState);
+    rowState.row.toggleClass('is-empty', this.isQueryRowEmpty(rowState));
     rowState.row.toggleClass('is-complete', complete);
+    setEditorRowReady(rowState, complete);
+    editor.refresh?.(rowState);
   }
 
-  persistGroupRows(sectionEl) {
-    const nextGroups = [];
-    for (const rowState of this.groupEditorRows) {
-      const queryText = String(rowState.queryInput.value || '').trim();
-      const parsed = this.plugin.parseGroupQuery(queryText);
+  persistQueryRows(editor) {
+    const entries = [];
+    for (const rowState of editor.rows) {
+      const parsed = this.plugin.parseGroupQuery(String(rowState.queryInput.value || '').trim());
       if (!parsed || !String(parsed.value || '').trim()) continue;
       const query = this.plugin.composeGroupQuery(
         parsed.type,
@@ -3157,108 +3001,54 @@ class GraphFrontierView extends ItemView {
       );
       if (!query) continue;
       if (!rowState.id) rowState.id = this.plugin.createGroupId();
-      nextGroups.push({
-        id: rowState.id,
-        query,
-        color: this.plugin.normalizeGroupColor(rowState.colorInput.value),
-        enabled: true,
-        ...(rowState.hidden ? { hidden: true } : {}),
-        ...(Object.keys(rowState.settings).length ? { settings: { ...rowState.settings } } : {}),
-      });
+      entries.push({ rowState, query });
     }
-    this.plugin.updateGroups(nextGroups);
-
-    const hasIncompleteRow = this.groupEditorRows.some(
-      (rowState) => !this.isGroupRowComplete(rowState)
-    );
-    if (!hasIncompleteRow) this.addGroupEditorRow(sectionEl, null);
+    editor.save(entries);
+    this.removeExtraEmptyRows(editor.rows, (rowState) => this.isQueryRowEmpty(rowState));
+    if (editor.rows.every((rowState) => this.isQueryRowComplete(rowState)))
+      this.addQueryRow(editor, null);
+    editor.afterPersist?.();
   }
 
-  addGroupEditorRow(sectionEl, group) {
-    const form = this.parseGroupForm(group);
-
-    const row = sectionEl.createDiv({ cls: 'graphfrontier-group-row' });
-    const dragHandle = row.createSpan({ cls: 'graphfrontier-group-drag', text: '::' });
-    const queryInputWrap = row.createDiv({
-      cls: 'graphfrontier-group-query-wrap graphfrontier-input-anchor',
+  addQueryRow(editor, entry) {
+    const rowState = createEditorRow(editor.sectionEl, {
+      value: String(entry?.query || ''),
+      placeholder: editor.placeholder,
+      icon: editor.icon,
+      label: editor.label,
     });
-    const queryInput = queryInputWrap.createEl('input', {
-      cls: 'graphfrontier-group-query',
-      type: 'text',
-      placeholder: 'Enter query...',
-    });
-    queryInput.value = form.query;
-
-    // The color lives in the group settings menu; the swatch button shows it and opens them.
-    const colorInput = row.createEl('input', {
-      cls: 'graphfrontier-group-color-value',
-      type: 'color',
-    });
-    colorInput.value = form.color;
-    colorInput.hidden = true;
-
-    // The eye sits inside the query field, like a search clear button, to keep the row compact.
-    const visibilityBtn = queryInputWrap.createEl('button', {
-      cls: 'graphfrontier-group-visibility',
-    });
-
-    const settingsBtn = row.createEl('button', { cls: 'graphfrontier-group-settings' });
-    settingsBtn.setAttribute('aria-label', 'Group color and settings');
-    settingsBtn.setAttribute('title', 'Group color and settings');
-    setIcon(settingsBtn, 'settings-2');
-
-    const rowState = {
-      row,
-      dragHandle,
-      queryInput,
-      colorInput,
-      settingsBtn,
-      visibilityBtn,
-      id: form.id,
-      hidden: form.hidden,
-      settings: form.settings,
-      refreshSwatch: () => {
-        const color = this.plugin.normalizeGroupColor(colorInput.value);
-        settingsBtn.style.backgroundColor = color;
-        settingsBtn.style.color = getContrastIconColor(color);
-      },
+    rowState.id = entry?.id || null;
+    rowState.editing = false;
+    editor.decorate?.(rowState, entry);
+    editor.rows.push(rowState);
+    const { row, queryInput, button } = rowState;
+    const update = () => {
+      this.refreshQueryRow(editor, rowState);
+      this.persistQueryRows(editor);
     };
-    rowState.refreshSwatch();
-    this.refreshGroupVisibilityButton(rowState);
-    this.groupEditorRows.push(rowState);
-    // Keep focus and the suggestion menu away from the query field when using the eye.
-    this.registerDomEvent(visibilityBtn, 'mousedown', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    this.registerDomEvent(visibilityBtn, 'click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.toggleGroupVisibility(rowState, event.altKey);
-      this.persistGroupRows(sectionEl);
-    });
+    const commit = () => {
+      rowState.editing = false;
+      update();
+    };
 
-    const openGroupSuggestMenu = () => {
-      const queryText = String(rowState.queryInput.value || '');
-      const suggestionPack = this.getGroupQuerySuggestions(queryText);
+    const openSuggestMenu = () => {
+      const suggestionPack = this.getGroupQuerySuggestions(String(queryInput.value || ''));
       const items = Array.isArray(suggestionPack?.items) ? suggestionPack.items : [];
       if (items.length === 0) {
         this.closeInputSuggestMenu();
         return;
       }
       this.showInputSuggestMenu(
-        rowState.queryInput,
+        queryInput,
         items,
         (selectedText) => {
-          rowState.queryInput.value = selectedText;
-          this.refreshGroupRowState(rowState);
-          this.persistGroupRows(sectionEl);
+          queryInput.value = selectedText;
+          update();
           const shouldOpenValueMenu = /:\s*$/.test(String(selectedText || '').trim());
           if (shouldOpenValueMenu) {
             this.contentEl.win.setTimeout(() => {
-              if (!rowState.queryInput) return;
-              rowState.queryInput.focus();
-              openGroupSuggestMenu();
+              queryInput.focus();
+              openSuggestMenu();
             }, 0);
           }
         },
@@ -3267,9 +3057,9 @@ class GraphFrontierView extends ItemView {
     };
 
     this.registerDomEvent(queryInput, 'input', () => {
-      this.refreshGroupRowState(rowState);
-      this.persistGroupRows(sectionEl);
-      openGroupSuggestMenu();
+      rowState.editing = true;
+      update();
+      openSuggestMenu();
     });
     this.registerDomEvent(queryInput, 'keydown', (event) => {
       const hasActiveMenu =
@@ -3294,45 +3084,33 @@ class GraphFrontierView extends ItemView {
       if (event.key !== 'Enter') return;
       event.preventDefault();
       if (hasActiveMenu && this.selectInputSuggestActive()) {
-        this.refreshGroupRowState(rowState);
-        this.persistGroupRows(sectionEl);
+        update();
         return;
       }
-      this.persistGroupRows(sectionEl);
+      commit();
       this.closeInputSuggestMenu();
     });
     this.registerDomEvent(queryInput, 'blur', () => {
+      commit();
       this.contentEl.win.setTimeout(() => {
         if (!this.inputSuggestInputEl || this.inputSuggestInputEl !== queryInput) return;
         this.closeInputSuggestMenu();
       }, 0);
     });
-    this.registerDomEvent(queryInput, 'click', () => {
-      openGroupSuggestMenu();
-    });
-    this.registerDomEvent(queryInput, 'focus', () => {
-      openGroupSuggestMenu();
-    });
-    this.registerDomEvent(settingsBtn, 'click', (event) => {
+    this.registerDomEvent(queryInput, 'click', openSuggestMenu);
+    this.registerDomEvent(queryInput, 'focus', openSuggestMenu);
+
+    this.registerDomEvent(button, 'click', (event) => {
       event.preventDefault();
       const sourceData = this.plugin.data;
       const sourceLayout = this.plugin.getActiveLayoutFileName();
+      const rect = button.getBoundingClientRect();
       const menu = new Menu(this.app);
-      const rect = settingsBtn.getBoundingClientRect();
-      this.addVisualSettingsToMenu(
-        menu,
-        null,
-        rect.left,
-        rect.bottom,
-        { ids: [] },
-        {
-          group: rowState,
-        }
-      );
+      editor.fillMenu(menu, rowState, rect);
       menu.addSeparator();
       menu.addItem((item) =>
         item
-          .setTitle('Delete group')
+          .setTitle(editor.deleteTitle)
           .setIcon('trash')
           .onClick(() => {
             if (
@@ -3340,283 +3118,157 @@ class GraphFrontierView extends ItemView {
               this.plugin.getActiveLayoutFileName() !== sourceLayout
             )
               return;
-            const index = this.groupEditorRows.indexOf(rowState);
+            const index = editor.rows.indexOf(rowState);
             if (index < 0) return;
-            this.groupEditorRows.splice(index, 1);
+            editor.rows.splice(index, 1);
             row.remove();
-            this.persistGroupRows(sectionEl);
+            this.persistQueryRows(editor);
           })
       );
       this.showMenuAtPointer(menu, rect.left, rect.bottom, event);
     });
 
-    this.registerDomEvent(row, 'dragstart', (event) => {
-      if (!this.isGroupRowComplete(rowState)) {
-        event.preventDefault();
-        return;
-      }
-      this.draggingGroupRow = rowState;
-      row.addClass('is-dragging');
-      if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', rowState.id || 'group');
-      }
-    });
-    this.registerDomEvent(row, 'dragover', (event) => {
-      if (!this.draggingGroupRow || this.draggingGroupRow === rowState) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    });
-    this.registerDomEvent(row, 'drop', (event) => {
-      if (!this.draggingGroupRow || this.draggingGroupRow === rowState) return;
-      event.preventDefault();
-
-      const fromIndex = this.groupEditorRows.indexOf(this.draggingGroupRow);
-      const toIndex = this.groupEditorRows.indexOf(rowState);
-      if (fromIndex < 0 || toIndex < 0) return;
-
-      const [moved] = this.groupEditorRows.splice(fromIndex, 1);
-      this.groupEditorRows.splice(toIndex, 0, moved);
-      if (fromIndex < toIndex) sectionEl.insertBefore(moved.row, rowState.row.nextSibling);
-      else sectionEl.insertBefore(moved.row, rowState.row);
-      this.persistGroupRows(sectionEl);
-    });
-    this.registerDomEvent(row, 'dragend', () => {
-      row.removeClass('is-dragging');
-      this.draggingGroupRow = null;
+    bindEditorRowDrag(rowState, editor.name, (moved) => {
+      if (moveEditorRow(editor.sectionEl, editor.rows, moved, rowState))
+        this.persistQueryRows(editor);
     });
 
-    this.refreshGroupRowState(rowState);
+    this.refreshQueryRow(editor, rowState);
+    return rowState;
   }
 
-  buildQueryRuleEditorSection(parentEl, options = {}) {
-    const ruleKey = String(options.key || '')
-      .trim()
-      .toLowerCase();
-    if (!ruleKey || !['blacklist', 'whitelist'].includes(ruleKey)) return;
-
+  // Filters edit blacklist (Exclude) and whitelist (Include only) as one list of rows.
+  buildQueryRuleEditorSection(parentEl) {
     const section = parentEl.createDiv({ cls: 'graphfrontier-groups' });
-    const titleText = String(options.title || '').trim() || ruleKey;
-    const titleEl = section.createDiv({ cls: 'graphfrontier-groups-title', text: titleText });
-    if (options.hint) titleEl.setAttr('title', String(options.hint));
-
-    const existingRules = Array.isArray(this.plugin.data[ruleKey]) ? this.plugin.data[ruleKey] : [];
-    const rowStateList = [];
-    if (ruleKey === 'blacklist') this.blacklistEditorRows = rowStateList;
-    else this.whitelistEditorRows = rowStateList;
-
-    for (const rule of existingRules) {
-      this.addQueryRuleEditorRow(section, ruleKey, rowStateList, rule);
-    }
-    this.addQueryRuleEditorRow(section, ruleKey, rowStateList, null);
-  }
-
-  parseQueryRuleForm(rule) {
-    return {
-      id: rule?.id || null,
-      query: String(rule?.query || ''),
+    const editor = this.createQueryRowEditor(section, {
+      name: 'filters',
+      placeholder: 'Enter filter...',
+      icon: 'more-horizontal',
+      label: 'Filter mode',
+      deleteTitle: 'Delete rule',
+      decorate: (rowState, rule) => (rowState.mode = rule?.mode || 'blacklist'),
+      refresh: (rowState) => this.refreshQueryRuleMode(rowState),
+      fillMenu: (menu, rowState) => this.addQueryRuleModeSwitch(editor, menu, rowState),
+      save: (entries) => {
+        const rules = { blacklist: [], whitelist: [] };
+        for (const { rowState, query } of entries)
+          rules[rowState.mode].push({ id: rowState.id, query, enabled: true });
+        // Row order across both lists is display state; the rule lists keep their format.
+        if (this.plugin.data.view_state)
+          this.plugin.data.view_state.filter_order = entries.map(({ rowState }) => rowState.id);
+        this.plugin.updateBlacklist(rules.blacklist);
+        this.plugin.updateWhitelist(rules.whitelist);
+        this.markQueryRuleVisibilityDirty();
+      },
+      afterPersist: () => this.refreshQueryRuleCounts(),
+    });
+    this.queryRuleEditorRows = editor.rows;
+    // Rules without a stored position follow, blacklist first.
+    const order = this.plugin.data.view_state?.filter_order || [];
+    const position = (rule) => {
+      const index = order.indexOf(rule.id);
+      return index < 0 ? order.length : index;
     };
+    const rules = ['blacklist', 'whitelist']
+      .flatMap((mode) =>
+        (Array.isArray(this.plugin.data[mode]) ? this.plugin.data[mode] : []).map((rule) => ({
+          ...rule,
+          mode,
+        }))
+      )
+      .sort((a, b) => position(a) - position(b));
+    for (const rule of rules) this.addQueryRow(editor, rule);
+    this.addQueryRow(editor, null);
+    this.queryRuleSummaryEl = parentEl.createDiv({ cls: 'graphfrontier-filter-count' });
+    this.queryRuleCountsKey = '';
+    this.refreshQueryRuleCounts();
   }
 
-  isQueryRuleRowComplete(rowState) {
-    const queryText = String(rowState.queryInput.value || '').trim();
-    if (!queryText) return false;
-    const parsed = this.plugin.parseGroupQuery(queryText);
-    if (!parsed) return false;
-    return !!String(parsed.value || '').trim();
+  refreshQueryRuleMode(rowState) {
+    const include = rowState.mode === 'whitelist';
+    const label = include
+      ? 'Include only: keep only matching notes. Click to change'
+      : 'Exclude: hide matching notes. Click to change';
+    rowState.button.setAttribute('aria-label', label);
+    rowState.button.setAttribute('title', label);
   }
 
-  isQueryRuleRowEmpty(rowState) {
-    const queryText = String(rowState.queryInput.value || '').trim();
-    return !queryText;
-  }
-
-  refreshQueryRuleRowState(rowState) {
-    const complete = this.isQueryRuleRowComplete(rowState);
-    const empty = this.isQueryRuleRowEmpty(rowState);
-    rowState.removeBtn.style.visibility = empty ? 'hidden' : 'visible';
-    rowState.dragHandle.style.visibility = complete ? 'visible' : 'hidden';
-    rowState.row.draggable = complete;
-    rowState.row.toggleClass('is-empty', empty);
-    rowState.row.toggleClass('is-complete', complete);
-  }
-
-  persistQueryRuleRows(sectionEl, ruleKey, rowStateList) {
-    const nextRules = [];
-    for (const rowState of rowStateList) {
-      const queryText = String(rowState.queryInput.value || '').trim();
-      const parsed = this.plugin.parseGroupQuery(queryText);
-      if (!parsed || !String(parsed.value || '').trim()) continue;
-      const query = this.plugin.composeGroupQuery(
-        parsed.type,
-        parsed.value,
-        parsed.propertyKey || ''
-      );
-      if (!query) continue;
-      if (!rowState.id) rowState.id = this.plugin.createGroupId();
-      nextRules.push({
-        id: rowState.id,
-        query,
-        enabled: true,
+  // The menu stays open while the mode switch is used.
+  addQueryRuleModeSwitch(editor, menu, rowState) {
+    menu.addItem((item) => {
+      item.setTitle('Mode');
+      const controls = item.dom.createDiv({
+        cls: 'graphfrontier-find-mode-controls graphfrontier-node-visual-control',
       });
-    }
-
-    if (ruleKey === 'blacklist') this.plugin.updateBlacklist(nextRules);
-    else this.plugin.updateWhitelist(nextRules);
-    this.markQueryRuleVisibilityDirty();
-
-    const hasIncompleteRow = rowStateList.some(
-      (rowState) => !this.isQueryRuleRowComplete(rowState)
-    );
-    if (!hasIncompleteRow) {
-      this.addQueryRuleEditorRow(sectionEl, ruleKey, rowStateList, null);
-    }
+      const modeSwitch = createModeSwitch(controls, {
+        left: 'Exclude',
+        right: 'Include only',
+        leftTitle: 'Hide matching notes',
+        rightTitle: 'Keep only matching notes',
+      });
+      const sync = () => {
+        const include = rowState.mode === 'whitelist';
+        item.setIcon(include ? 'check-circle' : 'minus-circle');
+        modeSwitch.sync(include);
+        modeSwitch.toggle.setAttribute(
+          'aria-label',
+          include ? 'Filter mode: include only' : 'Filter mode: exclude'
+        );
+      };
+      sync();
+      keepMenuOpen(controls);
+      modeSwitch.toggle.addEventListener('click', () => {
+        if (!editor.rows.includes(rowState)) return;
+        rowState.mode = rowState.mode === 'whitelist' ? 'blacklist' : 'whitelist';
+        this.refreshQueryRow(editor, rowState);
+        this.persistQueryRows(editor);
+        sync();
+      });
+    });
   }
 
-  addQueryRuleEditorRow(sectionEl, ruleKey, rowStateList, rule) {
-    const form = this.parseQueryRuleForm(rule);
-
-    const row = sectionEl.createDiv({ cls: 'graphfrontier-group-row' });
-    const dragHandle = row.createSpan({ cls: 'graphfrontier-group-drag', text: '::' });
-    const queryInputWrap = row.createDiv({
-      cls: 'graphfrontier-group-query-wrap graphfrontier-input-anchor',
-    });
-    const queryInput = queryInputWrap.createEl('input', {
-      cls: 'graphfrontier-group-query',
-      type: 'text',
-      placeholder: 'Enter query...',
-    });
-    queryInput.value = form.query;
-    const removeBtn = row.createEl('button', { cls: 'graphfrontier-group-remove', text: 'x' });
-
-    const rowState = {
-      row,
-      dragHandle,
-      queryInput,
-      removeBtn,
-      id: form.id,
-    };
-    rowStateList.push(rowState);
-
-    const openRuleSuggestMenu = () => {
-      const queryText = String(rowState.queryInput.value || '');
-      const suggestionPack = this.getGroupQuerySuggestions(queryText);
-      const items = Array.isArray(suggestionPack?.items) ? suggestionPack.items : [];
-      if (items.length === 0) {
-        this.closeInputSuggestMenu();
-        return;
+  // Summary of how many notes the filter rules hide.
+  refreshQueryRuleCounts() {
+    const rows = this.queryRuleEditorRows || [];
+    if (!this.queryRuleSummaryEl) return;
+    const rules = rows
+      .map((rowState) => ({
+        rowState,
+        parsed: this.isQueryRowComplete(rowState)
+          ? this.plugin.parseGroupQuery(String(rowState.queryInput.value).trim())
+          : null,
+      }))
+      .filter((rule) => rule.parsed);
+    const groupRules = this.plugin.getSettings().show_only_groups
+      ? this.getCompleteQueryRulesByKey('groups')
+      : [];
+    const key = `${this.visibilityGraphVersion}|${rules
+      .map(({ rowState }) => `${rowState.mode}:${rowState.queryInput.value.trim()}`)
+      .join('|')}|g:${groupRules.map((rule) => `${rule.type}:${rule.value}`).join('|')}`;
+    if (key === this.queryRuleCountsKey) return;
+    this.queryRuleCountsKey = key;
+    const hasInclude = rules.some(({ rowState }) => rowState.mode === 'whitelist');
+    let total = 0;
+    let hidden = 0;
+    for (const node of this.nodes || []) {
+      const meta = this.nodeMetaById?.get(node.id) || node.meta || null;
+      if (!meta || meta.darkEnergy || meta.subgraph) continue;
+      total += 1;
+      let excluded = false;
+      let included = false;
+      for (const rule of rules) {
+        if (!this.nodeMatchesParsedGroup(meta, rule.parsed, node)) continue;
+        if (rule.rowState.mode === 'whitelist') included = true;
+        else excluded = true;
       }
-      this.showInputSuggestMenu(
-        rowState.queryInput,
-        items,
-        (selectedText) => {
-          rowState.queryInput.value = selectedText;
-          this.refreshQueryRuleRowState(rowState);
-          this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
-          const shouldOpenValueMenu = /:\s*$/.test(String(selectedText || '').trim());
-          if (shouldOpenValueMenu) {
-            this.contentEl.win.setTimeout(() => {
-              if (!rowState.queryInput) return;
-              rowState.queryInput.focus();
-              openRuleSuggestMenu();
-            }, 0);
-          }
-        },
-        { title: suggestionPack?.menuTitle || '' }
-      );
-    };
-
-    this.registerDomEvent(queryInput, 'input', () => {
-      this.refreshQueryRuleRowState(rowState);
-      this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
-      openRuleSuggestMenu();
-    });
-    this.registerDomEvent(queryInput, 'keydown', (event) => {
-      const hasActiveMenu =
-        !!this.inputSuggestMenu &&
-        this.inputSuggestInputEl &&
-        this.inputSuggestInputEl === queryInput;
-      if (hasActiveMenu && event.key === 'ArrowDown') {
-        event.preventDefault();
-        this.moveInputSuggestSelection(1);
-        return;
-      }
-      if (hasActiveMenu && event.key === 'ArrowUp') {
-        event.preventDefault();
-        this.moveInputSuggestSelection(-1);
-        return;
-      }
-      if (hasActiveMenu && event.key === 'Escape') {
-        event.preventDefault();
-        this.closeInputSuggestMenu();
-        return;
-      }
-      if (event.key !== 'Enter') return;
-      event.preventDefault();
-      if (hasActiveMenu && this.selectInputSuggestActive()) {
-        this.refreshQueryRuleRowState(rowState);
-        this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
-        return;
-      }
-      this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
-      this.closeInputSuggestMenu();
-    });
-    this.registerDomEvent(queryInput, 'blur', () => {
-      this.contentEl.win.setTimeout(() => {
-        if (!this.inputSuggestInputEl || this.inputSuggestInputEl !== queryInput) return;
-        this.closeInputSuggestMenu();
-      }, 0);
-    });
-    this.registerDomEvent(queryInput, 'click', () => {
-      openRuleSuggestMenu();
-    });
-    this.registerDomEvent(queryInput, 'focus', () => {
-      openRuleSuggestMenu();
-    });
-    this.registerDomEvent(removeBtn, 'click', () => {
-      const index = rowStateList.indexOf(rowState);
-      if (index >= 0) rowStateList.splice(index, 1);
-      row.remove();
-      this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
-    });
-
-    this.registerDomEvent(row, 'dragstart', (event) => {
-      if (!this.isQueryRuleRowComplete(rowState)) {
-        event.preventDefault();
-        return;
-      }
-      this.draggingQueryRuleRow = rowState;
-      row.addClass('is-dragging');
-      if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', rowState.id || 'rule');
-      }
-    });
-    this.registerDomEvent(row, 'dragover', (event) => {
-      if (!this.draggingQueryRuleRow || this.draggingQueryRuleRow === rowState) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    });
-    this.registerDomEvent(row, 'drop', (event) => {
-      if (!this.draggingQueryRuleRow || this.draggingQueryRuleRow === rowState) return;
-      event.preventDefault();
-
-      const fromIndex = rowStateList.indexOf(this.draggingQueryRuleRow);
-      const toIndex = rowStateList.indexOf(rowState);
-      if (fromIndex < 0 || toIndex < 0) return;
-
-      const [moved] = rowStateList.splice(fromIndex, 1);
-      rowStateList.splice(toIndex, 0, moved);
-      if (fromIndex < toIndex) sectionEl.insertBefore(moved.row, rowState.row.nextSibling);
-      else sectionEl.insertBefore(moved.row, rowState.row);
-      this.persistQueryRuleRows(sectionEl, ruleKey, rowStateList);
-    });
-    this.registerDomEvent(row, 'dragend', () => {
-      row.removeClass('is-dragging');
-      this.draggingQueryRuleRow = null;
-    });
-
-    this.refreshQueryRuleRowState(rowState);
+      const grouped =
+        !groupRules.length ||
+        groupRules.some((rule) => this.nodeMatchesParsedGroup(meta, rule, node));
+      if (excluded || (hasInclude && !included) || !grouped) hidden += 1;
+    }
+    this.queryRuleSummaryEl.setText(
+      rules.length || groupRules.length ? `Filters hide ${hidden} of ${total} notes` : ''
+    );
   }
 
   formatSliderValue(value, step) {
@@ -3715,7 +3367,7 @@ class GraphFrontierView extends ItemView {
       }
     }
 
-    if (this.searchModeToggleEl) this.syncSearchModeToggleUi();
+    if (this.searchModeSwitch) this.syncSearchModeToggleUi();
     if (this.searchInputEl && activeEl !== this.searchInputEl) {
       const nextText = String(this.searchInputValue || '');
       if (this.searchInputEl.value !== nextText) this.searchInputEl.value = nextText;
@@ -3836,15 +3488,13 @@ class GraphFrontierView extends ItemView {
         : projectSubgraphs(fullGraph, this.plugin.data.subgraphs, scope?.id);
     const { topologyChanged } = this.syncGraphRuntimeState(graphData, { forceSavedPositions });
     this.markGraphVisibilityDirty();
+    this.refreshQueryRuleCounts();
 
     if (this.searchSelectedNodeId && !this.nodeById.has(this.searchSelectedNodeId)) {
       this.searchSelectedNodeId = null;
     }
     this.syncSearchMatchesLive();
     this.syncSearchClearButtonVisibility();
-    if (!this.shouldUseContentSearchIndex()) {
-      this.cancelContentSearchIndexBuild();
-    }
     this.getNodeSpatialIndex();
     this.updateLayoutCenter();
 
@@ -3873,53 +3523,6 @@ class GraphFrontierView extends ItemView {
       this.restoreSavedLayoutSleep();
     }
     this.render();
-  }
-
-  scheduleContentSearchIndexRebuild() {
-    if (!this.shouldUseContentSearchIndex()) return;
-    if (
-      this.contentSearchBuildGraphVersion === this.visibilityGraphVersion ||
-      this.contentSearchIndexGraphVersion === this.visibilityGraphVersion
-    ) {
-      return;
-    }
-    const buildToken = ++this.contentSearchBuildToken;
-    const graphVersion = this.visibilityGraphVersion;
-    this.contentSearchBuildGraphVersion = graphVersion;
-    const nodesSnapshot = this.nodes.slice();
-    const appRef = this.app;
-    const nextIndex = new Map();
-
-    const buildIndexAsync = async () => {
-      for (const node of nodesSnapshot) {
-        if (
-          buildToken !== this.contentSearchBuildToken ||
-          graphVersion !== this.visibilityGraphVersion
-        )
-          return;
-        if (!node || node.meta?.isAttachment) continue;
-        const file = appRef.vault.getAbstractFileByPath(node.id);
-        if (!file || typeof file.extension !== 'string' || file.extension.toLowerCase() !== 'md')
-          continue;
-        try {
-          const contentText = await appRef.vault.cachedRead(file);
-          nextIndex.set(node.id, String(contentText || '').toLowerCase());
-        } catch {
-          continue;
-        }
-      }
-      if (
-        buildToken !== this.contentSearchBuildToken ||
-        graphVersion !== this.visibilityGraphVersion
-      )
-        return;
-      this.contentSearchIndex = nextIndex;
-      this.contentSearchIndexGraphVersion = graphVersion;
-      this.contentSearchBuildGraphVersion = -1;
-      this.syncSearchMatchesLive();
-    };
-
-    buildIndexAsync();
   }
 
   /*
@@ -5088,14 +4691,11 @@ class GraphFrontierView extends ItemView {
       const position = this.screenToWorld(screenX, screenY);
       const sourceData = this.plugin?.data;
       const snapshot = this.selectedNodeIds?.size ? this.captureNodeActionTargets() : null;
-      if (snapshot?.ids.length) this.addSelectionActionsToMenu(menu, snapshot, clientX, clientY);
-      if (snapshot?.ids.length)
-        menu.addItem((item) =>
-          item
-            .setTitle(this.nodeActionLabel('Combine selected into subgraph', snapshot))
-            .setIcon('circle')
-            .onClick(() => this.editSubgraph(null, snapshot))
-        );
+      if (snapshot?.ids.length) {
+        this.addCombineSubgraphItem(menu, snapshot);
+        this.addRemoveFromSubgraphItem(menu, snapshot);
+        this.addSelectionActionsToMenu(menu, snapshot, clientX, clientY);
+      }
       menu.addItem((item) =>
         item
           .setTitle('Create gravity node')
@@ -5104,14 +4704,6 @@ class GraphFrontierView extends ItemView {
             if (this.plugin?.data !== sourceData) return;
             if (snapshot && !this.isNodeActionSnapshotCurrent(snapshot)) return;
             this.editDarkEnergy(null, position);
-          })
-      );
-      menu.addItem((item) =>
-        item
-          .setTitle('Node lists...')
-          .setIcon('list')
-          .onClick(() => {
-            if (this.plugin?.data === sourceData) this.openNodeListsModal();
           })
       );
       this.showMenuAtPointer(menu, clientX, clientY, event);
@@ -5124,12 +4716,6 @@ class GraphFrontierView extends ItemView {
     super.onPaneMenu?.(menu, source);
     menu.addItem((item) =>
       item
-        .setTitle('Node lists...')
-        .setIcon('list')
-        .onClick(() => this.openNodeListsModal())
-    );
-    menu.addItem((item) =>
-      item
         .setTitle('Backups...')
         .setIcon('archive')
         .onClick(() => (this.owner || this.plugin).openBackupsModal())
@@ -5138,6 +4724,15 @@ class GraphFrontierView extends ItemView {
 
   openNodeListsModal() {
     (this.owner || this.plugin).openDataSettings();
+  }
+
+  addCombineSubgraphItem(menu, snapshot, title = 'Combine into subgraph') {
+    menu.addItem((item) =>
+      item
+        .setTitle(title)
+        .setIcon('group')
+        .onClick(() => this.editSubgraph(null, snapshot))
+    );
   }
 
   editSubgraph(node = null, snapshot = null) {
@@ -5219,7 +4814,19 @@ class GraphFrontierView extends ItemView {
       x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
       y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
     };
-    const group = { id: item.id, name: item.name.trim(), members, ...center };
+    // Orbits around nodes left outside become exact pins below; origin keeps them for Ungroup.
+    const orbitPins = {};
+    for (const id of members) {
+      const orbit = data.orbit_pins[id];
+      if (orbit && !members.includes(orbit.anchor_id)) orbitPins[id] = { ...orbit };
+    }
+    const group = {
+      id: item.id,
+      name: item.name.trim(),
+      members,
+      ...center,
+      origin: { ...center, orbit_pins: orbitPins },
+    };
     translateMembers(data, members, -center.x, -center.y);
     data.saved_positions[item.id] = { ...center };
     data.subgraphs = normalizeSubgraphs([
@@ -5255,20 +4862,116 @@ class GraphFrontierView extends ItemView {
     }
   }
 
-  ungroupSubgraph(id) {
+  // Members are stored relative to their container. Returning them to the parent graph places
+  // them around the subgraph's origin, where they were combined, or around the container for
+  // subgraphs saved without one. A grid pin whose cell another node took moves to the nearest
+  // free cell; an orbit around a node outside returns when that node is in the parent graph,
+  // otherwise the exact pin stays. Runs before the caller changes membership.
+  moveMembersToParentSpace(group, members) {
     const data = this.plugin.data;
-    const group = data.subgraphs.find((item) => item.id === id);
-    if (!group) throw new Error('Subgraph not found');
-    const parent = hierarchy(data.subgraphs).get(id);
+    const parent = hierarchy(data.subgraphs).get(group.id) || null;
     this.captureGraphPositions(data);
-    const center = this.nodeById.get(id) || data.saved_positions[id] || data.pins[id] || group;
-    for (const member of group.members) {
+    const center =
+      group.origin ||
+      this.nodeById.get(group.id) ||
+      data.saved_positions[group.id] ||
+      data.pins[group.id] ||
+      group;
+    for (const member of members) {
       if (!data.saved_positions[member]) {
         const nested = data.subgraphs.find((item) => item.id === member);
         data.saved_positions[member] = nested ? { x: nested.x, y: nested.y } : { x: 0, y: 0 };
       }
     }
-    translateMembers(data, group.members, center.x, center.y);
+    translateMembers(data, members, center.x, center.y);
+
+    const parents = hierarchy(data.subgraphs);
+    const inParent = (id) => (parents.get(id) || null) === parent;
+    const step = this.plugin.clampGridStep(this.plugin.getSettings().grid_step);
+    const occupied = new Set(
+      Object.entries(data.pins)
+        .filter(([id]) => inParent(id) && !members.includes(id))
+        .map(([, pin]) => this.gridKey(Math.round(pin.x / step), Math.round(pin.y / step)))
+    );
+    for (const id of members) {
+      const orbit = group.origin?.orbit_pins?.[id];
+      const anchorExists =
+        orbit &&
+        (data.saved_positions[orbit.anchor_id] ||
+          this.nodeById.has(orbit.anchor_id) ||
+          data.subgraphs.some((item) => item.id === orbit.anchor_id));
+      if (anchorExists && inParent(orbit.anchor_id)) {
+        data.orbit_pins[id] = { ...orbit };
+        delete data.pins[id];
+        continue;
+      }
+      const pin = data.pins[id];
+      if (pin?.mode !== 'grid') continue;
+      const key = this.gridKey(Math.round(pin.x / step), Math.round(pin.y / step));
+      const cell = occupied.has(key)
+        ? this.findNearestFreeGridCell(pin.x, pin.y, step, occupied)
+        : { x: Math.round(pin.x / step) * step, y: Math.round(pin.y / step) * step };
+      data.pins[id] = { ...pin, x: cell.x, y: cell.y };
+      data.saved_positions[id] = { x: cell.x, y: cell.y };
+      occupied.add(this.gridKey(Math.round(cell.x / step), Math.round(cell.y / step)));
+    }
+  }
+
+  // Removes some members of a subgraph; removing all of them is Ungroup.
+  removeFromSubgraph(id, memberIds) {
+    const data = this.plugin.data;
+    const group = data.subgraphs.find((item) => item.id === id);
+    if (!group) throw new Error('Subgraph not found');
+    const removed = group.members.filter((member) => memberIds.includes(member));
+    if (!removed.length) return;
+    if (removed.length === group.members.length) {
+      this.ungroupSubgraph(id);
+      return;
+    }
+    const parent = hierarchy(data.subgraphs).get(id);
+    this.moveMembersToParentSpace(group, removed);
+    const orbitPins = { ...group.origin?.orbit_pins };
+    for (const member of removed) delete orbitPins[member];
+    data.subgraphs = data.subgraphs.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            members: item.members.filter((member) => !removed.includes(member)),
+            ...(item.origin ? { origin: { ...item.origin, orbit_pins: orbitPins } } : {}),
+          }
+        : item.id === parent
+          ? { ...item, members: [...item.members, ...removed] }
+          : item
+    );
+    reconcileOrbitSpaces(data);
+    this.subgraphsChanged(new Set([parent || null, id]));
+  }
+
+  // Inside an open subgraph, members can return to the graph that holds it.
+  addRemoveFromSubgraphItem(menu, snapshot) {
+    if (!this.hasValidSubgraphScope()) return;
+    menu.addItem((item) =>
+      item
+        .setTitle('Remove from subgraph')
+        .setIcon('log-out')
+        .onClick(() => {
+          if (!this.hasValidSubgraphScope()) return;
+          const ids = this.resolveNodeActionTargets(snapshot).map((node) => node.id);
+          try {
+            this.removeFromSubgraph(this.subgraphScope.id, ids);
+          } catch (error) {
+            new Notice(error.message);
+          }
+        })
+    );
+  }
+
+  ungroupSubgraph(id) {
+    const data = this.plugin.data;
+    const group = data.subgraphs.find((item) => item.id === id);
+    if (!group) throw new Error('Subgraph not found');
+    const parent = hierarchy(data.subgraphs).get(id);
+    this.moveMembersToParentSpace(group, group.members);
     data.subgraphs = data.subgraphs
       .filter((item) => item.id !== id)
       .map((item) => ({
@@ -5457,14 +5160,12 @@ class GraphFrontierView extends ItemView {
     const displayNodes = snapshot.ids.map((id) => this.nodeById.get(id)).filter(Boolean);
     if (!displayNodes.length && node) displayNodes.push(node);
     const syncControls = [];
-    for (const spec of options.advancedOnly ? [] : NODE_VISUAL_SETTINGS) {
+    for (const spec of NODE_VISUAL_SETTINGS) {
       const eligible = (entry) => !spec.edges || !entry.meta?.darkEnergy;
       const nodes = displayNodes.filter(eligible);
       if (!nodes.length && !group) continue;
       menu.addItem((item) => {
-        item
-          .setTitle(group ? spec.label : this.nodeActionLabel(spec.label, snapshot, nodes.length))
-          .setIcon('sliders-horizontal');
+        item.setTitle(spec.label).setIcon('sliders-horizontal');
         const controls = item.dom.createDiv({
           cls: 'graphfrontier-node-text-size graphfrontier-node-visual-control',
         });
@@ -5529,16 +5230,11 @@ class GraphFrontierView extends ItemView {
                   ? 'Group value'
                   : 'Individual value'
           );
-          item.setTitle(
-            (group ? spec.label : this.nodeActionLabel(spec.label, snapshot, nodes.length)) +
-              (mixed ? ' (Mixed)' : '')
-          );
+          item.setTitle(spec.label + (mixed ? ' (Mixed)' : ''));
         };
         syncControls.push(sync);
         sync();
-        for (const eventName of ['click', 'mousedown', 'keydown']) {
-          controls.addEventListener(eventName, (event) => event.stopPropagation());
-        }
+        keepMenuOpen(controls);
         input.addEventListener(spec.type === 'boolean' ? 'click' : 'input', () => {
           if (spec.type === 'boolean') input.checked = !input.checked;
           const settingValue =
@@ -5556,122 +5252,77 @@ class GraphFrontierView extends ItemView {
       });
     }
 
-    if (!options.advancedOnly) {
-      menu.addItem((item) => {
-        item.setIcon('rotate-ccw').onClick(() => {
-          if (group) group.reset();
-          for (const entry of this.getNodeVisualResetTargets(snapshot))
-            this.plugin.resetNodeVisualSettings(entry.id);
-          syncControls.forEach((sync) => sync());
-        });
-        const syncReset = () => {
-          const count = group
-            ? Number(group.canReset())
-            : this.getNodeVisualResetTargets(snapshot).length;
-          item.setTitle(
-            group
-              ? 'Reset visual settings'
-              : this.nodeActionLabel('Reset visual settings', snapshot, count)
-          );
-          item.setDisabled(count === 0);
-        };
-        syncControls.push(syncReset);
-        syncReset();
-      });
-    }
-    if (!group && !displayNodes.some((entry) => !entry.meta?.darkEnergy)) return;
-
     menu.addItem((item) => {
-      item.setTitle('Strong pull x').setIcon('zap');
+      item.setIcon('rotate-ccw').onClick(() => {
+        if (group) group.reset();
+        for (const entry of this.getNodeVisualResetTargets(snapshot))
+          this.plugin.resetNodeVisualSettings(entry.id);
+        syncControls.forEach((sync) => sync());
+      });
+      item.setTitle('Reset visual settings');
+      const syncReset = () => {
+        const count = group
+          ? Number(group.canReset())
+          : this.getNodeVisualResetTargets(snapshot).length;
+        item.setDisabled(count === 0);
+      };
+      syncControls.push(syncReset);
+      syncReset();
+    });
+  }
+
+  // Strong pull sits beside Visual settings as one slider: 0 turns it off, 1-20 set its force.
+  // Nodes whose pull comes from a group are switched off with an explicit x1 override.
+  addStrongPullSliderToMenu(menu, snapshot, options = {}) {
+    const group = options.group ? this.groupVisualMenuTarget(options.group) : null;
+    const targets = () =>
+      this.resolveNodeActionTargets(snapshot).filter((entry) => !entry.meta?.darkEnergy);
+    const initial = group ? [] : targets();
+    if (!group && !initial.length) return;
+    const strength = (nodeId) =>
+      this.plugin.isStrongPullNode(nodeId) || this.plugin.getNodeMultiplier(nodeId) > 1
+        ? this.plugin.getNodeMultiplier(nodeId)
+        : 0;
+    const setStrength = (nodeId, value) => {
+      if (value > 0) this.plugin.setNodeMultiplier(nodeId, value, { mode: 'strong-pull' });
+      else if (this.plugin.getGroupVisualSettings(nodeId)?.strong_pull)
+        this.plugin.setNodeMultiplier(nodeId, 1, { mode: 'manual' });
+      else this.plugin.clearNodeMultiplier(nodeId);
+    };
+    menu.addItem((item) => {
+      item.setTitle('Strong pull').setIcon('zap');
       const controls = item.dom.createDiv({ cls: 'graphfrontier-node-visual-control' });
       const input = controls.createEl('input', {
         type: 'range',
         cls: 'graphfrontier-sidepanel-slider',
       });
-      input.min = String(NODE_MULTIPLIER_MIN);
+      input.min = '0';
       input.max = String(NODE_MULTIPLIER_MAX);
       input.step = '1';
-      input.setAttribute('aria-label', 'Strong pull multiplier');
+      input.setAttribute('aria-label', 'Strong pull');
       const value = controls.createSpan({ cls: 'graphfrontier-sidepanel-value' });
       const sync = () => {
+        const current = targets();
         const values = group
-          ? [group.value('strong_pull_multiplier')]
-          : displayNodes
-              .filter((entry) => !entry.meta?.darkEnergy)
-              .map((entry) => this.plugin.getNodeMultiplier(entry.id));
+          ? [group.current()?.settings?.strong_pull ? group.value('strong_pull_multiplier') : 0]
+          : (current.length ? current : initial).map((entry) => strength(entry.id));
         input.value = String(values[0]);
-        value.setText(values.some((entry) => entry !== values[0]) ? 'Mixed' : input.value);
+        value.setText(
+          values.some((entry) => entry !== values[0]) ? 'Mixed' : values[0] ? input.value : 'Off'
+        );
       };
-      syncControls.push(sync);
       sync();
-      for (const eventName of ['click', 'mousedown', 'keydown'])
-        controls.addEventListener(eventName, (event) => event.stopPropagation());
+      keepMenuOpen(controls);
       input.addEventListener('input', () => {
-        const multiplier = this.plugin.clampStrongPullMultiplier(Number(input.value));
+        const next = Math.round(Number(input.value)) || 0;
         if (group) {
-          group.set('strong_pull_multiplier', multiplier);
-          group.set('strong_pull', true);
-        } else
-          for (const entry of this.resolveNodeActionTargets(snapshot)) {
-            if (!entry.meta?.darkEnergy)
-              this.plugin.setNodeMultiplier(entry.id, multiplier, { mode: 'strong-pull' });
-          }
+          if (next > 0)
+            group.set('strong_pull_multiplier', this.plugin.clampStrongPullMultiplier(next));
+          group.set('strong_pull', next > 0 ? true : null);
+        } else for (const entry of targets()) setStrength(entry.id, next);
         sync();
       });
     });
-
-    if (options.basicOnly || (!group && (!node || node.meta?.darkEnergy))) return;
-
-    const isStrongPullNode = group
-      ? !!group.current()?.settings?.strong_pull
-      : this.plugin.isStrongPullNode(node.id);
-    if (!isStrongPullNode) {
-      menu.addItem((item) =>
-        item
-          .setTitle('Strong pull')
-          .setIcon('zap')
-          .onClick(async () => {
-            if (
-              group
-                ? !group.current()
-                : !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id)
-            )
-              return;
-            const strong = this.plugin.clampStrongPullMultiplier(
-              group
-                ? group.value('strong_pull_multiplier')
-                : this.plugin.getSettings().strong_pull_multiplier
-            );
-            if (group) group.set('strong_pull', true);
-            else this.plugin.setNodeMultiplier(node.id, strong, { mode: 'strong-pull' });
-            this.kickLayoutSearch();
-            syncControls.forEach((sync) => sync());
-            new Notice(`Strong pull: ${group ? 'group' : node.id} x${strong.toFixed(2)}`);
-          })
-      );
-    }
-
-    const nodeMultiplier = group ? 1 : this.plugin.getNodeMultiplier(node.id);
-    if (nodeMultiplier > 1 || isStrongPullNode) {
-      menu.addItem((item) =>
-        item
-          .setTitle('Clear strong pull')
-          .setIcon('x')
-          .onClick(async () => {
-            if (
-              group
-                ? !group.current()
-                : !this.resolveNodeActionTargets(snapshot).some((entry) => entry.id === node.id)
-            )
-              return;
-            if (group) group.set('strong_pull', null);
-            else this.plugin.clearNodeMultiplier(node.id);
-            this.kickLayoutSearch();
-            syncControls.forEach((sync) => sync());
-            new Notice(`Strong pull cleared: ${group ? 'group' : node.id}`);
-          })
-      );
-    }
   }
 
   addContextSubmenuItem(menu, options) {
@@ -5679,7 +5330,7 @@ class GraphFrontierView extends ItemView {
     const menuItem = menu.items[menu.items.length - 1];
     if (menuItem && typeof menuItem.setSubmenu === 'function') {
       const submenu = menuItem.setSubmenu();
-      options.fillSubmenu(submenu);
+      options.fillSubmenu(submenu, menuItem);
       return;
     }
     if (!menuItem) return;
@@ -6064,7 +5715,6 @@ class GraphFrontierView extends ItemView {
           sections: Array.isArray(meta?.sections)
             ? meta.sections.map((section) => String(section || ''))
             : [],
-          lines: Array.isArray(meta?.lines) ? meta.lines.map((line) => String(line || '')) : [],
           properties,
           contentPreview,
         };
@@ -7495,11 +7145,6 @@ class GraphFrontierView extends ItemView {
     return this.captureNodeActionTargets(node);
   }
 
-  nodeActionLabel(title, snapshot, count = snapshot.ids.length) {
-    if (snapshot.ids.length <= 1) return title;
-    return `${title} · ${count === snapshot.ids.length ? count : count + ' of ' + snapshot.ids.length} nodes`;
-  }
-
   getSelectedNodesForCopy() {
     return this.resolveNodeActionTargets(this.captureNodeActionTargets());
   }
@@ -7525,7 +7170,7 @@ class GraphFrontierView extends ItemView {
       if (!count) continue;
       menu.addItem((item) =>
         item
-          .setTitle(this.nodeActionLabel(snapshot.ids.length > 1 ? title : single, snapshot, count))
+          .setTitle(snapshot.ids.length > 1 ? title : single)
           .setIcon('copy')
           .onClick(() => this.copySelectedNodes(kind, snapshot))
       );
@@ -7610,14 +7255,15 @@ class GraphFrontierView extends ItemView {
       if (count)
         menu.addItem((item) =>
           item
-            .setTitle(this.nodeActionLabel(title, snapshot, count))
+            .setTitle(title)
             .setIcon(icon)
             .onClick(() => this.applyNodePinAction(snapshot, mode))
         );
     }
-    submenu(this.nodeActionLabel('Visual settings', snapshot), 'settings-2', (target) =>
-      this.addVisualSettingsToMenu(target, null, clientX, clientY, snapshot, { basicOnly: true })
+    submenu('Visual settings', 'settings-2', (target) =>
+      this.addVisualSettingsToMenu(target, null, clientX, clientY, snapshot)
     );
+    this.addStrongPullSliderToMenu(menu, snapshot);
   }
 
   runPositionAction(ids, action, move = false) {
@@ -7873,7 +7519,13 @@ class GraphFrontierView extends ItemView {
           }
         }
         this.plugin.schedulePersist();
-        this.syncLayoutFileSelectionFromPlugin();
+        // Data changed while the file was written stays unsaved for the next autosave.
+        this.plugin.markLayoutSaved(
+          this.plugin._persistRevision === persistRevision + 1
+            ? this.plugin._persistRevision
+            : persistRevision
+        );
+        void this.layoutList?.render();
       }
       if (!silent) new Notice(`Layout saved: ${nodeCount} nodes`);
       return true;
@@ -7922,7 +7574,8 @@ class GraphFrontierView extends ItemView {
     return snapshot;
   }
 
-  restoreLayoutViewState() {
+  // keepCamera leaves the camera where it is, as when switching layouts from the layout list.
+  restoreLayoutViewState(options = {}) {
     if (this.subgraphScope) {
       const filter = this.plugin.data.subgraph_filters?.[this.subgraphScope.id];
       this.searchInputValue = filter?.query || 'name:';
@@ -7936,11 +7589,11 @@ class GraphFrontierView extends ItemView {
         : null;
       const camera =
         this.hasValidSubgraphScope() && this.plugin.data.subgraph_cameras[this.subgraphScope.id];
-      if (camera) {
+      if (camera && !options.keepCamera) {
         this.camera = { ...camera };
         this.cameraTarget = { ...camera };
       }
-      this.pendingSubgraphFit = !camera;
+      this.pendingSubgraphFit = !camera && !options.keepCamera;
       this.markSearchVisibilityDirty();
       return;
     }
@@ -7951,7 +7604,7 @@ class GraphFrontierView extends ItemView {
     this.searchMatchedNodeIds = new Set();
     this.focusNodeId = null;
     this.apiVisibleNodeIds = Array.isArray(state.node_filter) ? new Set(state.node_filter) : null;
-    if (state.camera_saved) {
+    if (state.camera_saved && !options.keepCamera) {
       this.camera = { x: state.pan_x, y: state.pan_y, zoom: state.zoom };
       this.cameraTarget = { ...this.camera };
     }
@@ -7967,7 +7620,7 @@ class GraphFrontierView extends ItemView {
     });
     if (!loaded) {
       new Notice(`Cannot read layout: ${layoutName}. Current changes kept.`);
-      this.syncLayoutFileSelectionFromPlugin();
+      void this.layoutList?.render();
       return false;
     }
     const views = this.getScopeLeaves().map((leaf) => leaf.view);
@@ -7991,9 +7644,8 @@ class GraphFrontierView extends ItemView {
         view.cameraTarget = { ...view.camera };
       }
       view.searchMode = this.plugin.data.settings.search_mode === 'filter' ? 'filter' : 'find';
-      view.restoreLayoutViewState();
+      view.restoreLayoutViewState({ keepCamera: options.keepCamera });
       view.sidePanelSectionState = this.plugin.getSidePanelSectionsState();
-      view.syncLayoutFileSelectionFromPlugin();
       view.layoutAutosaveDirty = false;
       view.layoutStillFrames = 0;
       view.layoutPaused = true;
@@ -8005,6 +7657,8 @@ class GraphFrontierView extends ItemView {
       view.buildSidePanel();
     }
     this.plugin.renderAllViews();
+    // The loaded file is the saved state, including persists made while views rebuilt.
+    this.plugin.markLayoutSaved?.();
     if (!silent) new Notice('Layout loaded');
     return true;
   }
@@ -8188,9 +7842,10 @@ class GraphFrontierView extends ItemView {
   }
 
   // View-state persistence and file opening helpers.
+  // The camera is saved with the next layout save, but moving it alone does not autosave.
   persistViewState() {
     this.persistCameraState();
-    this.plugin.schedulePersist(1200);
+    this.plugin.schedulePersist(1200, { layout: false });
   }
 
   hasValidSubgraphScope() {
@@ -8278,6 +7933,7 @@ class GraphFrontierView extends ItemView {
   }
 
   nodeMatchesParsedGroup(meta, parsed, node = null) {
+    if (parsed?.type === 'line') this.plugin.requestNoteLines?.();
     return nodeMatchesParsedGroupRender(meta, parsed, node, this.plugin.getNodeLists?.() || []);
   }
 

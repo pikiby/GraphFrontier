@@ -134,9 +134,9 @@ test('backup payloads omit Settings tab and restore preserves the current UI pre
   assert.equal('settings_tab' in bundle.data.view_state, false);
   for (const layout of bundle.layouts)
     assert.equal('settings_tab' in layout.data.view_state, false);
-  f.view.selectSettingsTab('selection');
+  f.view.selectSettingsTab('sets');
   await f.manager.restore(raw);
-  assert.equal(f.plugin.getSettingsTab(), 'selection');
+  assert.equal(f.plugin.getSettingsTab(), 'sets');
   for (const layout of bundle.layouts)
     assert.equal(
       'settings_tab' in JSON.parse(f.files.get(f.layoutPath(layout.name))).view_state,
@@ -305,7 +305,7 @@ test('leaving protected Backups settings does not authorize replacement and menu
   assert.equal(f.contents.get(fresh.path), raw);
   const menu = new obsidian.Menu();
   f.view.onPaneMenu(menu);
-  assert(menu.items.some((i) => i.title === 'Node lists...'));
+  assert(!menu.items.some((i) => i.title === 'Node lists...'));
   assert(menu.items.some((i) => i.title === 'Backups...'));
 });
 

@@ -63,9 +63,17 @@ Save, Load and autosave behavior. They remain stationary unless moved manually.
 ## Subgraphs
 
 Select existing nodes with the normal selection modifier, selection commands, or box
-selection. Right-click a node or empty space and choose **Combine selected into subgraph**.
+selection. Right-click a node or empty space and choose **Combine into subgraph**, the first
+item of a selection menu. For one note, **Combine linked** next to **Select linked nodes** combines
+the note with its direct links.
 The compact creation dialog has only a **Name** input; the captured selection supplies
-membership. No notes, files, folders or links are modified.
+membership. No notes, files, folders or links are modified. Inside an opened subgraph,
+**Remove from subgraph** in a node or selection menu returns those members to the parent graph,
+placed where they were combined; removing every member is the same as **Ungroup subgraph**.
+Ungroup also returns members to the place where they were combined (moves made inside are kept),
+restores orbits around nodes outside the subgraph when those nodes are in the parent graph, and
+moves a grid-pinned member to the nearest free cell if another node took its cell. Each subgraph
+stores this as `origin` in the layout; subgraphs created before it ungroup around their container.
 
 The parent graph always shows a hollow standard ball with a thicker outer outline.
 There is no in-place expand/collapse. Outside links are aggregated onto the container,
@@ -127,8 +135,8 @@ Flow:
 ## Right-Click Context Menu On Node
 
 The sidebar keeps Search first and Layout last. Its Settings section groups existing controls
-into Groups (including Blacklist/Whitelist), Display (including Attachments), Physics and
-Selection tabs. The chosen tab survives rebuilds and layout changes without changing physics.
+into Groups (groups, and Filters with Exclude / Include only rules, file visibility and attachments), Display, Physics and
+Sets (selection modifiers and custom lists) tabs. The chosen tab survives rebuilds and layout changes without changing physics.
 
 **Visual settings** provides per-node sliders for node size, link width,
 text zoom, text size and hover dimming. Notes and attachments use the same size controls.
@@ -145,7 +153,7 @@ Gravity nodes omit link settings, link painting and Strong pull.
 Hover dimming controls how much this node fades when another node is focused. Link widths
 are physical screen pixels (0.1-5) and apply to incident links; if both endpoints override a
 width, the larger override wins.
-Link color, opacity and arrow toggles inherit individual > group > global, preferring the stored source at equal priority. Reverse arrows is visual-only and appears only when arrows are on. Strong pull x (1-20) targets the node/eligible selection, or the group when opened from group settings; visual reset never resets force multipliers.
+Link color, opacity and arrow toggles inherit individual > group > global, preferring the stored source at equal priority. Reverse arrows is visual-only and appears only when arrows are on. The **Strong pull** slider (0 = off, up to 20) sits right below Visual settings and targets the node/eligible selection, or the group when opened from group settings; visual reset never resets force multipliers.
 Visual changes do not restart physics. Overrides follow layout Save, Load and autosave,
 and are included in static HTML export. Grid, graph-wide visibility and physics settings
 are not individual visual overrides.
@@ -173,8 +181,8 @@ Only HTTP(S) URLs and local paths or `obsidian://open?...` path links are suppor
 Empty or invalid list entries are ignored. Targets always appear in a hover submenu,
 even with one target, so its alias stays visible. Aliases are plain text; raw URLs show host and path, raw paths show the basename.
 Long labels are shortened; hover a choice to see its full target. Quote aliases in YAML,
-including targets containing spaces or parentheses. Plugin settings -> Navigation offers
-the syntax and **Copy example**, which copies YAML only when clicked, without editing a note.
+including targets containing spaces or parentheses. Hovering **Add URL or path** choices or
+**Edit** in the node menu shows this syntax.
 
 Right-clicking a selected node targets the entire selection. Right-clicking an unselected
 node targets only that node, without changing selection. Empty canvas offers compatible
@@ -183,8 +191,8 @@ the menu opens; removed nodes are ignored and switching layout invalidates old a
 
 The ordinary **Copy** submenu copies names, vault paths and available system paths, one
 per line. **Ctrl+C** / **Cmd+C** copies selected names through the same action, except in
-text inputs or when native text is selected. Batch labels include eligible counts, such
-as **Unpin · 3 of 5 nodes**. Exact/grid pinning and unpinning support selections; unchanged
+text inputs or when native text is selected. Menu titles do not show node counts, to keep
+menus narrow on mobile; actions apply only to eligible targets. Exact/grid pinning and unpinning support selections; unchanged
 exact pins and already-grid pins are skipped. Grid placement reserves unique cells,
 excludes batch targets' old pins, preserves unchanged grid pins and protects outsiders.
 Grid occupancy ignores stale pins for nodes absent from the current graph or outside
@@ -194,28 +202,28 @@ such a cell shows a faint dashed ring with **Hidden: <name>**, with or without t
 grid; on release the node takes the nearest free cell and a notice names the hidden holder
 (API pin and move results return a `GRID_CELL_HELD_BY_HIDDEN_NODE` warning instead).
 
-Basic **Visual settings** and reset apply to eligible selected nodes. Each control shows
-its eligible count; mixed values are marked **Mixed**, including colors, without writing
+Basic **Visual settings** and reset apply to eligible selected nodes. Mixed values are marked **Mixed**, including colors, without writing
 anything on opening. Link controls omit gravity nodes. In a multi-node menu, file opening/properties, rename, deletion, linked/orbit-center
-operations, native plugin actions and Strong pull activation/clearing remain single-only under
+operations and native plugin actions remain single-only under
 **Only for <name>**. Deletion never becomes a batch operation. Blank-canvas selection
 menus have no single-only actions.
 
 For one effective target, the menu is arranged in this order:
 
 - **Copy system root**, then **Copy**: Obsidian URL, vault-relative path, linked names and linked paths.
-- **Open path**, **Open URL**, then **Open**: same tab, new window, default app, system explorer and file navigation.
+- **Open path**, **Open URL** (each ends with **Edit**, which opens the note on that YAML line), **Add URL or path** when the note lacks one (adds the empty property and opens the note in its usual view mode; in source mode the cursor lands on that line), then **Open**: same tab, new window, default app, system explorer and file navigation.
 - **Pin node**, **Pin to grid**, **Pin linked**, and **Unpin node**. Linked actions include both notes and attachments.
-- **Visual settings**: text size, link appearance and targeted Strong pull, with visual reset independent of force settings.
-- **Select linked nodes**, **Bookmark**, then **Other**: move, bookmark, merge, add to search and local graph.
+- **Visual settings**: text size and link appearance, with visual reset independent of force settings; **Strong pull** right below it is a 0-20 slider, where 0 is off.
+- **Select linked nodes** and **Combine linked** (the note and its direct links into a subgraph) as their own block, then **Add to list** and **Other**: move, bookmark, merge, add to search and local graph.
 - **Delete** at the bottom uses Obsidian's normal deletion confirmation.
 
 Actions appear only when applicable: YAML actions require the corresponding property, unpin actions require matching pins, and linked actions require linked nodes. The text-size slider changes the effective targets; **Reset visual settings** removes their overrides.
 
 ## Layout Persistence
 
-- `Save layout`: stores current node positions and pin states
-- `Load layout`: restores previously saved layout
+- Layout rows: click one to make it active; **New layout...** saves the current graph under a new name
+- `Save layout`: stores current node positions and pin states in the active layout
+- `Load layout` command: restores the active layout's saved snapshot
 - `Autosave`: optionally saves layout after graph stabilizes
 
 If search row is active, save is blocked to avoid saving filtered/focus state as final layout.

@@ -398,24 +398,65 @@ for (const order of ['pending', 'restored', 'before-open', 'after-open']) {
   });
 }
 
-test('Ungroup uses current live container center plus latest local offsets, not original coordinates or stale pins', async (t) => {
+test('Ungroup returns members around where they were combined, keeping moves made inside', async (t) => {
   const f = setup(t);
   f.makeGroup();
   const child = await f.child();
   child.nodeById.get('a.md').x = -120;
   child.nodeById.get('a.md').y = 40;
   await child.pinNodeExact('a.md', { x: -120, y: 40 });
-  f.plugin.setPin(P + 'one', { x: 50, y: 10 });
   const handle = f.view.nodeById.get(P + 'one');
   handle.x = 3000;
   handle.y = 2000;
   f.view.ungroupSubgraph(handle.id);
-  assert.deepEqual(point(f.view.nodeById.get('a.md')), { x: 2880, y: 2040 });
-  assert.deepEqual(f.plugin.getPin('a.md'), { x: 2880, y: 2040, mode: 'exact' });
-  assert.deepEqual(point(f.view.nodeById.get('b.md')), { x: 3050, y: 2010 });
+  // a and b were combined around (50, 10); the moved container does not matter.
+  assert.deepEqual(point(f.view.nodeById.get('a.md')), { x: -70, y: 50 });
+  assert.deepEqual(f.plugin.getPin('a.md'), { x: -70, y: 50, mode: 'exact' });
+  assert.deepEqual(point(f.view.nodeById.get('b.md')), { x: 100, y: 20 }, 'untouched b is back');
   assert.equal(f.plugin.data.subgraphs.length, 0);
   assert.deepEqual(ids(child), []);
   assert.equal(f.writes.length, 0);
+});
+
+test('nested origins move with their container, so ungrouping both levels restores places', (t) => {
+  const f = setup(t);
+  const before = ['a.md', 'b.md', 'c.md'].map((id) => point(f.view.nodeById.get(id)));
+  f.makeGroup();
+  f.makeGroup([P + 'one', 'c.md'], 'outer');
+  f.view.ungroupSubgraph(P + 'outer');
+  f.view.ungroupSubgraph(P + 'one');
+  assert.deepEqual(
+    ['a.md', 'b.md', 'c.md'].map((id) => point(f.view.nodeById.get(id))),
+    before
+  );
+});
+
+test('a subgraph saved without origin still ungroups around its live container', async (t) => {
+  const f = setup(t);
+  f.makeGroup();
+  delete f.plugin.data.subgraphs[0].origin;
+  const handle = f.view.nodeById.get(P + 'one');
+  handle.x = 3000;
+  handle.y = 2000;
+  f.view.ungroupSubgraph(handle.id);
+  assert.deepEqual(point(f.view.nodeById.get('b.md')), { x: 3050, y: 2010 });
+});
+
+test('Ungroup restores outside orbits and moves a grid pin off a taken cell', (t) => {
+  const f = setup(t, { settings: { grid_step: 20 } });
+  f.plugin.setOrbitPin('a.md', { anchor_id: 'd.md', radius: 50, angle: 1 });
+  f.plugin.setPin('b.md', { x: 100, y: 20 }, { mode: 'grid' });
+  f.view.refreshFromVault({ keepCamera: true, forceSavedPositions: true, skipLayoutKick: true });
+  f.makeGroup();
+  assert.equal(f.plugin.data.orbit_pins['a.md'], undefined, 'outside orbit is exact while grouped');
+  f.plugin.setPin('c.md', { x: 100, y: 20 }, { mode: 'grid' });
+  f.view.ungroupSubgraph(P + 'one');
+  assert.deepEqual(f.plugin.data.orbit_pins['a.md'], { anchor_id: 'd.md', radius: 50, angle: 1 });
+  assert.equal(f.plugin.data.pins['a.md'], undefined);
+  const pin = f.plugin.getPin('b.md');
+  assert.equal(pin.mode, 'grid');
+  assert.notDeepEqual([pin.x, pin.y], [100, 20], 'c took the cell, so b moves to a free one');
+  assert.equal(Math.hypot(pin.x - 100, pin.y - 20), 20, 'the nearest free cell');
 });
 
 test('nested grouping and Ungroup move immediate containers only; deeper local spaces and their cameras are unchanged', async (t) => {
@@ -437,6 +478,32 @@ test('nested grouping and Ungroup move immediate containers only; deeper local s
   assert.deepEqual(ids(outer), []);
   assert(f.view.nodeById.has(P + 'one'));
   assert(!f.view.nodeById.has('a.md'));
+});
+
+test('members leave an open subgraph one at a time or as a selection; removing all ungroups', async (t) => {
+  const f = setup(t);
+  f.makeGroup(['a.md', 'b.md', 'c.md']);
+  const child = await f.child();
+  Object.assign(child.nodeById.get('a.md'), { x: -100, y: 40 });
+  Object.assign(f.view.nodeById.get(P + 'one'), { x: 1000, y: 500 });
+  const remove = (menu) => menu.items.find((item) => item.title === 'Remove from subgraph');
+
+  remove(buildNodeContextMenu(child, child.nodeById.get('a.md'), 0, 0)).callback();
+  assert.deepEqual(f.plugin.data.subgraphs[0].members, ['b.md', 'c.md']);
+  assert.deepEqual(ids(child), ['b.md', 'c.md']);
+  assert.deepEqual(point(f.view.nodeById.get('a.md')), { x: 0, y: 60 }, 'around the origin');
+
+  child.selectedNodeIds = new Set(['b.md', 'c.md']);
+  remove(buildNodeContextMenu(child, child.nodeById.get('b.md'), 0, 0)).callback();
+  assert.equal(f.plugin.data.subgraphs.length, 0);
+  assert.equal(f.view.nodeById.has(P + 'one'), false, 'the container is gone too');
+  assert.equal(f.plugin.data.saved_positions[P + 'one'], undefined);
+  assert(f.view.nodeById.has('b.md') && f.view.nodeById.has('c.md'));
+  assert.equal(
+    remove(buildNodeContextMenu(f.view, f.view.nodeById.get('a.md'), 0, 0)),
+    undefined,
+    'the root graph has no subgraph to leave'
+  );
 });
 
 test('creation modal has exactly one name input and no membership UI; captured selection supplies members', (t) => {
@@ -487,7 +554,7 @@ test('container context retains ordinary node actions and offers pane/rename/Ung
     assert(titles.includes(title), title);
   assert(!titles.some((title) => /expand|collapse|Add selected|Remove from|Dissolve/i.test(title)));
   const visual = menu.items.find((item) => item.title === 'Visual settings').submenu;
-  assert(visual.items.some((item) => item.title === 'Strong pull'));
+  assert(menu.items.some((item) => item.title === 'Strong pull'));
   assert(visual.items.some((item) => item.title === 'Link color'));
   assert.equal(f.view.toggleSubgraph, undefined);
 });

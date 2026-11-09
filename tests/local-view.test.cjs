@@ -72,11 +72,11 @@ test('local Settings tab is scoped, survives local Load and workspace restore, s
   assert.equal(f.local.plugin.getSettingsTab(), 'physics');
   assert.equal(f.plugin.getSettingsTab(), 'groups');
   await f.local.saveCurrentLayout({ silent: true });
-  f.local.selectSettingsTab('selection');
+  f.local.selectSettingsTab('sets');
   await f.local.loadSavedLayout({ silent: true });
   assert.equal(
     f.local.plugin.getSettingsTab(),
-    'selection',
+    'sets',
     'local layout cannot replace UI preference'
   );
   assert.equal(f.local.sidePanelOpen, false);
@@ -85,7 +85,7 @@ test('local Settings tab is scoped, survives local Load and workspace restore, s
   await f.local.setState(state);
   assert.equal(
     f.local.plugin.getSettingsTab(),
-    'selection',
+    'sets',
     'workspace state restores its own scoped UI'
   );
   assert.equal(f.plugin.getSettingsTab(), 'groups');

@@ -21,7 +21,7 @@ Then velocity is damped and position is updated each frame.
 - `Repel radius`: distance cutoff for repel interactions
 - `Center strength`: stronger pull toward center
 - `Damping`: stronger velocity decay per frame
-- `Strong pull x`: per-node multiplier used by strong pull action
+- `Strong pull`: per-node multiplier from the node menu slider, 0 (off) to 20
 
 ## Repel Radius Logic
 

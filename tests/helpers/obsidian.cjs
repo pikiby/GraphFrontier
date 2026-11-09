@@ -102,6 +102,10 @@ class Menu {
         this.warning = value;
         return this;
       },
+      setChecked(value) {
+        this.checked = value;
+        return this;
+      },
       onClick(callback) {
         this.callback = callback;
         return this;

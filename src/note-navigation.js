@@ -1,12 +1,9 @@
 const { Menu, Notice, Platform } = require('obsidian');
 
-const NOTE_NAVIGATION_EXAMPLE = `url:
-  - https://example.com
-  - '[Dashboard](https://example.com/dashboard)'
-path:
-  - '[Project](/home/user/projects/example)'
-  - '[Schema](Schemas/schema.sql)'
-`;
+// Shown on hover over the menu items that add or edit url/path.
+const NOTE_TARGET_HINT =
+  "A string or a list of strings. Alias: '[Label](target)', quoted in YAML. " +
+  'URLs need http(s); paths take local files and obsidian://open links.';
 
 function validateNoteTarget(type, target) {
   if (type === 'url') {
@@ -133,7 +130,11 @@ function addNoteTargetActions(menu, app, key, value, hostWindow, options = {}) {
     );
     item?.dom?.setAttribute('title', entry.target);
   };
-  const fill = (targetMenu) => targets.forEach((entry) => choice(targetMenu, entry, entry.label));
+  const fill = (targetMenu) => {
+    targets.forEach((entry) => choice(targetMenu, entry, entry.label));
+    if (options.edit)
+      add(targetMenu, 'Edit', 'pencil', options.edit)?.dom?.setAttribute('title', NOTE_TARGET_HINT);
+  };
   if (options.submenu) options.submenu(title, icon, fill);
   else
     menu.addItem((item) => {
@@ -148,6 +149,26 @@ function addNoteTargetActions(menu, app, key, value, hostWindow, options = {}) {
     });
 }
 
+// Opens the note on its YAML url/path line, adding an empty property if needed. The note keeps
+// the reader's own view mode; only plain source mode has a text line to put the cursor on,
+// while Live Preview and Reading show the property in the Properties block.
+async function editNoteTarget(app, file, key) {
+  await app.fileManager.processFrontMatter(file, (frontmatter) => {
+    if (!(key in frontmatter)) frontmatter[key] = null;
+  });
+  const lines = (await app.vault.read(file)).split(/\r?\n/);
+  const line = Math.max(
+    0,
+    lines.findIndex((entry, index) => index > 0 && new RegExp(`^${key}\\s*:`).test(entry))
+  );
+  const leaf = app.workspace.getLeaf(true);
+  await leaf.openFile(file, { eState: { line } });
+  const editor = leaf.view?.editor;
+  if (!editor || leaf.getViewState?.().state?.source !== true) return;
+  editor.setCursor({ line, ch: editor.getLine(line).length });
+  editor.focus();
+}
+
 function addNoteNavigationActions(menu, app, file, hostWindow) {
   const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
   if (!frontmatter) return;
@@ -158,7 +179,8 @@ function addNoteNavigationActions(menu, app, file, hostWindow) {
 module.exports = {
   addNoteNavigationActions,
   addNoteTargetActions,
+  editNoteTarget,
   getNoteTargets,
   openNoteTarget,
-  NOTE_NAVIGATION_EXAMPLE,
+  NOTE_TARGET_HINT,
 };

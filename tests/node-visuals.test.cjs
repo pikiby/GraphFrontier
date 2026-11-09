@@ -77,7 +77,7 @@ test('shared menu toggles use existing buttons, hide Reverse and display inherit
   assert.equal(view.layoutPaused, true, 'visual edits do not wake physics');
 });
 
-test('Strong pull slider targets eligible selection, synchronizes actions and visual reset preserves forces', async (t) => {
+test('Strong pull slider goes from off to 20 for eligible selection and survives visual reset', (t) => {
   const { plugin, view } = fixture(t);
   const { obsidian } = require('./helpers/obsidian.cjs');
   const nodes = [
@@ -90,33 +90,34 @@ test('Strong pull slider targets eligible selection, synchronizes actions and vi
   view.nodeById = new Map(nodes.map((node) => [node.id, node]));
   view.selectedNodeIds = new Set(['a', 'b', 'gravity']);
   const menu = new obsidian.Menu();
-  view.addVisualSettingsToMenu(menu, null, 0, 0, view.captureNodeActionTargets(null), {
-    basicOnly: true,
-  });
-  const input = menu.items.find((item) => item.title === 'Strong pull x').dom.children[0]
-    .children[0];
-  assert.equal(input.max, '20');
+  view.addStrongPullSliderToMenu(menu, view.captureNodeActionTargets(null));
+  const item = menu.items.find((entry) => /^Strong pull/.test(entry.title));
+  const [input, value] = item.dom.children[0].children;
+  assert.deepEqual([input.min, input.max, input.value, value.text], ['0', '20', '0', 'Off']);
   input.value = '20';
   input.events.input();
   assert.equal(plugin.getNodeMultiplier('a'), 20);
   assert.equal(plugin.getNodeMultiplier('b'), 20);
   assert.equal(plugin.getNodeMultiplier('gravity'), 1);
   assert.equal(plugin.getNodeMultiplier('other'), 1);
+  assert.equal(plugin.isStrongPullNode('a'), true);
   assert.equal(plugin.getSettings().strong_pull_multiplier, 5);
-  const single = new obsidian.Menu();
-  view.addVisualSettingsToMenu(single, nodes[0], 0, 0, {
+  const visual = new obsidian.Menu();
+  view.addVisualSettingsToMenu(visual, nodes[0], 0, 0, {
     ...view.captureNodeActionTargets(nodes[0]),
     ids: ['a'],
   });
-  const slider = single.items.find((item) => item.title === 'Strong pull x').dom.children[0]
-    .children[0];
-  single.items.find((item) => item.title === 'Reset visual settings').callback();
+  assert(!visual.items.some((entry) => /Strong pull/.test(entry.title)), 'not in Visual settings');
+  visual.items.find((entry) => entry.title === 'Reset visual settings').callback();
   assert.equal(plugin.getNodeMultiplier('a'), 20);
-  await single.items.find((item) => item.title === 'Clear strong pull').callback();
-  assert.equal(slider.value, '1');
+  input.value = '0';
+  input.events.input();
+  assert.equal(value.text, 'Off');
+  assert.equal(plugin.isStrongPullNode('a'), false);
+  assert.deepEqual(plugin.data.node_force_multipliers, {});
 });
 
-test('group multiplier uses existing force resolver and survives only-visual reset', (t) => {
+test('group strong pull uses the same slider, and 0 on a node overrides the group', (t) => {
   const { plugin, view } = fixture(t, {
     groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
   });
@@ -124,33 +125,37 @@ test('group multiplier uses existing force resolver and survives only-visual res
   view.nodes[0].meta = { path: 'alpha.md', fileName: 'alpha.md', tags: [] };
   const row = { id: 'g', settings: {}, colorInput: { value: '#123456' } };
   view.groupEditorRows = [row];
-  const menu = new obsidian.Menu();
-  view.addVisualSettingsToMenu(menu, null, 0, 0, { ids: [] }, { group: row });
-  const slider = menu.items.find((item) => item.title === 'Strong pull x').dom.children[0]
-    .children[0];
-  slider.value = '20';
-  slider.events.input();
+  const slider = (menu) =>
+    menu.items.find((item) => /^Strong pull/.test(item.title)).dom.children[0].children[0];
+  const groupMenu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(groupMenu, null, 0, 0, { ids: [] }, { group: row });
+  view.addStrongPullSliderToMenu(groupMenu, { ids: [] }, { group: row });
+  const groupSlider = slider(groupMenu);
+  groupSlider.value = '20';
+  groupSlider.events.input();
   assert.deepEqual(plugin.data.groups[0].settings, {
     strong_pull: true,
     strong_pull_multiplier: 20,
   });
   assert.equal(plugin.getNodeMultiplier('alpha.md'), 20);
-  assert.equal(plugin.getSettings().strong_pull_multiplier, 5);
-  menu.items.find((item) => item.title === 'Reset visual settings').callback();
-  assert.equal(plugin.getNodeMultiplier('alpha.md'), 20);
-  plugin.setNodeMultiplier('alpha.md', 8);
-  assert.equal(plugin.getNodeMultiplier('alpha.md'), 8, 'individual overrides group force');
-  const individual = new obsidian.Menu();
-  view.addVisualSettingsToMenu(individual, view.nodes[0], 0, 0);
-  const one = individual.items.find((item) => item.title === 'Strong pull x').dom.children[0]
-    .children[0];
-  one.value = '1';
-  one.events.input();
-  assert.equal(one.value, '1');
-  assert.equal(plugin.getNodeMultiplier('alpha.md'), 1, 'explicit one overrides group twenty');
-  assert.equal(plugin.normalizeData(plugin.data).node_force_multipliers['alpha.md'], 1);
+  groupMenu.items.find((item) => item.title === 'Reset visual settings').callback();
+  assert.equal(plugin.getNodeMultiplier('alpha.md'), 20, 'visual reset keeps the force');
+
+  const nodeMenu = new obsidian.Menu();
+  view.addStrongPullSliderToMenu(nodeMenu, view.captureNodeActionTargets(view.nodes[0]));
+  const nodeSlider = slider(nodeMenu);
+  assert.equal(nodeSlider.value, '20', 'node shows the inherited group force');
+  nodeSlider.value = '0';
+  nodeSlider.events.input();
+  assert.equal(plugin.getNodeMultiplier('alpha.md'), 1, 'off overrides group twenty');
+  assert.equal(nodeSlider.value, '0');
   plugin.clearNodeMultiplier('alpha.md');
   assert.equal(plugin.getNodeMultiplier('alpha.md'), 20, 'clear returns to group inheritance');
+
+  groupSlider.value = '0';
+  groupSlider.events.input();
+  assert.deepEqual(plugin.data.groups[0].settings, { strong_pull_multiplier: 20 });
+  assert.equal(plugin.getNodeMultiplier('alpha.md'), 1);
 });
 
 test('saved brightness clamps to 50 and text zoom supports 40 globally and individually', (t) => {
@@ -577,9 +582,9 @@ test('groups reuse the node visual menu, write group overrides and reset without
   const row = { id: 'g', settings: {}, colorInput: { value: '#123456' } };
   view.groupEditorRows = [row];
   const menu = new obsidian.Menu();
-  view.addVisualSettingsToMenu(menu, null, 0, 0, { ids: [] }, { group: row, basicOnly: true });
+  view.addVisualSettingsToMenu(menu, null, 0, 0, { ids: [] }, { group: row });
   const nodeMenu = new obsidian.Menu();
-  view.addVisualSettingsToMenu(nodeMenu, view.nodes[0], 0, 0, undefined, { basicOnly: true });
+  view.addVisualSettingsToMenu(nodeMenu, view.nodes[0], 0, 0);
   assert.deepEqual(
     menu.items.map((item) => item.title),
     nodeMenu.items.map((item) => item.title)
@@ -619,7 +624,7 @@ test('groups reuse the node visual menu, write group overrides and reset without
   assert.deepEqual(plugin.data.groups[0].settings, {});
 });
 
-test('group uses shared strong-pull and edge-color actions and preserves force on visual reset', async (t) => {
+test('group uses shared edge-color actions and visual reset keeps strong pull', async (t) => {
   const { obsidian } = require('./helpers/obsidian.cjs');
   const { view, plugin } = fixture(t, {
     groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
@@ -629,13 +634,13 @@ test('group uses shared strong-pull and edge-color actions and preserves force o
   const menu = () => {
     const m = new obsidian.Menu();
     view.addVisualSettingsToMenu(m, null, 0, 0, { ids: [] }, { group: row });
+    view.addStrongPullSliderToMenu(m, { ids: [] }, { group: row });
     return m;
   };
-  const action = (title) =>
-    menu()
-      .items.find((item) => item.title === title)
-      .callback();
-  await action('Strong pull');
+  const strong = menu().items.find((item) => item.title === 'Strong pull').dom.children[0]
+    .children[0];
+  strong.value = '5';
+  strong.events.input();
   assert.equal(plugin.data.groups[0].settings.strong_pull, true);
   const color = menu().items.find((item) => item.title === 'Link color').dom.children[0]
     .children[0];
@@ -646,16 +651,24 @@ test('group uses shared strong-pull and edge-color actions and preserves force o
   );
   assert.equal(plugin.data.groups[0].settings.edge_color, '#abcdef');
   assert(!menu().items.some((item) => item.title === 'Clear painted edges'));
-  await action('Reset visual settings');
-  assert.deepEqual(plugin.data.groups[0].settings, { strong_pull: true });
-  await action('Clear strong pull');
-  assert.deepEqual(plugin.data.groups[0].settings, {});
+  await menu()
+    .items.find((item) => item.title === 'Reset visual settings')
+    .callback();
+  assert.deepEqual(plugin.data.groups[0].settings, {
+    strong_pull: true,
+    strong_pull_multiplier: 5,
+  });
   assert.deepEqual(plugin.data.node_force_multipliers, {});
   assert.deepEqual(plugin.data.painted_edge_colors, {});
-  const stale = menu().items.find((item) => item.title === 'Strong pull');
+  const stale = menu().items.find((item) => item.title === 'Strong pull').dom.children[0]
+    .children[0];
   view.groupEditorRows = [];
-  await stale.callback();
-  assert.deepEqual(plugin.data.groups[0].settings, {});
+  stale.value = '0';
+  stale.events.input();
+  assert.deepEqual(plugin.data.groups[0].settings, {
+    strong_pull: true,
+    strong_pull_multiplier: 5,
+  });
 });
 
 test('node menu removes separate edge reset and general reset clears edge color', (t) => {

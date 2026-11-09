@@ -300,3 +300,53 @@ test('Filter draws connections for every same-name center, not only the first', 
   render.drawEdges(view, ctx);
   assert.equal(starts.length, 2, 'both center edges, without the neighbor-to-neighbor edge');
 });
+
+test('line: matches words on one line of note text, as in Obsidian search', () => {
+  const lines = ['deploy nats to staging', 'nats lag alert', 'restart "the job" later'];
+  for (const [query, expected] of [
+    ['nats', true],
+    ['NATS staging', true],
+    ['(nats alert)', true],
+    ['staging alert', false],
+    ['"the job"', true],
+    ['"job the"', false],
+    ['12', false],
+    ['', false],
+  ])
+    assert.equal(render.lineQueryMatches(lines, query), expected, query);
+});
+
+test('note text is read only after line: is used, and again when a note changes', async (t) => {
+  const { plugin, app, view } = fixture(t);
+  const file = { path: 'a.md', basename: 'a', extension: 'md', stat: { mtime: 1 } };
+  let text = 'Deploy NATS\nother line';
+  app.vault.getMarkdownFiles = () => [file];
+  app.vault.getAbstractFileByPath = (path) => (path === file.path ? file : null);
+  app.metadataCache.getFileCache = () => ({});
+  app.vault.cachedRead = async () => text;
+  plugin.data.settings.hide_orphans = false;
+  const reads = t.mock.method(plugin, 'readNoteLines');
+  const collect = () => Object.getPrototypeOf(plugin).collectGraphData.call(plugin);
+  collect();
+  assert.equal(reads.mock.callCount(), 0, 'no reads without line: queries');
+
+  t.mock.method(plugin, 'scheduleRefreshAllViews', () => {});
+  const matches = (query) =>
+    view.nodeMatchesParsedGroup(collect().nodes[0].meta, plugin.parseGroupQuery(query));
+  assert.equal(matches('line:deploy nats'), false, 'text is not read yet');
+  // The first line: query schedules a refresh; that refresh reads the notes.
+  collect();
+  assert.equal(reads.mock.callCount(), 1);
+  await reads.mock.calls[0].result;
+  assert.deepEqual(collect().nodes[0].meta.lines, ['deploy nats', 'other line']);
+  assert.equal(matches('line:deploy nats'), true);
+  assert.equal(matches('line:deploy other'), false);
+  assert.equal(reads.mock.callCount(), 1, 'unchanged notes are not read again');
+
+  text = 'renamed';
+  file.stat.mtime = 2;
+  collect();
+  assert.equal(reads.mock.callCount(), 2);
+  await reads.mock.calls[1].result;
+  assert.equal(matches('line:renamed'), true);
+});

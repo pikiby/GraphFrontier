@@ -356,6 +356,27 @@ test('filename Enter submits, ignores IME composition and prevents form reload',
   assert.equal(modal.completed, true);
 });
 
+test('folder suggestions put the folder named like the query before deeper path matches', (t) => {
+  const { modal, folder } = setup(t);
+  for (let index = 0; index < 10; index += 1) folder(`airflow/dags/nats_${index}`);
+  folder('airflow');
+  folder('airflow/dags');
+  folder('services');
+  folder('services/nats');
+  folder('nats');
+  folder('nats/streams');
+  folder('natsbox');
+  const suggestions = modal.folderSuggest.getSuggestions('nats');
+  assert.deepEqual(suggestions.slice(0, 5), [
+    'nats',
+    'services/nats',
+    'natsbox',
+    'nats/streams',
+    'airflow/dags/nats_0',
+  ]);
+  assert.equal(suggestions.length, 14);
+});
+
 test('native folder suggestions list real visible folders and select root or nested paths without exporting', (t) => {
   const { modal, folder, file, requests, calls } = setup(t);
   folder('/');
@@ -367,7 +388,7 @@ test('native folder suggestions list real visible folders and select root or nes
   file('not-a-folder.md');
   const suggest = modal.folderSuggest;
   assert.ok(suggest instanceof obsidian.AbstractInputSuggest);
-  assert.equal(suggest.limit, 8);
+  assert.equal(suggest.limit, 50);
   assert.deepEqual(suggest.getSuggestions(''), ['', 'Archive', 'Exports', 'Exports/Graphs']);
   assert.deepEqual(suggest.getSuggestions('EXPORTS\\GR'), ['Exports/Graphs']);
   assert.deepEqual(suggest.getSuggestions('new/nested'), []);

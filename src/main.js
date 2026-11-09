@@ -30,6 +30,7 @@ const {
   ZOOM_STEP_FACTOR,
   DEFAULT_DATA,
   SETTINGS_TABS,
+  LEGACY_SETTINGS_TABS,
   normalizeAttachmentExtensions,
   MIN_ZOOM,
   MAX_ZOOM,
@@ -770,6 +771,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     normalized.settings.include_unlinked_attachments =
       !!normalized.settings.include_unlinked_attachments;
     normalized.settings.existing_files_only = !!normalized.settings.existing_files_only;
+    normalized.settings.show_only_groups = normalized.settings.show_only_groups === true;
     normalized.settings.show_search_connections =
       normalized.settings.show_search_connections === true;
     normalized.settings.search_mode =
@@ -904,14 +906,23 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       nextSidePanelSections[sectionId] = !!rawState;
     }
     normalized.view_state.side_panel_sections = nextSidePanelSections;
-    normalized.view_state.settings_tab = SETTINGS_TABS.includes(viewState.settings_tab)
-      ? viewState.settings_tab
+    const settingsTab = LEGACY_SETTINGS_TABS[viewState.settings_tab] || viewState.settings_tab;
+    normalized.view_state.settings_tab = SETTINGS_TABS.includes(settingsTab)
+      ? settingsTab
       : DEFAULT_DATA.view_state.settings_tab;
     normalized.view_state.camera_saved = viewState.camera_saved === true;
     normalized.view_state.search_query =
       typeof viewState.search_query === 'string' && this.parseGroupQuery(viewState.search_query)
         ? viewState.search_query.slice(0, 4096)
         : 'name:';
+    // Display order of filter rows across blacklist and whitelist; the rules stay as they are.
+    normalized.view_state.filter_order = Array.isArray(viewState.filter_order)
+      ? [
+          ...new Set(
+            viewState.filter_order.filter((id) => typeof id === 'string' && id.length <= 256)
+          ),
+        ]
+      : [];
     normalized.view_state.node_filter = Array.isArray(viewState.node_filter)
       ? [
           ...new Set(
@@ -931,10 +942,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   // Finishes the render model 2 migration once the device pixel ratio is known.
   applyPendingRenderMigration(devicePixelRatio) {
     if (!applyEdgeDprMigration(this.data, devicePixelRatio)) return false;
-    const views = this.isLocalGraphFrontier
-      ? [this.getScopeView?.()]
-      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
-    for (const view of views) if (view) view.layoutAutosaveDirty = true;
+    for (const view of this.getGraphViews()) if (view) view.layoutAutosaveDirty = true;
     this.schedulePersist();
     this.renderAllViews?.();
     return true;
@@ -997,7 +1005,8 @@ module.exports = class GraphFrontierPlugin extends Plugin {
   }
 
   getSettingsTab() {
-    const tab = this.data?.view_state?.settings_tab;
+    const stored = this.data?.view_state?.settings_tab;
+    const tab = LEGACY_SETTINGS_TABS[stored] || stored;
     return SETTINGS_TABS.includes(tab) ? tab : DEFAULT_DATA.view_state.settings_tab;
   }
 
@@ -1061,13 +1070,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       this.data.hotkeys = {};
     }
     this.data.hotkeys[commandId] = normalizedHotkey;
-    this.schedulePersist();
+    this.schedulePersist(250, { layout: false });
   }
 
   clearCommandHotkey(commandId) {
     if (!this.data.hotkeys?.[commandId]) return;
     delete this.data.hotkeys[commandId];
-    this.schedulePersist();
+    this.schedulePersist(250, { layout: false });
   }
 
   isEditableTarget(targetElement) {
@@ -1091,14 +1100,40 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     this.app.commands.executeCommandById(commandId);
   }
 
-  schedulePersist(delayMs = 250) {
+  // Every data change is persisted to data.json. Layout content changes also become unsaved
+  // layout data, which Autosave writes to the active layout; UI preferences pass layout: false.
+  schedulePersist(delayMs = 250, options = {}) {
     if (this.backups?.restoring) return;
+    const clean = !this.hasUnsavedLayoutData();
     this._persistRevision = (this._persistRevision || 0) + 1;
+    if (options.layout === false && clean) this.markLayoutSaved();
     if (this._persistTimer) window.clearTimeout(this._persistTimer);
     const safeDelayMs = this.clampNumber(delayMs, 100, 5000, 250);
     this._persistTimer = window.setTimeout(() => {
       void this.persistPluginDataOnly();
+      this.autosaveLayoutData();
     }, safeDelayMs);
+  }
+
+  hasUnsavedLayoutData() {
+    return (this._persistRevision || 0) !== (this.layoutSavedRevision || 0);
+  }
+
+  // The active layout file now matches the plugin data, after a save or a load.
+  markLayoutSaved(revision = this._persistRevision || 0) {
+    this.layoutSavedRevision = revision;
+  }
+
+  // Settings, colors, groups and rules do not move nodes, so physics never autosaves them;
+  // they are saved here once persisted. A graph that is still moving saves when it settles.
+  autosaveLayoutData() {
+    if (!this.getSettings().layout_autosave || !this.hasUnsavedLayoutData()) return;
+    const view = this.getGraphViews().find(
+      (entry) => entry?.isOpen && !entry.subgraphScope && entry.graphDataRef === this.data
+    );
+    if (!view) return;
+    view.layoutAutosaveDirty = true;
+    if (view.layoutPaused && !view.dragNodeId) void view.saveCurrentLayout({ silent: true });
   }
 
   getLayoutsFolderRelativePath() {
@@ -1286,6 +1321,32 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       activeLayoutName: this.getActiveLayoutFileName(),
       activeChanged: true,
     };
+  }
+
+  // Renames a layout file; the active layout keeps being active under its new name.
+  async renameLayoutFile(layoutFileName, nextName) {
+    return this.runLayoutFileOperation(async () => {
+      const from = this.normalizeLayoutFileName(layoutFileName);
+      const to = this.normalizeLayoutFileName(nextName);
+      if (from === to) return { ok: true, layoutName: to };
+      const names = await this.listLayoutFileNames();
+      if (!names.includes(from)) return { ok: false, reason: 'not-found' };
+      if (names.includes(to)) return { ok: false, reason: 'exists', layoutName: to };
+      try {
+        await this.app.vault.adapter.rename(
+          this.getLayoutFileRelativePath(from),
+          this.getLayoutFileRelativePath(to)
+        );
+      } catch {
+        return { ok: false, reason: 'rename-failed' };
+      }
+      if (this.getActiveLayoutFileName() === from) {
+        this.data.active_layout_name = to;
+        await this.persistPluginDataOnly();
+      }
+      this.backups?.schedule();
+      return { ok: true, layoutName: to };
+    });
   }
 
   async persistPluginDataOnly() {
@@ -1540,12 +1601,23 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     return !!this.getGroupVisualSettings(nodeId)?.strong_pull;
   }
 
+  // Graph views this plugin owns: every main pane, or the one local graph pane.
+  getGraphViews() {
+    return this.isLocalGraphFrontier
+      ? [this.getScopeView?.()]
+      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
+  }
+
+  // Filter rules changed: every view recomputes which nodes are visible.
+  markQueryRulesDirty() {
+    const views = this.getGraphViews();
+    for (const view of views) view?.markQueryRuleVisibilityDirty?.();
+    return views;
+  }
+
   // Force multipliers change link forces, so settled layouts must re-settle.
   kickPhysicsViews(nodeId) {
-    const views = this.isLocalGraphFrontier
-      ? [this.getScopeView()]
-      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
-    for (const view of views) {
+    for (const view of this.getGraphViews()) {
       if (!view?.nodeById?.has(nodeId)) continue;
       const visible = view.getPhysicsVisibleNodeIds?.() ?? view.getFilterVisibleNodeIds?.();
       if (visible instanceof Set && !visible.has(nodeId)) continue;
@@ -1697,6 +1769,9 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         view.groupColorCache = null;
         view.appearanceCache = null;
         view.markQueryRuleVisibilityDirty();
+        view.nodeListsTab?.render();
+        view.queryRuleCountsKey = '';
+        view.refreshQueryRuleCounts?.();
         const query = view.searchInputEl?.value ?? view.searchInputValue;
         if (view.parseSearchQuery(query).source === 'list') view.syncSearchMatchesLive();
         if (
@@ -1752,22 +1827,18 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         });
       }
     }
-    const hiddenRules = (groups) =>
-      JSON.stringify(groups.filter((group) => group.hidden).map((group) => group.query));
-    const previousHidden = hiddenRules(this.data.groups);
+    // Hidden groups filter nodes, and with Show only groups every group query does.
+    const visibilityRules = (groups) =>
+      JSON.stringify(
+        groups
+          .filter((group) => group.hidden || this.getSettings().show_only_groups)
+          .map((group) => [group.query, group.hidden, group.enabled])
+      );
+    const previousVisibility = visibilityRules(this.data.groups);
     this.data.groups = normalizedGroups;
-    if (previousHidden !== hiddenRules(normalizedGroups)) {
-      const views = this.isLocalGraphFrontier
-        ? [this.getScopeView()]
-        : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
-      for (const view of views) view?.markQueryRuleVisibilityDirty?.();
-    }
-    if (previousPull !== pullRules(normalizedGroups)) {
-      const views = this.isLocalGraphFrontier
-        ? [this.getScopeView()]
-        : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
-      for (const view of views) view?.kickLayoutSearch();
-    }
+    if (previousVisibility !== visibilityRules(normalizedGroups)) this.markQueryRulesDirty();
+    if (previousPull !== pullRules(normalizedGroups))
+      for (const view of this.getGraphViews()) view?.kickLayoutSearch();
     this.schedulePersist();
     this.renderAllViews();
   }
@@ -1777,13 +1848,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const next = mode === 'hide' ? 'hide' : 'exclude';
     if (this.data.settings.group_hide_mode === next) return;
     this.data.settings.group_hide_mode = next;
-    const views = this.isLocalGraphFrontier
-      ? [this.getScopeView()]
-      : this.app.workspace.getLeavesOfType(GRAPHFRONTIER_VIEW_TYPE).map((leaf) => leaf.view);
-    for (const view of views) {
-      view?.markQueryRuleVisibilityDirty?.();
-      view?.syncGroupHideModeToggleUi?.();
-    }
+    for (const view of this.markQueryRulesDirty()) view?.syncGroupHideModeToggleUi?.();
     this.schedulePersist();
     this.renderAllViews();
   }
@@ -1878,7 +1943,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       addSuggestions(index.paths, 'path:');
       addSuggestions(index.files, 'file:');
       addSuggestions(index.sections, 'section:');
-      addSuggestions(index.lines, 'line:');
       for (const key of Array.from(index.properties.keys()).sort((a, b) => a.localeCompare(b))) {
         addSuggestions(index.properties.get(key) || new Set(), `[${key}]:`);
       }
@@ -1889,7 +1953,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     if (parsed.type === 'path') addSuggestions(index.paths, 'path:');
     if (parsed.type === 'file') addSuggestions(index.files, 'file:');
     if (parsed.type === 'section') addSuggestions(index.sections, 'section:');
-    if (parsed.type === 'line') addSuggestions(index.lines, 'line:');
     if (parsed.type === 'property') {
       const key = parsed.propertyKey || '';
       const options = index.properties.get(key) || new Set();
@@ -1937,7 +2000,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     if (cleanType === 'tag') items = Array.from(index.tags);
     else if (cleanType === 'path') items = Array.from(index.paths);
     else if (cleanType === 'file') items = Array.from(index.files);
-    else if (cleanType === 'line') items = Array.from(index.lines);
     else if (cleanType === 'section') items = Array.from(index.sections);
     else if (cleanType === 'property') {
       const cleanKey = String(propertyKey || '')
@@ -1965,7 +2027,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       paths: new Set(),
       files: new Set(),
       sections: new Set(),
-      lines: new Set(),
       properties: new Map(),
     };
 
@@ -1975,7 +2036,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       index.files.add(file.basename);
       for (const tag of meta.tags) index.tags.add(tag);
       for (const section of meta.sections) index.sections.add(section);
-      for (const line of meta.lines) index.lines.add(String(line));
       for (const [key, values] of meta.properties.entries()) {
         if (!index.properties.has(key)) index.properties.set(key, new Set());
         const bucket = index.properties.get(key);
@@ -2016,6 +2076,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     }
     meta.isAttachment = false;
     meta.fileType = 'md';
+    meta.lines = this.noteLines?.get(path)?.lines || [];
 
     const cache = this.app.metadataCache.getFileCache(file) || {};
     const tags = new Set();
@@ -2048,14 +2109,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         if (typeof heading.heading === 'string' && heading.heading.trim()) {
           meta.sections.push(heading.heading.trim());
         }
-        const line = Number(heading?.position?.start?.line);
-        if (Number.isFinite(line)) meta.lines.push(String(line + 1));
-      }
-    }
-    if (Array.isArray(cache.sections)) {
-      for (const section of cache.sections) {
-        const line = Number(section?.position?.start?.line);
-        if (Number.isFinite(line)) meta.lines.push(String(line + 1));
       }
     }
 
@@ -2077,8 +2130,6 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       }
     }
 
-    const uniqueLines = new Set(meta.lines);
-    meta.lines = Array.from(uniqueLines);
     return meta;
   }
 
@@ -2091,6 +2142,40 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       counts.set(extension, (counts.get(extension) || 0) + 1);
     }
     return [...counts].sort(([a], [b]) => a.localeCompare(b));
+  }
+
+  // Note text for `line:` queries is read only after one is first used; a note is read again
+  // when its modification time changes, and the graph refreshes once the text is in.
+  requestNoteLines() {
+    if (this.noteLinesWanted) return;
+    this.noteLinesWanted = true;
+    this.noteLines = new Map();
+    this.scheduleRefreshAllViews({ passive: true });
+  }
+
+  async readNoteLines(files) {
+    if (this.noteLinesReading) return;
+    this.noteLinesReading = true;
+    try {
+      for (const file of files) {
+        let text = '';
+        try {
+          text = await this.app.vault.cachedRead(file);
+        } catch {
+          // An unreadable note simply has no lines to match.
+        }
+        this.noteLines.set(file.path, {
+          mtime: file.stat?.mtime,
+          lines: String(text || '')
+            .toLowerCase()
+            .split(/\r?\n/),
+        });
+      }
+    } finally {
+      this.noteLinesReading = false;
+    }
+    // The refresh also picks up notes that changed while these were read.
+    this.scheduleRefreshAllViews({ passive: true });
   }
 
   // Graph-data builder: assemble nodes/edges from markdown, links, and filter settings.
@@ -2107,13 +2192,21 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const markdownSet = new Set();
     const nodeMap = new Map();
 
+    const staleNotes = [];
     for (const file of markdownFiles) {
       markdownSet.add(file.path);
+      if (this.noteLinesWanted && this.noteLines.get(file.path)?.mtime !== file.stat?.mtime)
+        staleNotes.push(file);
       nodeMap.set(file.path, {
         id: file.path,
         label: file.basename,
         meta: this.buildNodeMetaByPath(file.path, file, { isAttachment: false }),
       });
+    }
+    if (this.noteLinesWanted) {
+      for (const path of this.noteLines.keys())
+        if (!markdownSet.has(path)) this.noteLines.delete(path);
+      if (staleNotes.length) this.readNoteLines(staleNotes);
     }
 
     const addNodeIfMissing = (nodeId, label, options = {}) => {
@@ -2139,8 +2232,13 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const edges = [];
     const touchedNodeIds = new Set();
     const resolved = this.app.metadataCache.resolvedLinks || {};
+    // Links to missing files are kept apart, keyed by link text, as in the core graph.
+    const unresolved = existingFilesOnly ? {} : this.app.metadataCache.unresolvedLinks || {};
 
-    for (const [sourcePath, targets] of Object.entries(resolved)) {
+    for (const [sourcePath, targets] of [
+      ...Object.entries(resolved),
+      ...Object.entries(unresolved),
+    ]) {
       if (!markdownSet.has(sourcePath)) continue;
       if (!targets || typeof targets !== 'object') continue;
 

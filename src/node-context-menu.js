@@ -1,5 +1,5 @@
 const { Menu, Notice } = require('obsidian');
-const { addNoteTargetActions } = require('./note-navigation');
+const { addNoteTargetActions, editNoteTarget, NOTE_TARGET_HINT } = require('./note-navigation');
 
 function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   const { app, plugin } = view;
@@ -56,13 +56,9 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
     });
   };
   if (!only && snapshot.ids.length > 1) {
+    view.addCombineSubgraphItem(menu, snapshot);
+    view.addRemoveFromSubgraphItem(menu, snapshot);
     view.addSelectionActionsToMenu(menu, snapshot, clientX, clientY);
-    menu.addItem((item) =>
-      item
-        .setTitle(view.nodeActionLabel('Combine selected into subgraph', snapshot))
-        .setIcon('circle')
-        .onClick(() => view.editSubgraph(null, snapshot))
-    );
     addToList();
     view.addContextSubmenuItem(menu, {
       title: `Only for ${view.getLinkedNodeDisplayName(node)}`,
@@ -157,14 +153,6 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   }
   add(
     menu,
-    'Combine selected into subgraph',
-    'circle',
-    () => view.editSubgraph(null, snapshot),
-    !only && view.selectedNodeIds.has(node.id) && snapshot.ids.length > 0
-  );
-
-  add(
-    menu,
     'Copy system root',
     'hard-drive',
     () => view.copySelectedNodes('systemPaths', snapshot),
@@ -197,11 +185,31 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   if (isFile) menu.addSeparator();
 
   const properties = isFile ? app.metadataCache.getFileCache(file)?.frontmatter : null;
+  // YAML url/path targets open from here; Edit and Add go to the YAML line in the note.
+  const canEditYaml = isFile && file.extension === 'md' && !!app.fileManager?.processFrontMatter;
+  const editTarget = (key) => editNoteTarget(app, file, key);
   for (const key of ['path', 'url'])
     addNoteTargetActions(menu, app, key, properties?.[key], view.contentEl.win, {
       add: (target, title, icon, callback) => add(target, title, icon, callback, true, false),
       submenu,
+      edit: canEditYaml ? () => editTarget(key) : null,
     });
+  const missing = [
+    ['url', 'URL', 'external-link'],
+    ['path', 'Folder path', 'folder-open'],
+  ].filter(([key]) => properties?.[key] == null);
+  submenu(
+    'Add URL or path',
+    'plus',
+    (target) => {
+      for (const [key, title, icon] of missing)
+        add(target, title, icon, () => editTarget(key))?.dom?.setAttribute(
+          'title',
+          NOTE_TARGET_HINT
+        );
+    },
+    canEditYaml && !only && missing.length > 0
+  );
   submenu(
     'Open',
     'folder-open',
@@ -284,16 +292,11 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   );
   menu.addSeparator();
 
-  submenu(
-    only ? 'Advanced visual settings' : 'Visual settings',
-    'settings-2',
-    (target) => {
-      view.addVisualSettingsToMenu(target, node, clientX, clientY, singleSnapshot, {
-        advancedOnly: only,
-      });
-    },
-    !only || !node.meta?.darkEnergy
-  );
+  if (!only)
+    submenu('Visual settings', 'settings-2', (target) =>
+      view.addVisualSettingsToMenu(target, node, clientX, clientY, singleSnapshot)
+    );
+  view.addStrongPullSliderToMenu(menu, singleSnapshot);
   if (node.meta?.darkEnergy) return menu;
   menu.addSeparator();
 
@@ -304,7 +307,16 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
     () => view.selectLinkedNodes(node.id),
     hasLinked
   );
-  nativeAction(menu, 'Bookmark', 'bookmark', /bookmark/i);
+  // The note and its direct links become one subgraph.
+  if (hasLinked && !only && !node.meta?.subgraph)
+    view.addCombineSubgraphItem(
+      menu,
+      { ...singleSnapshot, ids: [node.id, ...linkedIds] },
+      'Combine linked'
+    );
+  if (!only) view.addRemoveFromSubgraphItem(menu, singleSnapshot);
+  // Bookmark lives in Other only.
+  menu.addSeparator();
   addToList();
   submenu('Other', 'ellipsis', (target) => {
     nativeAction(target, 'Move file to', 'folder-input', /move file to/i);

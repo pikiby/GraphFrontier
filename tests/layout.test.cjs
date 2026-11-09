@@ -24,7 +24,7 @@ function settingsPanelFixture(t, data = {}) {
     'buildFindSection',
     'buildGroupEditorSection',
     'buildQueryRuleEditorSection',
-    'addLayoutFileSearchRow',
+    'buildLayoutList',
     'addSideSaveLayoutButton',
     'buildAttachmentFileTypesControl',
   ]) {
@@ -34,6 +34,17 @@ function settingsPanelFixture(t, data = {}) {
   view.buildSidePanel();
   return { ...f, builders };
 }
+
+test('a side panel rebuild, such as a layout switch, keeps the panel scrolled where it was', (t) => {
+  const { view } = settingsPanelFixture(t);
+  view.sidePanelEl.empty = function () {
+    this.children.length = 0;
+    this.scrollTop = 0;
+  };
+  view.sidePanelEl.scrollTop = 400;
+  view.buildSidePanel();
+  assert.equal(view.sidePanelEl.scrollTop, 400);
+});
 
 test('sidebar order is Search, Settings tabs, Layout and each existing builder is reused once', (t) => {
   const { view, builders } = settingsPanelFixture(t, {
@@ -50,7 +61,7 @@ test('sidebar order is Search, Settings tabs, Layout and each existing builder i
   const tabs = [...view.settingsTabs];
   assert.deepEqual(
     tabs.map(([id]) => id),
-    ['groups', 'display', 'physics', 'selection']
+    ['groups', 'display', 'physics', 'sets']
   );
   const settings = sections[1].children[1];
   assert.equal(settings.children[0].attributes.role, 'tablist');
@@ -60,17 +71,16 @@ test('sidebar order is Search, Settings tabs, Layout and each existing builder i
   );
   const groups = view.settingsTabs.get('groups').panel;
   const display = view.settingsTabs.get('display').panel;
-  assert.equal(builders.buildGroupEditorSection.mock.calls[0].arguments[0], groups);
+  const groupList = groups.children.find((child) => child.children[0]?.text === 'Groups')
+    .children[1];
+  assert.equal(builders.buildGroupEditorSection.mock.calls[0].arguments[0], groupList);
   assert.equal(builders.buildGroupEditorSection.mock.callCount(), 1);
+  // One Filters editor (Exclude/Include only) sits in the Filters subgroup of the Groups tab.
+  const filters = groups.children.find((child) => child.children[0]?.text === 'Filters')
+    .children[1];
   assert.deepEqual(
-    builders.buildQueryRuleEditorSection.mock.calls.map((call) => [
-      call.arguments[0],
-      call.arguments[1].key,
-    ]),
-    [
-      [groups, 'blacklist'],
-      [groups, 'whitelist'],
-    ]
+    builders.buildQueryRuleEditorSection.mock.calls.map((call) => call.arguments[0]),
+    [filters.children[0]]
   );
   assert.equal(builders.buildFindSection.mock.calls[0].arguments[0], sections[0].children[1]);
   assert.equal(
@@ -88,17 +98,43 @@ test('sidebar order is Search, Settings tabs, Layout and each existing builder i
     'grid_color',
     'grid_opacity',
     'grid_line_width',
-    'hide_attachments',
-    'include_unlinked_attachments',
   ])
     assert(controls.includes(view.sideControls.get(key).input), `${key} stays in Display`);
+  // Groups holds the group editor and the Filters subgroup; file filters follow the rules.
+  assert.deepEqual(
+    view.settingsTabs.get('sets').panel.children.map((child) => child.children[0].text),
+    ['Selection', 'Custom lists'],
+    'Sets subgroups collapse like those of Groups'
+  );
+  // Groups and Filters are collapsible subgroups; there is no separate Attachments subgroup.
+  const [groupSection, filtersSection] = groups.children;
+  assert.equal(groups.children.length, 2);
+  assert.equal(groupSection.children[0].text, 'Groups');
+  assert.equal(filtersSection.children[0].text, 'Filters');
+  const [rulesGroup, fileFilters] = filters.children;
+  assert.equal(rulesGroup.cls, 'graphfrontier-sidepanel-group', 'divider as in Display');
+  assert.equal(fileFilters.cls, 'graphfrontier-sidepanel-group');
+  assert.equal(rulesGroup.children[0].text, 'buildQueryRuleEditorSection');
+  for (const key of [
+    'show_only_groups',
+    'existing_files_only',
+    'hide_orphans',
+    'hide_attachments',
+    'include_unlinked_attachments',
+    'attachment_node_color',
+  ])
+    assert(
+      descendants(fileFilters).includes(view.sideControls.get(key).input),
+      `${key} in Filters`
+    );
+  assert.equal(builders.buildAttachmentFileTypesControl.mock.calls[0].arguments[0], fileFilters);
   assert(
     descendants(view.settingsTabs.get('physics').panel).includes(
       view.sideControls.get('repel_strength').input
     )
   );
   assert(
-    descendants(view.settingsTabs.get('selection').panel).includes(
+    descendants(view.settingsTabs.get('sets').panel).includes(
       view.sideControls.get('selection_box_modifier').input
     )
   );
@@ -126,12 +162,12 @@ test('Settings tabs are accessible, compact, persist through rebuild and never w
   assert.equal(groups.panel.hidden, true);
   assert.equal(persist.mock.callCount(), 1);
   view.settingsTabs.get('display').button.events.keydown(key('End'));
-  assert.equal(plugin.getSettingsTab(), 'selection');
-  view.settingsTabs.get('selection').button.events.keydown(key('ArrowRight'));
+  assert.equal(plugin.getSettingsTab(), 'sets');
+  view.settingsTabs.get('sets').button.events.keydown(key('ArrowRight'));
   assert.equal(plugin.getSettingsTab(), 'groups');
   view.settingsTabs.get('groups').button.events.keydown(key('ArrowLeft'));
-  assert.equal(plugin.getSettingsTab(), 'selection');
-  view.settingsTabs.get('selection').button.events.keydown(key('Home'));
+  assert.equal(plugin.getSettingsTab(), 'sets');
+  view.settingsTabs.get('sets').button.events.keydown(key('Home'));
   assert.equal(plugin.getSettingsTab(), 'groups');
   view.settingsTabs.get('physics').button.events.click();
   const calls = persist.mock.callCount();
@@ -885,6 +921,96 @@ test('overlapping saves serialize and the later snapshot includes newer coordina
   assert.equal(view.layoutAutosaveDirty, false);
 });
 
+test('Autosave writes settings changes without node movement, and UI preferences do not', async (t) => {
+  const { plugin, view, writes, flushTimers } = fixture(t);
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  Object.assign(view, { isOpen: true, graphDataRef: plugin.data, layoutPaused: true });
+  const change = async (persist) => {
+    const before = writes.length;
+    persist();
+    flushTimers();
+    await settle();
+    flushTimers();
+    await settle();
+    return writes.slice(before).map((write) => JSON.parse(write.contents));
+  };
+
+  plugin.data.settings.layout_autosave = false;
+  assert.deepEqual(
+    await change(() => {
+      plugin.data.settings.node_color = '#111111';
+      plugin.schedulePersist();
+    }),
+    [],
+    'without Autosave only data.json is written'
+  );
+
+  plugin.data.settings.layout_autosave = true;
+  plugin.markLayoutSaved();
+  const saved = await change(() => {
+    plugin.data.settings.node_color = '#222222';
+    plugin.schedulePersist();
+  });
+  assert.equal(saved.length, 1, 'one save, and the save itself does not trigger another');
+  assert.equal(saved[0].settings.node_color, '#222222');
+  assert.equal(plugin.hasUnsavedLayoutData(), false);
+
+  assert.deepEqual(
+    await change(() => view.selectSettingsTab('display')),
+    [],
+    'switching a settings tab is not a layout change'
+  );
+});
+
+test('switching layouts from the list keeps the camera; Load layout restores the saved one', async (t) => {
+  const { view, putLayout } = fixture(t);
+  const savedCamera = { camera_saved: true, pan_x: 500, pan_y: 600, zoom: 3 };
+  putLayout({ view_state: savedCamera });
+  putLayout({ view_state: savedCamera }, 'next.json');
+  view.camera = { x: 1, y: 2, zoom: 1.5 };
+  view.cameraTarget = { ...view.camera };
+  assert.equal(await view.selectActiveLayoutFileByName('next.json'), true);
+  assert.deepEqual(view.cameraTarget, { x: 1, y: 2, zoom: 1.5 });
+  assert.equal(await view.loadSavedLayout({ silent: true }), true);
+  assert.deepEqual(view.cameraTarget, { x: 500, y: 600, zoom: 3 });
+});
+
+test('a settings change made just before a switch is saved to the layout it belongs to', async (t) => {
+  const { plugin, view, putLayout, files, layoutPath } = fixture(t);
+  putLayout({ settings: { node_color: '#000000' } });
+  putLayout({ settings: { node_color: '#999999' } }, 'next.json');
+  plugin.data.settings.layout_autosave = true;
+  plugin.markLayoutSaved();
+  plugin.data.settings.node_color = '#123456';
+  plugin.schedulePersist();
+  assert.equal(await view.selectActiveLayoutFileByName('next.json'), true);
+  const saved = JSON.parse(files.get(layoutPath('data.json')));
+  assert.equal(saved.settings.node_color, '#123456');
+  assert.equal(plugin.getSettings().node_color, '#999999');
+  assert.equal(plugin.hasUnsavedLayoutData(), false, 'a loaded layout starts saved');
+});
+
+test('switching layouts autosaves pending changes of the current layout first', async (t) => {
+  const { plugin, view, putLayout, files, layoutPath } = fixture(t);
+  putLayout({ saved_positions: {} });
+  putLayout({ saved_positions: { 'alpha.md': { x: -70, y: -80 } } }, 'next.json');
+  const saved = () => JSON.parse(files.get(layoutPath('data.json')) || '{}').saved_positions;
+  view.nodeById.get('alpha.md').x = 123;
+  view.layoutAutosaveDirty = true;
+  plugin.data.settings.layout_autosave = false;
+  assert.equal(await view.selectActiveLayoutFileByName('next.json'), true);
+  assert.equal(saved()?.['alpha.md'], undefined, 'without Autosave nothing is written');
+  assert.equal(await view.selectActiveLayoutFileByName('data.json'), true);
+
+  plugin.data.settings.layout_autosave = true;
+  view.nodeById.get('alpha.md').x = 456;
+  view.layoutAutosaveDirty = true;
+  assert.equal(await view.selectActiveLayoutFileByName('next.json'), true);
+  assert.equal(saved()['alpha.md'].x, 456);
+  assert.equal(plugin.getActiveLayoutFileName(), 'next.json');
+  assert.equal(view.nodeById.get('alpha.md').x, -70);
+});
+
 test('switch waits for an older save and cannot receive its saved snapshots', async (t) => {
   const { plugin, view, adapter, putLayout, writes } = fixture(t);
   putLayout({ saved_positions: { 'alpha.md': { x: -70, y: -80 } }, groups: [] }, 'next.json');
@@ -961,32 +1087,18 @@ test('save requested during switch preferences persistence cannot capture old vi
   assert.equal(view.nodeById.get('alpha.md').x, -70);
 });
 
-test('Save-As UI preserves active name on failure and changes it only after successful write', async (t) => {
-  const { plugin, view, adapter, files, layoutPath } = fixture(t);
+test('Save layout button saves to the active layout and Load layout is gone', async (t) => {
+  const { plugin, view, files, layoutPath } = fixture(t);
   const parent = element();
   view.addSideSaveLayoutButton(parent);
-  const row = parent.children[0].children[0];
-  const saveButton = row.children[1].children[0];
-  assert.equal(saveButton.text, 'Save layout');
-  view.layoutFileSearchInputValue = 'new layout';
-  const write = t.mock.method(adapter, 'write', async () => {
-    throw new Error('Disk full');
-  });
-  await saveButton.events.click();
+  const buttons = parent.children[0].children[0].children[1].children;
+  assert.deepEqual(
+    buttons.map((button) => button.text),
+    ['Save layout', 'Export to']
+  );
+  await buttons[0].events.click();
   assert.equal(plugin.getActiveLayoutFileName(), 'data.json');
-  assert.deepEqual(plugin.data.saved_positions, {});
-  assert.equal(view.layoutAutosaveDirty, true);
-  assert.equal(files.has(layoutPath('new layout.json')), false);
-  write.mock.restore();
-  const gate = holdWrite(t, adapter);
-  const saving = saveButton.events.click();
-  await gate.entered;
-  assert.equal(plugin.getActiveLayoutFileName(), 'data.json');
-  gate.release();
-  await saving;
-  assert.equal(plugin.getActiveLayoutFileName(), 'new layout.json');
-  assert.equal(files.has(layoutPath('new layout.json')), true);
-  assert.equal(view.layoutAutosaveDirty, false);
+  assert.equal(files.has(layoutPath('data.json')), true);
 });
 
 test('nonempty search still forbids save without mutating layout state', async (t) => {
@@ -1575,6 +1687,39 @@ test('unlinked attachments require both flags and remain subject to orphan filte
   }
 });
 
+test('Existing files only hides links to missing notes and attachments', (t) => {
+  const { plugin, app } = fixture(t);
+  const files = [{ path: 'alpha.md', basename: 'alpha', extension: 'md' }];
+  app.vault.getMarkdownFiles = () => files;
+  app.vault.getAbstractFileByPath = (path) => files.find((file) => file.path === path);
+  app.metadataCache.getFileCache = () => ({});
+  app.metadataCache.resolvedLinks = { 'alpha.md': {} };
+  app.metadataCache.unresolvedLinks = { 'alpha.md': { 'Missing note': 1, 'missing.png': 1 } };
+  const collect = () => Object.getPrototypeOf(plugin).collectGraphData.call(plugin);
+  Object.assign(plugin.data.settings, { hide_attachments: false, hide_orphans: false });
+
+  plugin.data.settings.existing_files_only = true;
+  assert.deepEqual(
+    collect().nodes.map((node) => node.id),
+    ['alpha.md']
+  );
+
+  plugin.data.settings.existing_files_only = false;
+  const graph = collect();
+  assert.deepEqual(
+    graph.nodes.map((node) => [node.id, node.label, node.meta.isAttachment]),
+    [
+      ['alpha.md', 'alpha', false],
+      ['Missing note', 'Missing note', false],
+      ['missing.png', 'missing.png', true],
+    ]
+  );
+  assert.deepEqual(graph.edges, [
+    { source: 'alpha.md', target: 'Missing note' },
+    { source: 'alpha.md', target: 'missing.png' },
+  ]);
+});
+
 test('include unlinked attachments defaults off, normalizes and round-trips per layout', async (t) => {
   const { plugin, view, writes, putLayout } = fixture(t);
   assert.equal(plugin.data.settings.include_unlinked_attachments, false);
@@ -1612,7 +1757,7 @@ test('unlinked attachment UI toggle follows Show attachments and uses normal dat
     'addSideSlider',
     'buildGroupEditorSection',
     'buildQueryRuleEditorSection',
-    'addLayoutFileSearchRow',
+    'buildLayoutList',
     'addSideSaveLayoutButton',
     'syncSidePanelControls',
   ])
@@ -1817,4 +1962,199 @@ test('two saved layouts restore independent attachment visibility and exclusions
     assert.equal(plugin.data.settings.include_unlinked_attachments, unlinked);
     assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, excluded);
   }
+});
+
+test('a stored Selection tab opens as Sets', (t) => {
+  const { plugin } = fixture(t, { view_state: { settings_tab: 'selection' } });
+  assert.equal(plugin.data.view_state.settings_tab, 'sets');
+  plugin.data.view_state.settings_tab = 'selection';
+  assert.equal(plugin.getSettingsTab(), 'sets');
+});
+
+test('group and rule editors never keep more than one empty row', (t) => {
+  const { view } = fixture(t);
+  const focused = { value: '' };
+  view.contentEl.ownerDocument = { activeElement: focused };
+  const row = (value, input = { value }) => ({ queryInput: input, row: { remove() {} } });
+  const label = (rows) =>
+    rows.map((rowState) =>
+      rowState.queryInput === focused ? 'focused' : rowState.queryInput.value
+    );
+  const isEmpty = (rowState) => !rowState.queryInput.value;
+  // A cleared row being edited replaces the trailing empty row.
+  const rows = [row('tag:a'), row(''), row('', focused), row('tag:b'), row(''), row('')];
+  view.removeExtraEmptyRows(rows, isEmpty);
+  assert.deepEqual(label(rows), ['tag:a', 'focused', 'tag:b']);
+  // Without an edited empty row only the last one stays.
+  view.contentEl.ownerDocument = { activeElement: null };
+  const unfocused = [row('tag:a'), row(''), row('tag:b'), row(''), row('')];
+  view.removeExtraEmptyRows(unfocused, isEmpty);
+  assert.deepEqual(label(unfocused), ['tag:a', 'tag:b', '']);
+});
+
+test('group buttons stay hidden while the query text changes', (t) => {
+  const { view, plugin } = fixture(t, { groups: [] });
+  view.getGroupQuerySuggestions = () => ({ items: [] });
+  view.contentEl.win.setTimeout = () => {};
+  view.buildGroupEditorSection(element());
+  const [row] = view.groupEditorRows;
+  assert.equal(row.queryInput.placeholder, 'Enter group...');
+  row.queryInput.value = 'tag:alpha';
+  row.queryInput.events.input();
+  assert.equal(plugin.data.groups[0].query, 'tag:alpha');
+  assert.equal(row.button.style.display, 'none');
+  assert.equal(row.visibilityBtn.style.display, 'none');
+  row.queryInput.events.blur();
+  assert.equal(row.button.style.display, '');
+  assert.equal(row.visibilityBtn.style.display, '');
+  assert.equal(row.row.draggable, true);
+});
+
+test('Show only groups hides ungrouped notes, combines with Include only and follows group edits', (t) => {
+  const { view, plugin } = fixture(t, {
+    groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
+    whitelist: [{ id: 'w', query: 'name:a', enabled: true }],
+  });
+  view.nodes = ['alpha', 'beta', 'gamma'].map((name) => ({
+    id: `${name}.md`,
+    label: name,
+    meta: { path: `${name}.md`, fileName: name },
+  }));
+  view.nodeMetaById = new Map(view.nodes.map((node) => [node.id, node.meta]));
+  const visible = () => {
+    view.markQueryRuleVisibilityDirty();
+    return [...(view.getQueryRuleVisibleNodeIds() || ['all'])];
+  };
+  assert.deepEqual(visible(), ['alpha.md', 'beta.md', 'gamma.md'], 'Include only name:a');
+  plugin.data.settings.show_only_groups = true;
+  assert.deepEqual(visible(), ['alpha.md'], 'must match Include only and a group');
+  plugin.updateWhitelist([]);
+  plugin.updateGroups([...plugin.data.groups, { query: 'name:gamma', color: '#654321' }]);
+  assert.deepEqual(view.getQueryRuleVisibleNodeIds() && [...view.getQueryRuleVisibleNodeIds()], [
+    'alpha.md',
+    'gamma.md',
+  ]);
+  plugin.updateGroups([]);
+  assert.deepEqual(visible(), ['all'], 'no groups, no effect');
+  plugin.data.settings.show_only_groups = false;
+  assert.equal(plugin.normalizeData(plugin.data).settings.show_only_groups, false);
+  assert.equal(
+    plugin.normalizeData({ settings: { show_only_groups: true } }).settings.show_only_groups,
+    true
+  );
+});
+
+test('dragging a filter keeps its order across Exclude and Include only rules', (t) => {
+  const { view, plugin } = fixture(t, {
+    blacklist: [{ id: 'b1', query: 'name:alpha', enabled: true }],
+    whitelist: [{ id: 'w1', query: 'name:beta', enabled: true }],
+  });
+  const build = () => {
+    const parent = element();
+    view.buildQueryRuleEditorSection(parent);
+    parent.children[0].insertBefore = () => {};
+    return view.queryRuleEditorRows;
+  };
+  const rows = build();
+  const event = { preventDefault() {} };
+  rows[1].row.events.dragstart(event);
+  rows[0].row.events.drop(event);
+  assert.deepEqual(plugin.data.view_state.filter_order, ['w1', 'b1']);
+  assert.deepEqual(
+    plugin.data.blacklist.map((rule) => rule.query),
+    ['name:alpha']
+  );
+  assert.deepEqual(
+    plugin.data.whitelist.map((rule) => rule.query),
+    ['name:beta']
+  );
+  assert.deepEqual(
+    build().map((row) => [row.mode, row.queryInput.value]),
+    [
+      ['whitelist', 'name:beta'],
+      ['blacklist', 'name:alpha'],
+      ['blacklist', ''],
+    ]
+  );
+  assert.deepEqual(plugin.normalizeData(plugin.data).view_state.filter_order, ['w1', 'b1']);
+});
+
+test('Filters edit blacklist and whitelist as one list with modes and a hidden total', (t) => {
+  const { view, plugin } = fixture(t, {
+    blacklist: [{ id: 'b1', query: 'name:alpha', enabled: true }],
+    whitelist: [{ id: 'w1', query: 'name:beta', enabled: true }],
+  });
+  view.nodes = [
+    { id: 'alpha.md', label: 'alpha', meta: { path: 'alpha.md', fileName: 'alpha' } },
+    { id: 'beta.md', label: 'beta', meta: { path: 'beta.md', fileName: 'beta' } },
+    { id: 'gamma.md', label: 'gamma', meta: { path: 'gamma.md', fileName: 'gamma' } },
+  ];
+  view.nodeMetaById = new Map(view.nodes.map((node) => [node.id, node.meta]));
+  const parent = element();
+  view.buildQueryRuleEditorSection(parent);
+  const rows = view.queryRuleEditorRows;
+  assert.deepEqual(
+    rows.map((row) => [row.mode, row.queryInput.value]),
+    [
+      ['blacklist', 'name:alpha'],
+      ['whitelist', 'name:beta'],
+      ['blacklist', ''],
+    ]
+  );
+  assert.equal(view.queryRuleSummaryEl.text, 'Filters hide 2 of 3 notes');
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  let menu;
+  obsidian.Menu.prototype.showAtMouseEvent = function () {
+    menu = this;
+  };
+  t.after(() => delete obsidian.Menu.prototype.showAtMouseEvent);
+  const openMenu = (rowState) => {
+    rowState.button.getBoundingClientRect = () => ({ left: 0, bottom: 0 });
+    rowState.button.events.click({ preventDefault() {} });
+    return menu;
+  };
+  const modeMenu = openMenu(rows[0]);
+  assert.deepEqual(
+    modeMenu.items.map((item) => item.title || '-'),
+    ['Mode', '-', 'Delete rule']
+  );
+  const all = (el) => [el, ...el.children.flatMap(all)];
+  const toggle = all(modeMenu.items[0].dom).find((el) => el.attr?.role === 'switch');
+  assert.equal(modeMenu.items[0].icon, 'minus-circle');
+  assert.equal(toggle.attributes['aria-checked'], 'false');
+  toggle.events.click();
+  assert.equal(modeMenu.items[0].icon, 'check-circle');
+  assert.equal(toggle.attributes['aria-checked'], 'true');
+  assert.deepEqual(
+    plugin.data.blacklist.map((rule) => rule.query),
+    []
+  );
+  assert.deepEqual(
+    plugin.data.whitelist.map((rule) => rule.query),
+    ['name:alpha', 'name:beta']
+  );
+  assert.equal(view.queryRuleSummaryEl.text, 'Filters hide 1 of 3 notes');
+  // Like group rows, the empty trailing row has no handle and no mode button.
+  assert.equal(rows.at(-1).queryInput.placeholder, 'Enter filter...');
+  assert.equal(rows.at(-1).button.style.display, 'none');
+  assert.equal(rows.at(-1).dragHandle.style.visibility, 'hidden');
+  assert.equal(rows[0].button.style.display, '');
+  // While the text changes the button stays hidden; it appears once the field is left.
+  view.getGroupQuerySuggestions = () => ({ items: [] });
+  view.contentEl.win.setTimeout = () => {};
+  const typed = rows.at(-1);
+  typed.queryInput.value = 'name:gamma';
+  typed.queryInput.events.input();
+  assert.equal(typed.button.style.display, 'none');
+  typed.queryInput.events.blur();
+  assert.equal(typed.button.style.display, '');
+  assert.equal(typed.dragHandle.style.visibility, 'visible');
+  rows[1].row.remove = () => {};
+  openMenu(rows[1])
+    .items.find((item) => item.title === 'Delete rule')
+    .callback();
+  assert.deepEqual(
+    plugin.data.whitelist.map((rule) => rule.query),
+    ['name:alpha']
+  );
 });

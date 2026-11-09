@@ -535,8 +535,13 @@
   display: block;
 }
 
-.graphfrontier-layout-file-row {
-  margin-bottom: 10px;
+/* Layout rows: a click selects the layout; the active one is outlined in the accent color. */
+.graphfrontier-layout-row input.graphfrontier-group-query[readonly] {
+  cursor: pointer;
+}
+
+.graphfrontier-sidepanel .graphfrontier-layout-row.is-active input.graphfrontier-group-query {
+  border-color: var(--interactive-accent);
 }
 
 .graphfrontier-search-mode-toggle {
@@ -612,6 +617,29 @@
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Collapsible Groups and Filters subgroups draw their own divider, so their rule sections do not. */
+.graphfrontier-subgroup-section .graphfrontier-groups {
+  margin-top: 6px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* Room between the last editor row and the divider or buttons below; padding does not collapse. */
+.graphfrontier-subgroup-section > .graphfrontier-sidepanel-group:first-child,
+.graphfrontier-layout-list {
+  padding-bottom: 8px;
+}
+
+.graphfrontier-filter-count {
+  margin: 2px 0 4px 15px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.graphfrontier-filter-count:empty {
+  display: none;
 }
 
 .graphfrontier-groups-title {
@@ -1170,10 +1198,6 @@ input[type='color'].graphfrontier-group-color-input:focus-visible {
 
 .graphfrontier-input-menu-check-item .graphfrontier-input-menu-main {
   min-width: 0;
-}
-
-.graphfrontier-sidepanel .graphfrontier-attachments-content > * + * {
-  padding-top: 2px;
 }
 
 .graphfrontier-sidepanel button.graphfrontier-group-settings {

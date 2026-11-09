@@ -6,7 +6,9 @@ const NODE_MULTIPLIER_MAX = 20;
 const ZOOM_STEP_FACTOR = 1.12;
 const TWO_PI = Math.PI * 2;
 
-const SETTINGS_TABS = ['groups', 'display', 'physics', 'selection'];
+const SETTINGS_TABS = ['groups', 'display', 'physics', 'sets'];
+// Earlier releases stored the Sets tab as 'selection'.
+const LEGACY_SETTINGS_TABS = { selection: 'sets' };
 
 const DEFAULT_DATA = {
   active_layout_name: 'data.json',
@@ -44,6 +46,7 @@ const DEFAULT_DATA = {
     include_unlinked_attachments: false,
     excluded_attachment_extensions: [],
     existing_files_only: true,
+    show_only_groups: false,
     search_mode: 'find',
     group_hide_mode: 'exclude',
     show_search_connections: false,
@@ -82,6 +85,7 @@ const DEFAULT_DATA = {
     zoom: 1,
     side_panel_sections: {},
     settings_tab: 'groups',
+    filter_order: [],
   },
 };
 
@@ -174,6 +178,7 @@ function normalizeAttachmentExtensions(value) {
 
 module.exports = {
   SETTINGS_TABS,
+  LEGACY_SETTINGS_TABS,
   normalizeAttachmentExtensions,
   GRAPHFRONTIER_VIEW_TYPE,
   LOCAL_GRAPHFRONTIER_VIEW_TYPE,

@@ -60,9 +60,11 @@ test('node menu follows requested sections and puts Delete last', (t) => {
     'Unpin node',
     '---',
     'Visual settings',
+    'Strong pull',
     '---',
     'Select linked nodes',
-    'Bookmark',
+    'Combine linked',
+    '---',
     'Add to list',
     'Other',
     '---',
@@ -103,9 +105,9 @@ test('node menu follows requested sections and puts Delete last', (t) => {
     'Text size',
     'Hover dimming',
     'Reset visual settings',
-    'Strong pull x',
-    'Strong pull',
   ]);
+  const strongPull = item(menu, 'Strong pull').dom.children[0].children[0];
+  assert.deepEqual([strongPull.min, strongPull.max, strongPull.value], ['0', '20', '0']);
   assert.deepEqual(titles(item(menu, 'Other').submenu), [
     'Move file to',
     'Bookmark',
@@ -124,7 +126,7 @@ test('copy and native actions retain their target file and deletion prompts firs
   await item(menu, 'Copy system root').callback();
   await item(item(menu, 'Copy').submenu, 'From vault folder').callback();
   await item(item(menu, 'Copy').submenu, 'As Obsidian URL').callback();
-  await item(menu, 'Bookmark').callback();
+  await item(item(menu, 'Other').submenu, 'Bookmark').callback();
   await item(item(menu, 'Other').submenu, 'Move file to').callback();
   await item(item(menu, 'Other').submenu, 'Merge entire file with').callback();
   await item(menu, 'Delete').callback();
@@ -410,4 +412,69 @@ test('single URL and path aliases remain visible in submenus for scalars and lis
     }
   }
   assert.equal(opened.length, 4);
+});
+
+test('Combine linked sits beside Select linked nodes; selection menus start with Combine', async (t) => {
+  const { view, node, menu } = setup(t);
+  const titlesList = titles(menu);
+  const index = titlesList.indexOf('Select linked nodes');
+  assert.equal(titlesList[index + 1], 'Combine linked');
+  const combine = item(menu, 'Combine linked');
+  assert.equal(combine.icon, 'group');
+  let opened;
+  t.mock.method(view, 'editSubgraph', (_, snapshot) => (opened = snapshot.ids));
+  combine.callback();
+  assert.deepEqual(opened, [node.id, 'linked.md'], 'the node and its links');
+
+  view.selectedNodeIds = new Set([node.id, 'linked.md']);
+  const selection = buildNodeContextMenu(view, node, 10, 20);
+  assert.equal(titles(selection)[0], 'Combine into subgraph');
+  assert(!titles(selection).some((title) => / · \d+ nodes/.test(title)), 'no node counts');
+
+  view.selectedNodeIds = new Set();
+  view.neighborsById = new Map();
+  const lonely = buildNodeContextMenu(view, node, 10, 20);
+  assert(!titles(lonely).some((title) => /Combine/.test(title)), 'nothing to combine with');
+});
+
+test('Add URL or path writes an empty YAML property and opens the note on that line', async (t) => {
+  const { app, view, file } = setup(t);
+  const frontmatter = { tags: ['x'] };
+  app.metadataCache.getFileCache = () => ({ frontmatter });
+  app.fileManager.processFrontMatter = async (_, change) => change(frontmatter);
+  app.vault.read = async () => '---\ntags: [x]\nurl:\n---\nbody';
+  let opened;
+  const cursor = {};
+  let source = true;
+  app.workspace.getLeaf = () => ({
+    openFile: async (target, state) => (opened = [target.path, state]),
+    getViewState: () => ({ state: { source } }),
+    view: {
+      editor: {
+        getLine: () => 'url:',
+        setCursor: (position) => Object.assign(cursor, position),
+        focus() {},
+      },
+    },
+  });
+  const menu = buildNodeContextMenu(view, view.nodeById.get(file.path), 10, 20);
+  const addMenu = item(menu, 'Add URL or path').submenu;
+  assert.deepEqual(titles(addMenu), ['URL', 'Folder path']);
+  assert.match(item(addMenu, 'URL').dom.attributes.title, /'\[Label\]\(target\)'/);
+  await item(addMenu, 'URL').callback();
+  assert.equal(frontmatter.url, null);
+  assert.deepEqual(opened, [file.path, { eState: { line: 2 } }], "the reader's own view mode");
+  assert.deepEqual(cursor, { line: 2, ch: 4 }, 'source mode puts the cursor on the line');
+  source = false;
+  delete cursor.line;
+  await item(addMenu, 'Folder path').callback();
+  assert.equal(frontmatter.path, null);
+  assert.equal(cursor.line, undefined, 'Live Preview and Reading leave the cursor alone');
+
+  frontmatter.url = 'https://example.com';
+  frontmatter.path = '/project';
+  const full = buildNodeContextMenu(view, view.nodeById.get(file.path), 10, 20);
+  assert.equal(item(full, 'Add URL or path'), undefined);
+  assert.deepEqual(titles(item(full, 'Open URL').submenu).at(-1), 'Edit');
+  assert.match(item(item(full, 'Open URL').submenu, 'Edit').dom.attributes.title, /Alias/);
 });

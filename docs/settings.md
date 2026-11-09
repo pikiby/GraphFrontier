@@ -2,11 +2,11 @@
 
 GraphFrontier settings are mainly controlled in the right side panel inside the view.
 
-Plugin settings -> `Navigation` explains note YAML `url`/`path` strings, lists and
-quoted aliases (`'[Label](target)'`). `Copy example` copies the displayed YAML on
-click only; it does not create or edit notes. See [quick-open navigation](usage.md).
+Note YAML `url`/`path` syntax (strings, lists and quoted aliases `'[Label](target)'`) is shown
+on hover over **Add URL or path** and **Edit** in the node menu. See
+[quick-open navigation](usage.md).
 
-## Selection
+## Sets
 
 **Add to search** chooses the modifier for adding a clicked node name to the search
 field (default: **Alt**; **None** disables it). On conflicting shortcuts, node
@@ -19,9 +19,9 @@ Local GraphFrontier starts with its settings panel hidden; click **Show** to ope
 - `Existing files only`: hide unresolved links or non-existing targets
 - `Show orphans`: show/hide nodes with no links
 
-The collapsible `Attachments` section sits inside `Settings` -> `Display` and
-contains `Show attachments`, the visibility toggle for non-Markdown graph nodes.
-When enabled, it reveals `Show unlinked attachments` (off by default, stored per layout).
+`Show attachments` sits in `Settings` -> `Groups` -> `Filters` and is the visibility toggle
+for non-Markdown graph nodes. When enabled, it reveals the file types search,
+`Show unlinked attachments` (off by default, stored per layout) and the attachment node color.
 When both are enabled, all vault non-Markdown files are included, even without note links.
 `Show orphans` still applies: unlinked attachments remain hidden when it is off.
 
@@ -68,8 +68,15 @@ Other settings, overrides, positions and pins are preserved; no replacement over
 ## Visual Controls
 
 The sidebar order is `Search`, `Settings`, `Layout`. Search and layout actions are unchanged.
-Settings has four compact tabs: `Groups`, `Display`, `Physics`, `Selection`. Groups includes
-the existing Blacklist and Whitelist editors; Display includes Attachments. All controls keep
+Settings has four compact tabs: `Groups`, `Display`, `Physics`, `Sets`. Groups holds two
+collapsible subgroups, Groups and Filters: one list of rules and, below a divider,
+`Show only groups` (hide notes that match no group), `Existing files only`, `Show orphans` and
+`Show attachments`. Each rule's three-dot button opens a menu with an
+**Exclude / Include only** switch (blacklist / whitelist) and Delete rule; in Groups,
+Filters and Custom lists rows are reordered by their handle, the handle and buttons appear once
+you finish editing a row, and each editor keeps a single empty row; a
+summary shows how many notes the rules hide; Sets holds two
+collapsible subgroups, Selection (modifiers) and Custom lists. All controls keep
 their previous behavior. Left/Right arrow keys switch tabs, Home/End select the first/last.
 The selected tab is a global UI preference, not part of named layouts or backup payloads;
 Load and restore keep the current tab. Local Graph keeps its own workspace UI state and
@@ -79,7 +86,6 @@ starts with its sidebar closed, as before.
 
 - `Dim low-degree nodes`: off by default. Nodes with established graph degree 0 or 1 use 65% opacity; hover, selection and search highlights remain fully visible. Live canvas and HTML export use the same degree, not a degree recalculated from the screen filter.
 
-- `Existing files only` and `Show orphans`: graph visibility (see above)
 - `Hover dimming`: how strongly non-focused elements are dimmed
 - `Hover color`: color of highlighted links and of the hover ring. Until a color is picked,
   highlighted links keep their own color and move it towards the theme text color, and the
@@ -160,8 +166,10 @@ only color changes. Each row has one round button filled with the group color an
 marked with a settings icon; it opens the same visual settings menu used for
 individual nodes, where the group color is changed with the other settings. **Reset visual settings** clears the additional
 visual overrides and keeps its rule color and Strong pull. The same menu also
-provides **Link color**, **Strong pull x**, **Strong pull**, and
-**Clear strong pull**. The multiplier is 1-20: node menus change only the targeted eligible nodes; group menus store a group multiplier and enable Strong pull. Individual multipliers override group values. An explicit node multiplier of 1 overrides a stronger group; Clear strong pull removes the override and inherits again. Old groups/actions without a group multiplier use the existing global fallback. Visual reset preserves Strong pull and its multiplier.
+provides **Link color** and a **Strong pull** slider. The slider goes from 0 (off) to 20:
+node menus change only the targeted eligible nodes; group menus store a group multiplier and
+enable Strong pull. Individual values override group values, so 0 on a node turns off the pull
+it would inherit from a group. Visual reset preserves Strong pull and its multiplier.
 
 Supported query patterns:
 
@@ -169,10 +177,11 @@ Supported query patterns:
 - `tag:<value>`
 - `path:<value>`
 - `file:<value>`
-- `line:<value>`
+- `line:<words>`: every word, or `"quoted phrase"`, occurs in one line of the note text, as in
+  Obsidian search. Note text is read the first time a `line:` query is used.
 - `section:<value>`
 - `[property]:<value>`
-- `list:<id>` (exact node-list ID)
+- `list:<id or name>` (node list)
 
 Behavior:
 
@@ -202,12 +211,21 @@ Behavior:
 
 ### Node lists
 
+**Custom lists** sit in the **Sets** tab below the selection modifiers and use the same
+rows as groups. Edit a list's name in place. The round button opens **Add selected notes** (only
+with a selection), **Members** (click notes to remove them; the submenu stays open), **Create group**
+(adds a `list:<id>` group) and **Delete list**. Drag a list by its handle to reorder
+it. Type a name in the last row to
+create a list; selected notes are added to it. Group, filter and list fields save when
+you press Enter or leave the field.
+
 Open **Settings → GraphFrontier → Node lists** to create, rename or delete lists and
 search all lists and edit their members. Open a list to see filenames and paths,
 remove members, or use **Add files...** to search the vault and select multiple files.
 Rename, delete and **Copy list ID** are in the list's **...** menu. The node menu's
 **Add to list** also supports a multi-node selection. Use `list:` in a group's
-query to select a list by name; the stored query uses its stable ID.
+query to select a list by ID or name. New lists take their ID from the name when it has
+Latin letters or digits, so a group keeps working after its list is deleted and created again.
 
 Lists only define membership, not appearance. They are stored separately in
 `node-lists.json` inside the plugin folder and shared across layouts and local
@@ -216,11 +234,20 @@ inside Obsidian update membership. Lists do not force filtered nodes into view.
 Membership changes update visuals. Strong pull groups also wake physics when their
 membership changes.
 
-## Save/Load Row
+## Layout
 
-- `Autosave`: saves layout after movement settles
-- `Save layout`: save positions, settings, pins, camera and any exact API node subset
-- `Load layout`: restore saved layout snapshot
+Every saved layout is a row, like groups and Custom lists; the active one is outlined.
+Click a row to make that layout active. Its round button opens **Rename** (edit the name in
+place, saved on Enter or blur) and **Delete layout**. Type a name in the last row,
+**New layout...**, to save the current graph as a new layout and make it active; an existing
+name is never overwritten.
+
+- `Autosave`: saves the active layout after nodes settle, and right after settings, colors,
+  groups or rules change; switching to another layout or closing the view first saves changes
+  that are still pending. Settings tabs, collapsed sections and the camera alone do not trigger it
+- `Save layout`: save positions, settings, pins, camera and any exact API node subset to the
+  active layout
+- The `Load layout` command restores the active layout's saved snapshot
 
 MCP `save_layout` additionally permits saving a nonempty search query. Manual
 Save and normal autosave retain their existing nonempty-search restriction.
