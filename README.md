@@ -9,7 +9,7 @@ GraphFrontier is an interactive graph workspace for Obsidian, with its own rende
 Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, combine selections into named subgraphs, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
 Include attachments as ordinary graph nodes, filter them by file type, and apply
-selection actions to multiple nodes at once. See the [0.9.0 release notes](docs/releases/0.9.0.md).
+selection actions to multiple nodes at once. See the [0.9.1 release notes](docs/releases/0.9.1.md).
 
 Use it to:
 
@@ -23,12 +23,13 @@ Use it to:
 **Get started:** install GraphFrontier from Obsidian's Community plugins, then run
 **Open GraphFrontier**. [Installation and updates](docs/installation.md).
 
-## New In 0.9.0
+## New In 0.9.1
 
-- Reworked physics and on-demand rendering, with settled-layout restoration and reduced repeated force/style calculations.
-- Tabbed settings and group visibility: **Hide** keeps hidden nodes in physics; **Exclude** removes them. Alt-click the eye to solo a group.
-- Proportional node sizes, zoom-independent link widths, link colors, opacity and arrows, plus custom backgrounds and grid styling.
-- Multiple YAML URL/path destinations with readable aliases in quick-open submenus.
+- Unified editors for groups, filters, custom lists and saved layouts, with a new **Sets** tab.
+- Layout switching saves pending changes when Autosave is enabled; settings changes save without waiting for physics.
+- Remove members from subgraphs and restore their original placement and external orbits.
+- Add or edit YAML URL/path destinations from node menus; improved text search and export folder suggestions.
+- Android fixes for graph height after closing the keyboard and input focus during canvas gestures.
 
 Earlier layouts receive a one-time node-size/link-width migration. High-degree nodes may
 look larger because the old radius ceiling is gone. See [upgrade details](docs/releases/0.9.0.md#upgrading-and-compatibility).
@@ -46,6 +47,11 @@ remain available in the global graph.
 connections.
 
 ## Features
+
+- On-demand rendering and cached physics/style calculations keep settled graphs idle and restore saved settled layouts.
+- Settings are organized into **Groups**, **Display**, **Physics** and **Sets** tabs.
+- Proportional node sizes, zoom-independent link widths, colors, opacity and directional arrows can be customized globally, by group or by node. Background and grid styling are configurable too.
+- YAML `url` and `path` properties support multiple destinations with readable aliases in quick-open submenus.
 
 <table style="border-collapse: collapse; width: 100%;">
   <tr style="background-color: transparent;">
@@ -188,8 +194,8 @@ include file extensions. Supported files open in Obsidian; other formats use the
 system's default app where available.
 
 Select several nodes to pin, unpin, change compatible visual settings, or copy
-names and paths together. Context-menu counts show how many nodes an action will
-affect; actions that require a single node remain separate.
+names and paths together. Actions apply to eligible selected nodes; actions that
+require a single node remain separate.
 
 ## Groups And Node Lists
 

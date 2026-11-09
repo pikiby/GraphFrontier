@@ -32,6 +32,46 @@ test('graph height excludes floating navigation and the keyboard viewport', () =
   assert.equal(style.maxHeight, '750px');
 });
 
+test('parent resize releases the keyboard cap even when the capped wrapper does not resize', (t) => {
+  const observed = new Set();
+  let callback;
+  const original = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(fn) {
+      callback = fn;
+    }
+    observe(el) {
+      observed.add(el);
+    }
+  };
+  t.after(() => {
+    if (original === undefined) delete globalThis.ResizeObserver;
+    else globalThis.ResizeObserver = original;
+  });
+  let bottom = 549;
+  const view = {
+    wrapEl: { style: {} },
+    contentEl: {
+      getBoundingClientRect: () => ({ left: 0, right: 393, top: 88, bottom }),
+      ownerDocument: {
+        defaultView: { visualViewport: { offsetTop: 0, height: 851 } },
+        querySelector: () => null,
+      },
+    },
+    resizeCanvas() {
+      GraphFrontierView.prototype.updateWrapHeightForKeyboard.call(this);
+    },
+  };
+  GraphFrontierView.prototype.installResizeObserver.call(view);
+  assert.ok(observed.has(view.contentEl));
+  assert.ok(observed.has(view.wrapEl));
+  callback();
+  assert.equal(view.wrapEl.style.maxHeight, '461px');
+  bottom = 851;
+  callback([{ target: view.contentEl }]);
+  assert.equal(view.wrapEl.style.maxHeight, '763px');
+});
+
 function themeElement(scheme, variables = {}) {
   const el = {};
   const doc = {

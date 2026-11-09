@@ -3378,6 +3378,8 @@ class GraphFrontierView extends ItemView {
   installResizeObserver() {
     if (typeof ResizeObserver !== 'function') return;
     this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
+    // The keyboard cap can keep wrapEl unchanged when its parent grows again.
+    this.resizeObserver.observe(this.contentEl);
     this.resizeObserver.observe(this.wrapEl);
   }
 
@@ -4382,6 +4384,15 @@ class GraphFrontierView extends ItemView {
   onTouchStart(event) {
     this.requestFrame();
     if (!event.touches || event.touches.length === 0) return;
+    // Canvas gestures prevent the browser's default focus transfer. Release our editor
+    // explicitly so Android does not reopen the keyboard on every subsequent gesture.
+    const active = this.contentEl?.ownerDocument?.activeElement;
+    if (
+      active &&
+      this.contentEl.contains(active) &&
+      (active.matches?.('input, textarea') || active.isContentEditable)
+    )
+      active.blur();
     this.ignoreMouseUntilMs = Date.now() + 700;
     if (event.cancelable) event.preventDefault();
     this.clearTouchLongPressTimer();

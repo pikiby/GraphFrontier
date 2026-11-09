@@ -56,6 +56,25 @@ test('single touch schedules long press on empty background as well as nodes', (
   }
 });
 
+test('canvas gestures release focused graph editors before preventing default, not other panes', () => {
+  for (const inside of [true, false]) {
+    const calls = [];
+    const active = { matches: () => true, blur: () => calls.push('blur') };
+    const view = {
+      contentEl: { ownerDocument: { activeElement: active }, contains: () => inside },
+      requestFrame() {},
+      clearTouchLongPressTimer() {},
+      startPinchGesture() {},
+    };
+    proto.onTouchStart.call(view, {
+      touches: [{}, {}],
+      cancelable: true,
+      preventDefault: () => calls.push('prevent'),
+    });
+    assert.deepEqual(calls, inside ? ['blur', 'prevent'] : ['prevent']);
+  }
+});
+
 function touchHarness(t, node = null) {
   const previous = global.window;
   let timer;
