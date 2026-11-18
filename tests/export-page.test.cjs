@@ -264,6 +264,8 @@ test('an exported page has Save layout but no Export to', (t) => {
   const onPage = element();
   GraphFrontierView.prototype.addSideSaveLayoutButton.call(view, onPage);
   assert.ok(texts(onPage).includes('Save layout'));
+  assert.ok(!texts(onPage).includes('Autosave'));
+  assert.ok(texts(inObsidian).includes('Autosave'));
   assert.ok(!texts(onPage).includes('Export to'));
 });
 
@@ -290,21 +292,11 @@ test('attachments clicked on the page say they cannot open in the browser', asyn
 test('a page saves into the file the user chose; without a click it asks for one first', async (t) => {
   const notices = [];
   const written = [];
-  const saved = {};
+
   for (const [name, value] of Object.entries({
     navigator: { userActivation: { isActive: false } },
     window: {
       location: { pathname: '/site/My%20graph.html' },
-      showSaveFilePicker: async (options) => {
-        saved.options = options;
-        return {
-          name: 'My graph.html',
-          createWritable: async () => ({
-            write: async (text) => written.push(text),
-            close: async () => {},
-          }),
-        };
-      },
     },
   })) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -326,21 +318,35 @@ test('a page saves into the file the user chose; without a click it asks for one
   t.after(() => delete globalThis.document);
   let html = 'v1';
   const saver = createFileSaver(() => html);
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
-  saver.schedule();
-  await settle();
   assert.deepEqual(written, []);
-  assert.match(notices[0], /Click Save layout once/);
+  assert.equal(notices.length, 0);
   navigator.userActivation.isActive = true;
-  saver.schedule();
-  await settle();
-  assert.equal(saved.options.suggestedName, 'My graph.html');
+  assert.equal(await saver.saveLayout(async () => true), false);
+  assert.deepEqual(written, []);
+  document.getElementById = () => ({ textContent: 'payload' });
+  let contents = 'different';
+  window.showOpenFilePicker = async () => [
+    {
+      getFile: async () => ({ text: async () => contents }),
+      kind: 'file',
+      name: 'My graph.html',
+      requestPermission: async () => 'granted',
+      createWritable: async () => ({
+        write: async (text) => written.push(text),
+        close: async () => {},
+      }),
+    },
+  ];
+  assert.equal(await saver.saveLayout(async () => true), false);
+  assert.deepEqual(written, []);
+  contents = '<script id="graphfrontier-data" type="application/json">payload</script>';
+  assert.equal(await saver.saveLayout(async () => true), true);
   assert.deepEqual(written, ['v1']);
   navigator.userActivation.isActive = false;
   html = 'v2';
-  saver.schedule();
-  await settle();
-  assert.deepEqual(written, ['v1', 'v2'], 'later saves need no click');
+  assert.deepEqual(written, ['v1'], 'no automatic writes');
+  await saver.saveLayout(async () => true);
+  assert.deepEqual(written, ['v1', 'v2']);
 });
 
 test('notes on the page render without their properties block', () => {

@@ -1,75 +1,68 @@
-// Saving the exported page into its own HTML file, so saved layouts live in the file itself.
-// A browser writes a local file only through a file the user chose: the first save asks where
-// (pick this page's file to replace it); later saves write there without asking. Browsers
-// without that ability download an updated copy instead. Saves without a click (Autosave) only
-// write once a file has been chosen.
 const { Notice } = require('./obsidian');
-
-function download(html, name) {
-  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function pageFileName() {
-  const name = decodeURIComponent(window.location.pathname.split('/').pop() || '');
-  return /\.html?$/i.test(name) ? name : 'graphfrontier.html';
-}
 
 function createFileSaver(getHtml) {
   let handle = null;
-  let timer = null;
-  let askedForClick = false;
-  const name = pageFileName();
+  // Installed viewers may already have the original file handle.
+  window.launchQueue?.setConsumer(({ files }) => {
+    if (files?.length === 1 && files[0].kind === 'file') handle = files[0];
+  });
+  let pending = Promise.resolve();
+  let manual = false;
 
-  async function write(html) {
-    const writable = await handle.createWritable();
-    await writable.write(html);
-    await writable.close();
-  }
-
-  async function save() {
-    const html = getHtml();
-    if (handle) {
-      await write(html);
-      return;
-    }
-    // Choosing a file needs a click; saves without one wait for it.
-    if (!navigator.userActivation?.isActive) {
-      if (!askedForClick)
-        new Notice('Click Save layout once to choose the file this page saves into');
-      askedForClick = true;
-      return;
-    }
-    if (typeof window.showSaveFilePicker === 'function') {
-      try {
-        handle = await window.showSaveFilePicker({
-          suggestedName: name,
-          types: [{ description: 'HTML page', accept: { 'text/html': ['.html'] } }],
-        });
-      } catch (error) {
-        if (error?.name === 'AbortError') return;
-        throw error;
-      }
-      await write(html);
-      new Notice(`Saved into ${handle.name}`);
-      return;
-    }
-    download(html, name);
-    new Notice('This browser cannot write files: an updated copy of the page was downloaded');
+  function write() {
+    pending = pending
+      .catch(() => {})
+      .then(async () => {
+        const html = getHtml();
+        const writable = await handle.createWritable();
+        await writable.write(html);
+        await writable.close();
+      });
+    return pending;
   }
 
   return {
-    schedule() {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        save().catch((error) => new Notice(`Cannot save the page: ${error?.message || error}`));
-      }, 150);
+    async saveLayout(capture) {
+      if (manual) return false;
+      manual = true;
+      try {
+        if (!handle && typeof window.showOpenFilePicker === 'function') {
+          const [selected] = await window.showOpenFilePicker({ multiple: false });
+          const file = await selected.getFile();
+          const original = document.getElementById('graphfrontier-data')?.textContent;
+          const contents = await file.text();
+          if (
+            !original ||
+            !contents.includes(
+              `<script id="graphfrontier-data" type="application/json">${original}</script>`
+            )
+          ) {
+            new Notice('Select the original GraphFrontier HTML. No file was changed.');
+            return false;
+          }
+          handle = selected;
+        }
+        if (!handle) {
+          new Notice(
+            'Not saved: the browser opened this HTML without access to write the original file.'
+          );
+          return false;
+        }
+        if ((await handle.requestPermission({ mode: 'readwrite' })) !== 'granted') {
+          new Notice('Not saved: write permission was not granted.');
+          return false;
+        }
+        if (!(await capture())) return false;
+        await write();
+        new Notice(`Saved into ${handle.name}`);
+        return true;
+      } catch (error) {
+        if (error?.name === 'AbortError') return false;
+        new Notice(`Cannot save the page: ${error?.message || error}`);
+        return false;
+      } finally {
+        manual = false;
+      }
     },
   };
 }

@@ -825,7 +825,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     ].includes(normalized.settings.selection_toggle_modifier)
       ? normalized.settings.selection_toggle_modifier
       : DEFAULT_DATA.settings.selection_toggle_modifier;
-    normalized.settings.layout_autosave = !!normalized.settings.layout_autosave;
+    normalized.settings.layout_autosave = !this.exportPage && !!normalized.settings.layout_autosave;
     normalized.settings.export_static_html_path =
       typeof normalized.settings.export_static_html_path === 'string'
         ? normalized.settings.export_static_html_path.trim()

@@ -43,6 +43,7 @@ async function boot() {
   const styles = document.querySelector('head style')?.textContent || '';
   const script = document.scripts[document.scripts.length - 1]?.textContent || '';
   const options = snapshot.exportOptions || { physics: true, settings: true };
+  if (obsidian.Platform.isMobile) options.saves = false;
   obsidian.setIconSet(snapshot.icons);
   document.body.addClass(...(snapshot.bodyClasses || []));
 
@@ -50,7 +51,6 @@ async function boot() {
   let saver = null;
   const app = createApp(snapshot, {
     openNote: (file) => reader?.open(file),
-    onPluginFileChange: () => saver?.schedule(),
   });
   reader = createNoteReader(app);
   const plugin = new GraphFrontierPlugin(app, snapshot.manifest);
@@ -65,7 +65,7 @@ async function boot() {
         title: document.title,
         styles,
         script,
-        data: { ...snapshot, pluginData: app.pluginData, pluginFiles: app.vault.adapter.files() },
+        data: { ...snapshot, pluginData: plugin.data, pluginFiles: app.vault.adapter.files() },
       })
     );
   app.metadataCache.trigger('resolved');
@@ -80,6 +80,7 @@ async function boot() {
   };
   const view = app.viewFactories.get(GRAPHFRONTIER_VIEW_TYPE)(leaf);
   leaf.view = view;
+  if (saver) view.saveExportedLayout = () => saver.saveLayout(() => view.saveCurrentLayout());
   app.leaves.push(leaf);
   app.workspace.activeLeaf = leaf;
   document.getElementById('graphfrontier-root').appendChild(view.containerEl);

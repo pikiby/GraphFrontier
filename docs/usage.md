@@ -243,11 +243,9 @@ only the graph, as exported:
 - **Settings menu**: the side panel with search, groups, display, physics (with Physics) and sets.
 - **Layouts** (with Settings menu): every saved layout, listed in the Layout section to switch
   between them. Without it the page has only the layout on screen at export.
-- **Saves** (with Settings menu): **Save layout** and **Autosave**, plus renaming, deleting and
-  creating layouts in the list. Saving writes into the exported HTML file itself. The first save
-  asks where to save: choose the page's own file to replace it; later saves, including Autosave,
-  write there without asking. Autosave waits until that first save. Browsers that cannot write
-  files (such as Firefox and Safari) download an updated copy of the page instead.
+- **Saves** (with Settings menu): manual **Save layout** on desktop only (no browser autosave), plus renaming, deleting and
+  creating layouts in the list. On first Save, select the original HTML and grant write access.
+  Subsequent saves in that session use the same file. Without file access no copy is downloaded.
 
 Clicking a note opens its text in a panel on the left, clear of the settings menu. Attachments
 have no text to show, and a page cannot open files in other apps, so clicking one says it

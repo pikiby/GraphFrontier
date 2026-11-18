@@ -9,7 +9,7 @@ GraphFrontier is an interactive graph workspace for Obsidian, with its own rende
 Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, combine selections into named subgraphs, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
 Include attachments as ordinary graph nodes, filter them by file type, and apply
-selection actions to multiple nodes at once. See the [0.9.1 release notes](docs/releases/0.9.1.md).
+selection actions to multiple nodes at once. See the [0.9.2 release notes](docs/releases/0.9.2.md).
 
 Use it to:
 
@@ -23,13 +23,12 @@ Use it to:
 **Get started:** install GraphFrontier from Obsidian's Community plugins, then run
 **Open GraphFrontier**. [Installation and updates](docs/installation.md).
 
-## New In 0.9.1
+## New In 0.9.2
 
-- Unified editors for groups, filters, custom lists and saved layouts, with a new **Sets** tab.
-- Layout switching saves pending changes when Autosave is enabled; settings changes save without waiting for physics.
-- Remove members from subgraphs and restore their original placement and external orbits.
-- Add or edit YAML URL/path destinations from node menus; improved text search and export folder suggestions.
-- Android fixes for graph height after closing the keyboard and input focus during canvas gestures.
+- Export a standalone HTML graph with optional physics, settings and layout switching. Review the embedded note text and metadata before sharing.
+- HTML exports offer manual Save on supported desktop browsers only. Mobile exports have no Save, and browser exports never autosave. Obsidian autosave is unchanged.
+- Choose node shapes globally, by group or per node. Use Grow to replay graph formation or Wave to trace links.
+- Adjust physics steps per frame under Sets → Simulation and access Undo/Redo from the graph header.
 
 Earlier layouts receive a one-time node-size/link-width migration. High-degree nodes may
 look larger because the old radius ceiling is gone. See [upgrade details](docs/releases/0.9.0.md#upgrading-and-compatibility).

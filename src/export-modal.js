@@ -66,7 +66,7 @@ const EXPORT_MODULES = [
     'Every saved layout, to switch between them; without it only the layout on screen',
     'settings',
   ],
-  ['saves', 'Saves', 'Save layout and Autosave; saving writes into the exported file', 'settings'],
+  ['saves', 'Saves', 'Manual Save layout in desktop browsers only', 'settings'],
 ];
 
 class ExportModal extends Modal {

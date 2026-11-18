@@ -1369,29 +1369,30 @@ class GraphFrontierView extends ItemView {
   addSideSaveLayoutButton(parentEl) {
     const wrap = parentEl.createDiv({ cls: 'graphfrontier-sidepanel-actions' });
     const row = wrap.createDiv({ cls: 'graphfrontier-sidepanel-actions-row' });
-    const autosaveWrap = row.createDiv({ cls: 'graphfrontier-sidepanel-autosave' });
-    autosaveWrap.setAttr('title', 'Automatically save layout after nodes stop moving');
-    const autosaveLabel = autosaveWrap.createSpan({
-      text: 'Autosave',
-      cls: 'graphfrontier-sidepanel-label',
-    });
-    autosaveLabel.setAttr('title', 'Automatically save layout after nodes stop moving');
-    const autosaveBtn = autosaveWrap.createEl('button', { cls: 'graphfrontier-toggle-btn' });
-    autosaveBtn.setAttr('title', 'Automatically save layout after nodes stop moving');
-    const updateAutosaveButton = (isOn) => {
-      autosaveBtn.setText('');
-      autosaveBtn.toggleClass('is-on', isOn);
-      autosaveBtn.setAttr('aria-label', `Autosave: ${isOn ? 'on' : 'off'}`);
-    };
-    updateAutosaveButton(!!this.plugin.data.settings.layout_autosave);
+    if (!this.plugin.exportPage) {
+      const autosaveWrap = row.createDiv({ cls: 'graphfrontier-sidepanel-autosave' });
+      autosaveWrap.setAttr('title', 'Automatically save layout after nodes stop moving');
+      const autosaveLabel = autosaveWrap.createSpan({
+        text: 'Autosave',
+        cls: 'graphfrontier-sidepanel-label',
+      });
+      autosaveLabel.setAttr('title', 'Automatically save layout after nodes stop moving');
+      const autosaveBtn = autosaveWrap.createEl('button', { cls: 'graphfrontier-toggle-btn' });
+      autosaveBtn.setAttr('title', 'Automatically save layout after nodes stop moving');
+      const updateAutosaveButton = (isOn) => {
+        autosaveBtn.setText('');
+        autosaveBtn.toggleClass('is-on', isOn);
+        autosaveBtn.setAttr('aria-label', `Autosave: ${isOn ? 'on' : 'off'}`);
+      };
+      updateAutosaveButton(!!this.plugin.data.settings.layout_autosave);
 
-    this.registerDomEvent(autosaveBtn, 'click', () => {
-      const next = !this.plugin.data.settings.layout_autosave;
-      this.plugin.data.settings.layout_autosave = next;
-      updateAutosaveButton(next);
-      this.plugin.schedulePersist();
-    });
-
+      this.registerDomEvent(autosaveBtn, 'click', () => {
+        const next = !this.plugin.data.settings.layout_autosave;
+        this.plugin.data.settings.layout_autosave = next;
+        updateAutosaveButton(next);
+        this.plugin.schedulePersist();
+      });
+    }
     const buttonsWrap = row.createDiv({ cls: 'graphfrontier-sidepanel-buttons' });
 
     const saveButton = buttonsWrap.createEl('button', {
@@ -1400,7 +1401,9 @@ class GraphFrontierView extends ItemView {
     });
     saveButton.setAttr('title', 'Save positions, settings, and pin states to the active layout');
 
-    this.registerDomEvent(saveButton, 'click', () => this.saveCurrentLayout());
+    this.registerDomEvent(saveButton, 'click', () =>
+      this.saveExportedLayout ? this.saveExportedLayout() : this.saveCurrentLayout()
+    );
 
     // An exported page cannot export again: it has no vault to write to.
     if (this.plugin.exportPage) return;
@@ -6910,7 +6913,7 @@ class GraphFrontierView extends ItemView {
         );
         void this.layoutList?.render();
       }
-      if (!silent) new Notice(`Layout saved: ${nodeCount} nodes`);
+      if (!silent && !this.saveExportedLayout) new Notice(`Layout saved: ${nodeCount} nodes`);
       return true;
     });
   }
