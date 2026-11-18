@@ -1,4 +1,4 @@
-const { GRAPHFRONTIER_VIEW_TYPE } = require('./constants');
+import { GRAPHFRONTIER_VIEW_TYPE } from './constants.js';
 
 const watched = new WeakSet();
 const branches = new Set([
@@ -185,4 +185,4 @@ function observeNodeLists(plugin) {
   });
 }
 
-module.exports = { observePluginData, observeNodeLists };
+export { observePluginData, observeNodeLists };

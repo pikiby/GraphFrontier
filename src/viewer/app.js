@@ -1,7 +1,7 @@
 // The Obsidian app for the exported page, built from the vault snapshot taken at export: files,
 // their metadata (tags, properties, headings), resolved and unresolved links, note texts and the
 // plugin's files (layouts, lists). Writes stay in this page's memory.
-const { Events, TFile, TFolder, Notice } = require('./obsidian');
+import { Events, TFile, TFolder, Notice } from './obsidian.js';
 
 function basenameOf(path) {
   const name = path.slice(path.lastIndexOf('/') + 1);
@@ -194,4 +194,4 @@ function createApp(snapshot, { openNote, onPluginFileChange } = {}) {
   return app;
 }
 
-module.exports = { createApp };
+export { createApp };

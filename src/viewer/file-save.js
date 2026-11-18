@@ -1,4 +1,4 @@
-const { Notice } = require('./obsidian');
+import { Notice } from './obsidian.js';
 
 function createFileSaver(getHtml) {
   let handle = null;
@@ -67,4 +67,4 @@ function createFileSaver(getHtml) {
   };
 }
 
-module.exports = { createFileSaver };
+export { createFileSaver };

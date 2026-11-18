@@ -1,30 +1,31 @@
-const {
+import { linkStylePicker } from './link-markers.js';
+import {
   beginPositionAction,
   finishPositionAction,
   runPositionAction,
   replayPositionAction,
   historyFor,
-} = require('./position-history');
-const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Scope, setIcon } = require('obsidian');
-const { nodeListContains } = require('./node-lists');
-const {
+} from './position-history.js';
+import { ItemView, Notice, Menu, MarkdownRenderer, Modal, Scope, setIcon } from 'obsidian';
+import { nodeListContains } from './node-lists.js';
+import {
   createEditorRow,
   setEditorRowReady,
   bindEditorRowDrag,
   moveEditorRow,
   keepMenuOpen,
   createModeSwitch,
-} = require('./panel-controls');
-const { observePluginData } = require('./appearance-events');
-const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
-const { ExportModal } = require('./export-modal');
-const { hasExportPage, captureExportSnapshot, buildExportHtml } = require('./export-page');
-const { DARK_THEME, readGraphTheme, getColorInputValue } = require('./theme');
-const { getNodeWorldRadius } = require('./render-metrics');
-const { buildNodeContextMenu } = require('./node-context-menu');
-const { NodeListsTab } = require('./node-lists-tab');
-const { LayoutList } = require('./layout-list');
-const {
+} from './panel-controls.js';
+import { observePluginData } from './appearance-events.js';
+import { resolveVaultExportPath, writeVaultExport } from './vault-export.js';
+import { ExportModal } from './export-modal.js';
+import { hasExportPage, captureExportSnapshot, buildExportHtml } from './export-page.js';
+import { DARK_THEME, readGraphTheme, getColorInputValue } from './theme.js';
+import { getNodeWorldRadius } from './render-metrics.js';
+import { buildNodeContextMenu } from './node-context-menu.js';
+import { NodeListsTab } from './node-lists-tab.js';
+import { LayoutList } from './layout-list.js';
+import {
   startGrow,
   stepGrow,
   isGrowActive,
@@ -33,10 +34,10 @@ const {
   isWaveActive,
   firePulse,
   activePulseWaves,
-} = require('./effects');
-const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
-const { DarkEnergyModal } = require('./dark-energy-modal');
-const {
+} from './effects.js';
+import { PREFIX, normalizeDarkEnergy } from './dark-energy.js';
+import { DarkEnergyModal } from './dark-energy-modal.js';
+import {
   SUBGRAPH_PREFIX,
   normalizeSubgraphs,
   subgraphNodes,
@@ -45,18 +46,18 @@ const {
   projectNodeId,
   translateMembers,
   reconcileOrbitSpaces,
-} = require('./subgraphs');
-const { SubgraphModal } = require('./subgraph-modal');
-const {
+} from './subgraphs.js';
+import { SubgraphModal } from './subgraph-modal.js';
+import {
   NODE_VISUAL_SETTINGS,
   getNodeVisualOverride,
   getNodeVisualSetting,
   normalizeNodeShape,
   NODE_SHAPE_NAMES,
-} = require('./node-visuals');
+} from './node-visuals.js';
 const NODE_SHAPE_VALUES = NODE_VISUAL_SETTINGS.find((spec) => spec.key === 'node_shape').values;
 
-const {
+import {
   DEFAULT_DATA,
   SETTINGS_TABS,
   normalizeAttachmentExtensions,
@@ -66,41 +67,41 @@ const {
   ZOOM_STEP_FACTOR,
   MIN_ZOOM,
   MAX_ZOOM,
-} = require('./constants');
+} from './constants.js';
 
-const {
+import {
   captureLayoutSleep,
   restoreLayoutSleep,
   wakeOnPhysicsVisibilityChange,
   resetPhysicsVisibilityBaseline,
   copyLayoutSleepState,
-  kickLayoutSearch: kickLayoutSearchPhysics,
-  updateLayoutCenter: updateLayoutCenterPhysics,
+  kickLayoutSearch as kickLayoutSearchPhysics,
+  updateLayoutCenter as updateLayoutCenterPhysics,
   getOrbitRadiusBySpacing,
   getOrbitRadiusForAnchor,
-  recomputeOrbitRadii: recomputeOrbitRadiiPhysics,
-  stepCameraSmoothing: stepCameraSmoothingPhysics,
-  stepSimulation: stepSimulationPhysics,
-  stepLayoutAutosave: stepLayoutAutosavePhysics,
+  recomputeOrbitRadii as recomputeOrbitRadiiPhysics,
+  stepCameraSmoothing as stepCameraSmoothingPhysics,
+  stepSimulation as stepSimulationPhysics,
+  stepLayoutAutosave as stepLayoutAutosavePhysics,
   getLayoutAutosaveDelay,
   getPhysicsParameters,
-} = require('./physics');
+} from './physics.js';
 
-const {
-  stepFocusSmoothing: stepFocusSmoothingRender,
-  renderFrame: renderFrameRender,
+import {
+  stepFocusSmoothing as stepFocusSmoothingRender,
+  renderFrame as renderFrameRender,
   getHoverDimAlpha,
   hexToRgba,
-  getNodeRadius: getNodeRadiusRender,
-  getLabelZoomThreshold: getLabelZoomThresholdRender,
-  getLabelFontSize: getLabelFontSizeRender,
-  getGroupColorForNode: getGroupColorForNodeRender,
-  nodeMatchesParsedGroup: nodeMatchesParsedGroupRender,
+  getNodeRadius as getNodeRadiusRender,
+  getLabelZoomThreshold as getLabelZoomThresholdRender,
+  getLabelFontSize as getLabelFontSizeRender,
+  getGroupColorForNode as getGroupColorForNodeRender,
+  nodeMatchesParsedGroup as nodeMatchesParsedGroupRender,
   lineQueryMatches,
-  drawGrid: drawGridRender,
-  drawEdges: drawEdgesRender,
-  drawNodes: drawNodesRender,
-} = require('./render');
+  drawGrid as drawGridRender,
+  drawEdges as drawEdgesRender,
+  drawNodes as drawNodesRender,
+} from './render.js';
 
 // Every swatch that shows a node color takes that node's shape; a circle keeps it round.
 function applySwatchShape(el, value) {
@@ -698,8 +699,28 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(edgeGroup, 'Link width', 'edge_width_scale', 0.1, 5, 0.01, 'render', {
       hint: 'Link thickness in physical screen pixels, independent of zoom',
     });
+    const addStyle = (parent, key) => {
+      const spec = NODE_VISUAL_SETTINGS.find((s) => s.key === key);
+      const row = parent.createDiv({ cls: 'graphfrontier-style-row' });
+      row.createSpan({ cls: 'graphfrontier-sidepanel-label', text: spec.label });
+      const sync = linkStylePicker(row, spec, (value) => {
+        this.plugin.data.settings[key] = value;
+        this.plugin.schedulePersist();
+        sync(value);
+        this.applyRefreshMode('render');
+      });
+      this.sideControls.set(key, { type: 'style-picker', sync });
+      sync(this.plugin.getSettings()[key]);
+    };
+    addStyle(edgeGroup, 'edge_pattern');
     this.addSideToggle(edgeGroup, 'Show arrows', 'show_arrows', 'render', {
       onChange: () => this.syncSidePanelControls(),
+    });
+    this.arrowControlsEl = edgeGroup.createDiv();
+    addStyle(this.arrowControlsEl, 'arrow_shape');
+    this.addSideSlider(this.arrowControlsEl, 'Arrow size', 'arrow_size', 0.5, 3, 0.1, 'render');
+    this.addSideToggle(this.arrowControlsEl, 'Scale arrows with nodes', 'arrow_zoom', 'render', {
+      hint: 'When off, arrows keep the same size on screen as you zoom.',
     });
     this.reverseArrowsRowEl = this.addSideToggle(
       edgeGroup,
@@ -846,6 +867,11 @@ class GraphFrontierView extends ItemView {
     this.nodeListsTab = new NodeListsTab(this, customListsSection.createDiv());
     this.nodeListsTab.render();
 
+    if (!exportPage && this.plugin.mcp?.desktop) {
+      const mcpSection = this.createSidePanelSection(setsSection, { id: 'mcp', title: 'MCP' });
+      mcpSection.addClass('graphfrontier-subgroup-section');
+      this.plugin.mcp.renderToggle(mcpSection);
+    }
     // An exported page has the layout list with Layouts, and Save layout and Autosave with Saves.
     const pageLayouts = !exportPage || exportPage.layouts;
     const pageSaves = !exportPage || exportPage.saves;
@@ -2195,6 +2221,42 @@ class GraphFrontierView extends ItemView {
     return this.nodeById.has(this.searchSelectedNodeId) ? this.searchSelectedNodeId : null;
   }
 
+  exportVisibleIds() {
+    const visible = this.getFilterVisibleNodeIds();
+    return new Set(
+      this.nodes.filter((node) => !visible || visible.has(node.id)).map((node) => node.id)
+    );
+  }
+
+  // Evaluate saved filters without loading another layout into the live workspace.
+  savedLayoutExportView(layout) {
+    const plugin = Object.create(this.plugin, {
+      data: { value: layout, writable: true, configurable: true },
+    });
+    plugin.noteLinesWanted = false;
+    let checkedLines = false;
+    plugin.requestNoteLines = () => {
+      if (checkedLines) return;
+      if (
+        !plugin.app.vault.getMarkdownFiles().every((file) => {
+          const cached = plugin.noteLines?.get(file.path);
+          return cached && cached.mtime === file.stat?.mtime;
+        })
+      )
+        throw new Error('Open the layout and let its line filters finish indexing before export.');
+      checkedLines = true;
+    };
+    const preview = new GraphFrontierView(this.leaf, plugin);
+    preview.subgraphScope = null;
+    preview.restoreLayoutViewState();
+    const raw = plugin.collectGraphData();
+    preview.canonicalGraphData = raw;
+    const projected = projectSubgraphs(raw, layout.subgraphs);
+    preview.syncGraphRuntimeState(projected);
+    preview.syncSearchMatchesLive();
+    return preview;
+  }
+
   getFilterVisibleNodeIds() {
     return growVisibleNodeIds(this, this.getRuleAndSearchVisibleNodeIds());
   }
@@ -2362,7 +2424,7 @@ class GraphFrontierView extends ItemView {
       return this.filterVisibilityCache.searchVisibleNodeIds;
     }
 
-    let visibleNodeIds = null;
+    let visibleNodeIds;
     if (this.searchMode !== 'filter') {
       this.filterVisibilityCache.searchVisibleVersion = this.visibilitySearchVersion;
       this.filterVisibilityCache.searchVisibleNodeIds = null;
@@ -2646,13 +2708,9 @@ class GraphFrontierView extends ItemView {
 
       let textContainerEl = itemEl;
       if (hasAction) {
-        itemEl.style.display = 'flex';
-        itemEl.style.alignItems = 'flex-start';
-        itemEl.style.justifyContent = 'space-between';
-        itemEl.style.gap = '8px';
+        itemEl.classList.add('graphfrontier-suggestion-with-action');
         textContainerEl = ownerDocument.createElement('div');
-        textContainerEl.style.minWidth = '0';
-        textContainerEl.style.flex = '1 1 auto';
+        textContainerEl.className = 'graphfrontier-suggestion-text';
         itemEl.appendChild(textContainerEl);
       }
 
@@ -3453,6 +3511,7 @@ class GraphFrontierView extends ItemView {
   syncSidePanelControls() {
     this.syncSettingsTabs();
     this.refreshShapeSwatches();
+    if (this.arrowControlsEl) this.arrowControlsEl.hidden = !this.plugin.getSettings().show_arrows;
     if (this.reverseArrowsRowEl)
       this.reverseArrowsRowEl.style.display = this.plugin.getSettings().show_arrows ? '' : 'none';
     if (this.backgroundColorRowEl)
@@ -3466,6 +3525,10 @@ class GraphFrontierView extends ItemView {
 
     for (const [key, meta] of this.sideControls.entries()) {
       const currentValue = meta.getValue ? meta.getValue() : this.plugin.data.settings[key];
+      if (meta.type === 'style-picker') {
+        meta.sync(currentValue);
+        continue;
+      }
       if (meta.type === 'boolean') {
         if (activeEl !== meta.input) {
           const uiValue =
@@ -3537,8 +3600,8 @@ class GraphFrontierView extends ItemView {
 
   updateWrapHeightForKeyboard() {
     if (!this.wrapEl) return;
-    if (this.wrapEl.style.height) this.wrapEl.style.height = '';
-    if (this.wrapEl.style.maxHeight) this.wrapEl.style.maxHeight = '';
+    if (this.wrapEl.style.height) this.wrapEl.style.removeProperty('height');
+    if (this.wrapEl.style.maxHeight) this.wrapEl.style.removeProperty('max-height');
     const doc = this.contentEl.ownerDocument;
     const viewport = doc?.defaultView?.visualViewport;
     const host = this.contentEl.getBoundingClientRect?.();
@@ -5339,10 +5402,37 @@ class GraphFrontierView extends ItemView {
       const nodes = displayNodes.filter(eligible);
       if (!nodes.length && !group) continue;
       menu.addItem((item) => {
-        item.setTitle(spec.label).setIcon('sliders-horizontal');
+        item.setTitle(spec.label);
         const controls = item.dom.createDiv({
           cls: 'graphfrontier-node-text-size graphfrontier-node-visual-control',
         });
+        if (['arrow_shape', 'edge_pattern'].includes(spec.key)) {
+          controls.addClass('graphfrontier-style-picker-control');
+          const targets = () => this.resolveNodeActionTargets(snapshot).filter(eligible);
+          const selected = linkStylePicker(controls, spec, (value) => {
+            if (group) group.set(spec.key, value);
+            else for (const n of targets()) this.plugin.setNodeVisualSetting(n.id, spec.key, value);
+            syncControls.forEach((fn) => fn());
+          });
+          const sync = () => {
+            const values = group
+              ? [group.value(spec.key)]
+              : targets().map((n) => getNodeVisualSetting(this.plugin, n.id, spec.key));
+            selected(values.every((v) => v === values[0]) ? values[0] : null);
+            if (spec.key !== 'edge_pattern')
+              item.dom.style.display = (
+                group
+                  ? group.value('show_arrows')
+                  : targets().some((n) => getNodeVisualSetting(this.plugin, n.id, 'show_arrows'))
+              )
+                ? ''
+                : 'none';
+          };
+          syncControls.push(sync);
+          sync();
+          keepMenuOpen(controls);
+          return;
+        }
         const input = controls.createEl(spec.type === 'boolean' ? 'button' : 'input', {
           type: spec.type === 'color' ? 'color' : spec.type === 'boolean' ? 'button' : 'range',
           cls:
@@ -5396,7 +5486,7 @@ class GraphFrontierView extends ItemView {
             input.toggleClass('is-on', input.checked);
             input.setAttribute('aria-pressed', String(input.checked));
           }
-          if (spec.key === 'reverse_arrows')
+          if (['reverse_arrows', 'arrow_shape', 'arrow_size', 'arrow_zoom'].includes(spec.key))
             item.dom.style.display = (
               group
                 ? group.value('show_arrows')
@@ -5449,6 +5539,7 @@ class GraphFrontierView extends ItemView {
     }
 
     menu.addItem((item) => {
+      item.dom.addClass('graphfrontier-trailing-menu-icon');
       item.setIcon('rotate-ccw').onClick(() => {
         if (group) group.reset();
         for (const entry of this.getNodeVisualResetTargets(snapshot))
@@ -5486,6 +5577,7 @@ class GraphFrontierView extends ItemView {
       else this.plugin.clearNodeMultiplier(nodeId);
     };
     menu.addItem((item) => {
+      item.dom.addClass('graphfrontier-trailing-menu-icon');
       item.setTitle('Strong pull').setIcon('zap');
       const controls = item.dom.createDiv({ cls: 'graphfrontier-node-visual-control' });
       const input = controls.createEl('input', {
@@ -6047,7 +6139,7 @@ class GraphFrontierView extends ItemView {
     const colorInput = hostDocument.createElement('input');
     colorInput.type = 'color';
     colorInput.value = initialColor;
-    colorInput.className = 'graphfrontier-group-color-input';
+    colorInput.className = 'graphfrontier-group-color-input graphfrontier-floating-color-input';
     hostDocument.body.appendChild(colorInput);
 
     const viewportWidth = this.contentEl.win.innerWidth || 1200;
@@ -6058,12 +6150,8 @@ class GraphFrontierView extends ItemView {
     const clampedX = Math.max(8, Math.min(viewportWidth - pickerSize - 8, targetX));
     const clampedY = Math.max(8, Math.min(viewportHeight - pickerSize - 8, targetY));
 
-    colorInput.style.position = 'fixed';
     colorInput.style.left = `${clampedX}px`;
     colorInput.style.top = `${clampedY}px`;
-    colorInput.style.opacity = '0';
-    colorInput.style.zIndex = '9999';
-    colorInput.style.pointerEvents = 'none';
 
     let disposed = false;
     const cleanup = () => {
@@ -6746,9 +6834,7 @@ class GraphFrontierView extends ItemView {
       const textareaEl = document.createElement('textarea');
       textareaEl.value = normalizedText;
       textareaEl.setAttribute('readonly', '');
-      textareaEl.style.position = 'fixed';
-      textareaEl.style.top = '-10000px';
-      textareaEl.style.opacity = '0';
+      textareaEl.className = 'graphfrontier-clipboard-input';
       document.body.appendChild(textareaEl);
       textareaEl.select();
       const copied = document.execCommand('copy');
@@ -6859,7 +6945,7 @@ class GraphFrontierView extends ItemView {
       const snapshotText = JSON.stringify(snapshot);
       const editVersion = this.layoutEditVersion;
       const persistRevision = this.plugin._persistRevision;
-      let written = false;
+      let written;
       try {
         written = await this.plugin.persistActiveLayoutFile(snapshot, layoutName);
       } catch {
@@ -7193,7 +7279,7 @@ class GraphFrontierView extends ItemView {
     const direct = testCell(baseGX, baseGY);
     if (direct) return direct;
 
-    let best = null;
+    let best;
     const maxRing = 260;
 
     for (let ring = 1; ring <= maxRing; ring++) {
@@ -7492,7 +7578,4 @@ class ExactCoordinatesModal extends Modal {
   }
 }
 
-module.exports = {
-  GraphFrontierView,
-  getContrastIconColor,
-};
+export { GraphFrontierView, getContrastIconColor };

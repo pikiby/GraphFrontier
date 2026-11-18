@@ -286,10 +286,7 @@ state. See [API layouts and backups](mcp.md#layouts-and-backups).
 
 ## Local MCP
 
-Desktop Obsidian's `Settings -> GraphFrontier -> Local MCP` provides the optional
-server toggle, port, status, token management and client configuration examples.
-MCP is off by default and listens on localhost only. Its private `mcp.json`
-configuration is separate from layout data. See [setup and API reference](mcp.md).
+On desktop, **Sets → MCP** or **Settings → GraphFrontier → MCP** controls the local CLI bridge. It is on by default. Turning it off blocks graph tool calls until enabled again. See [setup](mcp.md).
 
 ## Related Docs
 
@@ -323,3 +320,10 @@ in a temporary file before being moved to its final path. Windows reserved
 folder names are rejected on all platforms.
 
 This protects against plugin reinstallation, not loss of the vault itself.
+
+**Display → Links:** choose solid, dashed or dotted strokes. With arrows enabled,
+click a marker preview to choose its shape. **Scale arrows with nodes** (on by default) scales the
+arrow with the nodes; turning it off keeps its screen size constant. Link width is independent
+of zoom. Groups and individual nodes can override these choices.
+
+The MCP switch is independent of saved layouts and never travels with HTML exports.

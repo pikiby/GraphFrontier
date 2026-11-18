@@ -9,7 +9,7 @@ GraphFrontier is an interactive graph workspace for Obsidian, with its own rende
 Turn connected notes into diagrams you can arrange, style, save, and share. Pin nodes in place, combine selections into named subgraphs, organize them around gravity centers, switch between layouts, and export interactive HTML graphs with note previews.
 
 Include attachments as ordinary graph nodes, filter them by file type, and apply
-selection actions to multiple nodes at once. See the [0.9.2 release notes](docs/releases/0.9.2.md).
+selection actions to multiple nodes at once.
 
 Use it to:
 
@@ -23,15 +23,13 @@ Use it to:
 **Get started:** install GraphFrontier from Obsidian's Community plugins, then run
 **Open GraphFrontier**. [Installation and updates](docs/installation.md).
 
-## New In 0.9.2
+## New in 0.9.4
 
-- Export a standalone HTML graph with optional physics, settings and layout switching. Review the embedded note text and metadata before sharing.
-- HTML exports offer manual Save on supported desktop browsers only. Mobile exports have no Save, and browser exports never autosave. Obsidian autosave is unchanged.
-- Choose node shapes globally, by group or per node. Use Grow to replay graph formation or Wave to trace links.
-- Adjust physics steps per frame under Sets → Simulation and access Undo/Redo from the graph header.
+- **Share one view or several layouts.** HTML exports include notes visible in the current graph. Enable **Layouts** to include the notes visible in the other exported layouts too. Files exported with earlier versions do not change; re-export them before sharing.
+- **Distinguish connections at a glance.** Use solid, dashed or dotted links, choose from eight arrow shapes, and adjust their size. Arrows can scale with the nodes or keep a fixed size on screen.
+- **Connect an agent without a port or token.** On desktop, the MCP connector uses the official Obsidian CLI. Switch access on or off in **Sets → MCP**. Existing HTTP clients need the [new connection instructions](docs/mcp.md#connect-a-client).
 
-Earlier layouts receive a one-time node-size/link-width migration. High-degree nodes may
-look larger because the old radius ceiling is gone. See [upgrade details](docs/releases/0.9.0.md#upgrading-and-compatibility).
+[Read the 0.9.4 release notes](docs/releases/0.9.4.md).
 
 ## Local GraphFrontier
 
@@ -162,7 +160,7 @@ connections.
       <img src="docs/media/hide_edges.gif" alt="Hide links demo" width="100%">
       <br>
       <p style="font-size: 1.05em;"><strong>Reduce unwanted link clutter</strong></p>
-      <p>Adjust link opacity and width without deleting notes or changing links.</p>
+      <p>Use solid, dashed or dotted lines without changing the links in your notes.</p>
     </td>
   </tr>
   <tr style="background-color: transparent;">
@@ -256,13 +254,13 @@ An MCP-capable agent can:
 
 ### Connect A Client
 
-1. In desktop Obsidian, enable **Settings -> GraphFrontier -> Local MCP**.
-2. Add the settings-provided endpoint and token configuration to an MCP-capable client, such as Codex, Claude Code or OpenCode. See [client configurations](docs/mcp.md#client-configurations).
+1. Enable the official CLI in desktop Obsidian. GraphFrontier MCP is on by default.
+2. Ask your agent to register the [local stdio connector](docs/mcp.md#connect-a-client) for this vault. No port or token is needed.
 3. Open a graph and ask the agent to identify the vault before making changes.
 
 ### Safety And Current Limits
 
-MCP is off by default and desktop-only. It runs as a local authenticated server.
+MCP is desktop-only. The client starts a local subprocess; the plugin opens no port.
 Only connect trusted clients: they can change layouts and export note content,
 and data returned to the client may be sent to its AI provider. GraphFrontier
 includes no built-in model or AI subscription. See the [full tool and API
@@ -300,13 +298,13 @@ See the [installation guide](docs/installation.md) for source builds and trouble
 
 - **Getting started:** [Installation](docs/installation.md), [Usage](docs/usage.md), [Settings](docs/settings.md).
 - **Advanced:** [Hotkeys and commands](docs/hotkeys.md), [Physics model](docs/physics.md), [Local API and embedded MCP](docs/mcp.md), [Development and project structure](docs/development.md).
-- **Help:** [Troubleshooting](docs/troubleshooting.md), [Release notes for 0.9.0](docs/releases/0.9.0.md), [release history](docs/releases/).
+- **Help:** [Troubleshooting](docs/troubleshooting.md), [Current release notes](docs/releases/0.9.4.md), [release history](docs/releases/).
 
 ## Support
 
 I would be grateful for your support, ideas and bug reports.
 
-<a href="https://www.buymeacoffee.com/pikiby" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+<a href="https://buymeacoffee.com/pikiby" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
 [Share an idea](https://github.com/pikiby/GraphFrontier/discussions) · [Report a bug](https://github.com/pikiby/GraphFrontier/issues)
 

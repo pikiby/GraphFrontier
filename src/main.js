@@ -1,28 +1,29 @@
-const { BackupManager } = require('./backups');
-const { observeNodeLists } = require('./appearance-events');
-const { normalizeLayoutSleep } = require('./physics');
-const {
+import { markerOrder } from './link-markers.js';
+import { BackupManager } from './backups.js';
+import { observeNodeLists } from './appearance-events.js';
+import { normalizeLayoutSleep } from './physics.js';
+import {
   RENDER_MODEL,
   prepareRenderModel,
   normalizeLegacyRenderSettings,
   applyEdgeDprMigration,
-} = require('./render-migration');
-const { Plugin, Notice, parseLinktext } = require('obsidian');
-const { normalizeDarkEnergy, darkEnergyNodes } = require('./dark-energy');
-const { normalizeSubgraphs, subgraphNodes, normalizeSubgraphSpaces } = require('./subgraphs');
-const {
+} from './render-migration.js';
+import { Plugin, Notice, parseLinktext } from 'obsidian';
+import { normalizeDarkEnergy, darkEnergyNodes } from './dark-energy.js';
+import { normalizeSubgraphs, subgraphNodes, normalizeSubgraphSpaces } from './subgraphs.js';
+import {
   NODE_VISUAL_SETTINGS,
   getNodeGroupVisuals,
   normalizeNodeVisuals,
   normalizeGroupVisuals,
-} = require('./node-visuals');
-const { NodeListStore } = require('./node-lists');
-const { getGroupStyleMap } = require('./render');
+} from './node-visuals.js';
+import { NodeListStore } from './node-lists.js';
+import { getGroupStyleMap } from './render.js';
 const EMPTY_NODE_LISTS = [];
-const { GraphFrontierApi } = require('./api');
-const { McpController, GraphFrontierMcpSettingTab } = require('./mcp-settings');
+import { GraphFrontierApi } from './api.js';
+import { McpController, GraphFrontierMcpSettingTab } from './mcp-settings.js';
 
-const {
+import {
   GRAPHFRONTIER_VIEW_TYPE,
   LOCAL_GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
@@ -38,10 +39,10 @@ const {
   HOTKEY_COMMAND_IDS,
   HOTKEY_MODIFIER_KEYS,
   HOTKEY_KEY_ALIASES,
-} = require('./constants');
+} from './constants.js';
 
-const { GraphFrontierView } = require('./view');
-const { LocalGraphFrontierView } = require('./local-view');
+import { GraphFrontierView } from './view.js';
+import { LocalGraphFrontierView } from './local-view.js';
 
 // Register all Command Palette / hotkey actions in one place to keep plugin boot logic compact.
 function registerGraphFrontierCommands(plugin) {
@@ -306,7 +307,7 @@ function getHotkeyFromKeyboardEventUtil(keyboardEvent) {
 // ============================================================================
 // Plugin core: data load, command registration, persistence, and graph data collection.
 // ============================================================================
-module.exports = class GraphFrontierPlugin extends Plugin {
+export default class GraphFrontierPlugin extends Plugin {
   async onload() {
     this.metadataResolvedOnce = false;
     this.metadataResolutionPending = false;
@@ -696,6 +697,10 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         'reverse_arrows',
       ])
         settings[key] = settings[key] === true;
+      settings.arrow_zoom = settings.arrow_zoom !== false;
+      if (![0, 1, 2].includes(settings.edge_pattern)) settings.edge_pattern = 0;
+      if (!markerOrder.includes(settings.arrow_shape)) delete settings.arrow_shape;
+      settings.arrow_size = this.clampNumber(settings.arrow_size, 0.5, 3, 1);
       settings.grid_opacity =
         typeof settings.grid_opacity === 'number' && Number.isFinite(settings.grid_opacity)
           ? Math.max(0, Math.min(1, settings.grid_opacity))
@@ -1202,7 +1207,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const adapter = this.app?.vault?.adapter;
     if (!adapter || typeof adapter.list !== 'function') return [];
     const folderPath = this.getLayoutsFolderRelativePath();
-    let files = [];
+    let files;
     try {
       const listed = await adapter.list(folderPath);
       files = Array.isArray(listed?.files) ? listed.files : [];
@@ -2024,7 +2029,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       this.groupSuggestionIndex ||
       this.buildGroupSuggestionIndex(this.app.vault.getMarkdownFiles());
 
-    let items = [];
+    let items;
     if (cleanType === 'tag') items = Array.from(index.tags);
     else if (cleanType === 'path') items = Array.from(index.paths);
     else if (cleanType === 'file') items = Array.from(index.files);
@@ -2078,7 +2083,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     const file = abstractFile || this.app.vault.getAbstractFileByPath(path);
     const forcedAttachment = options && options.isAttachment === true;
     const pathText = String(path || '');
-    const fallbackExtMatch = /\.([^.\/]+)$/u.exec(pathText);
+    const fallbackExtMatch = /\.([^./]+)$/u.exec(pathText);
     const fallbackExt = fallbackExtMatch ? String(fallbackExtMatch[1] || '').toLowerCase() : '';
     const fileExt = typeof file?.extension === 'string' ? file.extension.toLowerCase() : '';
     const meta = {
@@ -2282,7 +2287,7 @@ module.exports = class GraphFrontierPlugin extends Plugin {
         const isAttachmentExisting =
           targetExists && typeof targetAbs.extension === 'string' && targetExt !== 'md';
 
-        const unresolvedExtMatch = /(?:\.([^.\/]+))$/u.exec(targetPath);
+        const unresolvedExtMatch = /\.([^./]+)$/u.exec(targetPath);
         const unresolvedExt = unresolvedExtMatch ? unresolvedExtMatch[1].toLowerCase() : '';
         const isAttachmentUnresolved =
           !targetExists && unresolvedExt !== '' && unresolvedExt !== 'md';
@@ -2331,7 +2336,32 @@ module.exports = class GraphFrontierPlugin extends Plugin {
     let nodes = Array.from(nodeMap.values());
     let filteredEdges = edges;
 
-    if (hideOrphans) {
+    const exported = this.exportLayoutGraphs?.[this.getActiveLayoutFileName()];
+    if (exported) {
+      const synthetic = new Set(
+        [...this.data.dark_energy, ...this.data.subgraphs].map((n) => n.id)
+      );
+      const visible = new Set();
+      for (const n of exported.nodes) {
+        if (synthetic.has(n.id)) {
+          visible.add(n.id);
+          continue;
+        }
+        const file = this.app.vault.getAbstractFileByPath(n.id);
+        if (!file && existingFilesOnly) continue;
+        if (
+          n.attachment &&
+          (!includeAttachments ||
+            excludedExtensions.has((file?.extension || n.id.split('.').pop()).toLowerCase()))
+        )
+          continue;
+        if (hideOrphans && !n.linked && !touchedNodeIds.has(n.id)) continue;
+        visible.add(n.id);
+        addNodeIfMissing(n.id, n.label || n.id, { isAttachment: n.attachment });
+      }
+      nodes = [...nodeMap.values()].filter((n) => visible.has(n.id));
+      filteredEdges = exported.edges.filter((e) => visible.has(e.source) && visible.has(e.target));
+    } else if (hideOrphans) {
       const keepIds = touchedNodeIds;
       nodes = nodes.filter((node) => keepIds.has(node.id));
       const keepSet = new Set(nodes.map((node) => node.id));
@@ -2401,4 +2431,4 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       view.persistViewState?.();
     }
   }
-};
+}

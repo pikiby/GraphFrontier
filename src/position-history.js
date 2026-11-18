@@ -1,4 +1,4 @@
-const { GRAPHFRONTIER_VIEW_TYPE } = require('./constants');
+import { GRAPHFRONTIER_VIEW_TYPE } from './constants.js';
 const histories = new WeakMap();
 const clone = (value) => (value == null ? null : JSON.parse(JSON.stringify(value)));
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -135,7 +135,7 @@ function replayPositionAction(view, redo = false) {
   return 'applied';
 }
 
-module.exports = {
+export {
   historyFor,
   beginPositionAction,
   finishPositionAction,

@@ -1,4 +1,4 @@
-const { Modal } = require('obsidian');
+import { Modal } from 'obsidian';
 class DataConfirmModal extends Modal {
   static ask(app, title, message, action = 'Confirm') {
     return new Promise((resolve) =>
@@ -26,4 +26,4 @@ class DataConfirmModal extends Modal {
     this.contentEl.empty();
   }
 }
-module.exports = { DataConfirmModal };
+export { DataConfirmModal };

@@ -7,4 +7,4 @@ class GraphApiError extends Error {
 function fail(code, message) {
   throw new GraphApiError(code, message);
 }
-module.exports = { GraphApiError, fail };
+export { GraphApiError, fail };

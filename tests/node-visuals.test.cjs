@@ -296,7 +296,7 @@ test('one reset clears all visual controls, identical for notes and attachments'
       definition.type === 'color'
         ? { ...definition, max: '#abcdef' }
         : definition.type === 'boolean'
-          ? { ...definition, max: true }
+          ? { ...definition, max: definition.key !== 'arrow_zoom' }
           : definition;
     const row = visual.items.find((item) => item.title === spec.label).dom.children[0];
     const [input] = row.children;
@@ -309,7 +309,10 @@ test('one reset clears all visual controls, identical for notes and attachments'
       spec.type === 'boolean'
     );
     input.value = String(spec.values ? spec.values.length - 1 : spec.max);
-    input.events[spec.type === 'boolean' ? 'click' : 'input']();
+    if (input.cls === 'graphfrontier-style-strip') {
+      const index = spec.values.indexOf(spec.max);
+      input.children[index].events.click({ stopPropagation() {} });
+    } else input.events[spec.type === 'boolean' ? 'click' : 'input']();
     assert.equal(getNodeVisualOverride(plugin, node.id, spec.key), spec.max);
   }
   const resets = visual.items.filter((item) => item.title === 'Reset visual settings');
@@ -594,14 +597,21 @@ test('groups reuse the node visual menu, write group overrides and reset without
     input.value = String(
       spec.type === 'color' ? '#abcdef' : spec.values ? spec.values.length - 1 : spec.max
     );
-    input.events[spec.type === 'boolean' ? 'click' : 'input']();
+    if (input.cls === 'graphfrontier-style-strip') {
+      const index = spec.values.indexOf(spec.max);
+      input.children[index].events.click({ stopPropagation() {} });
+    } else input.events[spec.type === 'boolean' ? 'click' : 'input']();
     if (spec.key === 'node_color') {
       assert.equal(plugin.data.groups[0].color, '#abcdef');
       assert.equal(row.colorInput.value, '#abcdef');
     } else
       assert.equal(
         plugin.data.groups[0].settings[spec.key],
-        spec.type === 'color' ? '#abcdef' : spec.type === 'boolean' ? true : spec.max
+        spec.type === 'color'
+          ? '#abcdef'
+          : spec.type === 'boolean'
+            ? spec.key !== 'arrow_zoom'
+            : spec.max
       );
   }
   assert.deepEqual(plugin.data.node_visual_settings, before);
@@ -777,4 +787,23 @@ test('shape: base value in Display, individual override, and every node color sw
   view.sidePanelOpen = true;
   view.syncSidePanelControls();
   assert.equal(input.value, '6', 'panel sync places the slider by position');
+});
+
+test('retired arrow is discarded without shifting other saved marker IDs', (t) => {
+  const spec = NODE_VISUAL_SETTINGS.find((s) => s.key === 'arrow_shape');
+  assert.deepEqual(spec.values, [2, 1, 0, 4, 5, 6, 7, 8]);
+  assert.equal(spec.names[8], 'Bar');
+  const { plugin } = fixture(t, { settings: { arrow_shape: 3 } });
+  assert.equal(Object.hasOwn(plugin.data.settings, 'arrow_shape'), false);
+  const { normalizeGroupVisuals } = loadSource('node-visuals.js');
+  assert.deepEqual(normalizeGroupVisuals({ arrow_shape: 3 }), {});
+  const { validate } = loadSource('api-tools.js');
+  const update = (shape) =>
+    validate('updateSettings', {
+      viewId: 'view',
+      contextToken: 'token',
+      settings: { arrow_shape: shape },
+    });
+  assert.throws(() => update(3), { code: 'INVALID_ARGUMENT' });
+  for (const id of spec.values) assert.equal(update(id).settings.arrow_shape, id);
 });

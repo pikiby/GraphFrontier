@@ -27,4 +27,4 @@ ${String(styles).replace(/<\/(style)/gi, '<\\/$1')}
 `;
 }
 
-module.exports = { buildPageHtml };
+export { buildPageHtml };

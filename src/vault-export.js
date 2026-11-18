@@ -1,4 +1,4 @@
-const { TFile, TFolder, normalizePath } = require('obsidian');
+import { TFile, TFolder, normalizePath } from 'obsidian';
 
 function validateVaultExportPath(rawPath) {
   const value = String(rawPath || '')
@@ -94,4 +94,4 @@ async function writeExport(vault, target, html, options) {
   else throw new Error('The export filename points to a folder');
 }
 
-module.exports = { buildVaultExportPath, resolveVaultExportPath, writeVaultExport };
+export { buildVaultExportPath, resolveVaultExportPath, writeVaultExport };

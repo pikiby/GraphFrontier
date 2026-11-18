@@ -8,7 +8,7 @@
 - `src/render.js`: render pass, visual helpers, focus/label/color behavior
 - `src/constants.js`: defaults, limits, command metadata, shared constants
 - `src/api.js`, `src/api-actions.js`, `src/api-layouts.js`, `src/api-tools.js`: graph API, actions, layout recovery and validated schemas
-- `src/mcp-server.js`, `src/mcp-settings.js`: optional authenticated MCP transport and connection settings
+- `src/mcp-server.js`, `src/mcp-settings.js`: local MCP bridge and agent access settings
 - `src/static/`: plugin release assets source (`manifest.json`, `styles.css`, `versions.json`)
 - `dist/`: built plugin files ready to install into a vault plugin folder
 - `dist/release/`: packaged release zip files
@@ -31,7 +31,7 @@ ESM forms. The ordinary interpreted parser remains intact. `z.compile(schema)`
 falls back to that parser; strict compilation throws a typed unsupported error.
 This is not a validation stub or a global `Function` override.
 
-The helper pins Zod 4.6.7 and MCP SDK 1.32.1 and checks SHA-256 hashes of every
+The helper pins Zod 4.6.7 and MCP SDK 1.32.2 and checks SHA-256 hashes of every
 adapted upstream file. A changed version or source stops the build. When upgrading
 these dependencies, review the affected sources and transformations before updating
 the pins/hashes, then run the no-codegen and bundle tests. Those tests check the

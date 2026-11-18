@@ -2,9 +2,10 @@
 // shows the graph exactly as the GraphFrontier view shows it in Obsidian. The snapshot is what
 // the plugin reads from Obsidian: the vault's files, their metadata and links, note texts, the
 // plugin's data and layouts with the current positions, the theme and the icons.
-const { setIcon } = require('obsidian');
-const viewerSource = require('./viewer-source');
-const { buildPageHtml } = require('./export-html');
+import { setIcon } from 'obsidian';
+import viewerSource from './viewer-source.js';
+import { buildPageHtml } from './export-html.js';
+import { captureIcon } from './export-icon.js';
 
 function hasExportPage() {
   return typeof viewerSource.viewerScript === 'string' && viewerSource.viewerScript.length > 0;
@@ -29,12 +30,12 @@ function filterLinks(links, keep) {
   const result = {};
   for (const [source, targets] of Object.entries(links || {})) {
     if (!keep(source)) continue;
-    result[source] = { ...targets };
+    result[source] = Object.fromEntries(Object.entries(targets).filter(([id]) => keep(id)));
   }
   return result;
 }
 
-// The page's icons: each candidate name that Obsidian draws as an icon, as SVG markup.
+// The page's icons: each candidate name that Obsidian draws as an icon, as SVG geometry.
 function captureIcons(doc) {
   const icons = {};
   for (const name of viewerSource.iconCandidates) {
@@ -44,7 +45,8 @@ function captureIcons(doc) {
     } catch {
       continue;
     }
-    if (holder.firstElementChild?.tagName?.toLowerCase() === 'svg') icons[name] = holder.innerHTML;
+    const icon = captureIcon(holder.firstElementChild);
+    if (icon?.tag === 'svg') icons[name] = icon;
   }
   return icons;
 }
@@ -84,6 +86,40 @@ function keepNodes(layout, keep) {
       ? value.filter((id) => keep(id))
       : Object.fromEntries(Object.entries(value).filter(([id]) => keep(id)));
   }
+  // These rules have already removed their targets. Do not export private exclusion queries.
+  result.blacklist = [];
+  result.groups = layout.groups.filter((group) => !group.hidden);
+  const orbits = (entries) =>
+    Object.fromEntries(
+      Object.entries(entries || {}).filter(([id, orbit]) => keep(id) && keep(orbit.anchor_id))
+    );
+  result.orbit_pins = orbits(layout.orbit_pins);
+  result.saved_layout_orbit_pins = orbits(layout.saved_layout_orbit_pins);
+  result.dark_energy = layout.dark_energy.filter((item) => keep(item.id));
+  result.subgraphs = layout.subgraphs
+    .filter((item) => keep(item.id))
+    .map((item) => ({
+      ...item,
+      members: item.members.filter(keep),
+      ...(item.origin && {
+        origin: { ...item.origin, orbit_pins: orbits(item.origin.orbit_pins) },
+      }),
+    }));
+  result.subgraph_cameras = Object.fromEntries(
+    Object.entries(layout.subgraph_cameras).filter(([id]) => keep(id))
+  );
+  const pruneFilter = (state) => ({
+    ...state,
+    node_filter: state.node_filter?.filter(keep) ?? null,
+  });
+  result.subgraph_filters = Object.fromEntries(
+    Object.entries(layout.subgraph_filters)
+      .filter(([id]) => keep(id))
+      .map(([id, state]) => [id, pruneFilter(state)])
+  );
+  result.view_state = pruneFilter(layout.view_state);
+  // Sleep signatures describe the original topology, not the exported one.
+  result.saved_layout_sleep = {};
   return result;
 }
 
@@ -103,33 +139,67 @@ async function captureExportSnapshot(view, options = {}) {
   const { vault, metadataCache } = app;
   const adapter = vault.adapter;
   const layoutName = plugin.getActiveLayoutFileName();
-  const wanted = Array.isArray(options.nodeIds) ? new Set(options.nodeIds) : null;
-  // The active layout as it is on screen now, with live positions and camera. An export of
-  // chosen nodes keeps their data and that of gravity nodes and subgraphs, and no other layout.
+  const explicit = Array.isArray(options.nodeIds);
+  const wanted = view.exportVisibleIds();
+  if (explicit) {
+    const requested = new Set(options.nodeIds);
+    for (const id of wanted) if (!requested.has(id)) wanted.delete(id);
+  }
+  // Keep the visible topology even when clipping removes a note's only neighbour,
+  // or when an edge represents members of a collapsed container.
+  const topology = (source, ids) => ({
+    nodes: source.nodes
+      .filter((n) => ids.has(n.id))
+      .map((n) => ({
+        id: n.id,
+        label: n.label,
+        linked:
+          source.plugin.getSettings().hide_orphans ||
+          n.degree > 0 ||
+          !!source.topologyNeighborsById?.get(n.id)?.size,
+        attachment: n.meta?.isAttachment === true,
+      })),
+    edges: source.edges
+      .filter((e) => ids.has(e.source) && ids.has(e.target))
+      .map(({ source, target, bidirectional }) => ({ source, target, bidirectional })),
+  });
+  const layoutGraphs = Object.create(null);
+  layoutGraphs[layoutName] = topology(view, wanted);
+  const includedIds = new Set(wanted);
   const snapshot = view.captureLayoutSnapshot(layoutName);
-  const synthetic = new Set(
-    [...(snapshot.dark_energy || []), ...(snapshot.subgraphs || [])].map((item) => item.id)
-  );
-  const liveLayout = wanted
-    ? keepNodes(snapshot, (id) => wanted.has(id) || synthetic.has(id))
-    : snapshot;
+  const liveLayout = keepNodes(snapshot, (id) => wanted.has(id));
   const modules = normalizeModules(options.modules);
   const pluginFiles = {};
-  for (const name of wanted || !modules.layouts ? [] : await plugin.listLayoutFileNames()) {
+  for (const name of explicit || !modules.layouts ? [] : await plugin.listLayoutFileNames()) {
+    if (name === layoutName) continue;
     const filePath = plugin.getLayoutFileRelativePath(name);
-    try {
-      pluginFiles[filePath] = await adapter.read(filePath);
-    } catch {
-      // An unreadable layout is simply not offered on the page.
-    }
+    const raw = JSON.parse(await adapter.read(filePath));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !raw.settings)
+      throw new Error('Cannot determine visibility for saved layout: ' + name);
+    const layout = plugin.normalizeData(raw);
+    layout.active_layout_name = name;
+    const preview = view.savedLayoutExportView(layout);
+    const ids = preview.exportVisibleIds();
+    layoutGraphs[name] = topology(preview, ids);
+    pluginFiles[filePath] = JSON.stringify(keepNodes(layout, (id) => ids.has(id)));
+    for (const id of ids) includedIds.add(id);
   }
   pluginFiles[plugin.getLayoutFileRelativePath(layoutName)] = JSON.stringify(liveLayout);
   const listsPath = plugin.nodeListStore?.path;
-  if (listsPath && (await adapter.exists(listsPath)))
-    pluginFiles[listsPath] = await adapter.read(listsPath);
-
-  const files = vault.getFiles().filter((file) => !wanted || wanted.has(file.path));
-  const included = new Set(files.map((file) => file.path));
+  if (listsPath && (await adapter.exists(listsPath))) {
+    const { lists } = JSON.parse(await adapter.read(listsPath));
+    pluginFiles[listsPath] = JSON.stringify({
+      version: 1,
+      lists: lists
+        .map(({ id, name, nodeIds }) => ({
+          id,
+          name,
+          nodeIds: nodeIds.filter((nodeId) => includedIds.has(nodeId)),
+        }))
+        .filter((list) => list.nodeIds.length),
+    });
+  }
+  const files = vault.getFiles().filter((file) => includedIds.has(file.path));
   const caches = {};
   const texts = {};
   for (const file of files) {
@@ -144,13 +214,12 @@ async function captureExportSnapshot(view, options = {}) {
       }
     }
   }
-  const resolvedLinks = filterLinks(metadataCache.resolvedLinks, (path) => included.has(path));
-  if (wanted)
-    for (const targets of Object.values(resolvedLinks))
-      for (const target of Object.keys(targets)) if (!included.has(target)) delete targets[target];
+  const keep = (id) => includedIds.has(id);
+  const resolvedLinks = filterLinks(metadataCache.resolvedLinks, keep);
   const doc = view.contentEl.ownerDocument;
   return {
     exportOptions: modules,
+    layoutGraphs,
     manifest: {
       id: plugin.manifest.id,
       version: plugin.manifest.version,
@@ -169,9 +238,7 @@ async function captureExportSnapshot(view, options = {}) {
     caches,
     texts,
     resolvedLinks,
-    unresolvedLinks: wanted
-      ? {}
-      : filterLinks(metadataCache.unresolvedLinks, (path) => included.has(path)),
+    unresolvedLinks: filterLinks(metadataCache.unresolvedLinks, keep),
     icons: captureIcons(doc),
     bodyClasses: ['theme-dark', 'theme-light'].filter((name) => doc.body.classList.contains(name)),
     themeVariables: captureThemeVariables(view.contentEl),
@@ -191,4 +258,4 @@ function buildExportHtml(snapshot, title) {
   });
 }
 
-module.exports = { hasExportPage, captureExportSnapshot, buildExportHtml, normalizeModules };
+export { hasExportPage, captureExportSnapshot, buildExportHtml, normalizeModules };

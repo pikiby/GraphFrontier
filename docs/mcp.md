@@ -1,100 +1,16 @@
 # Local Graph API and MCP
 
-Available starting with **GraphFrontier 0.8.0**. This release includes a
-desktop-only MCP server inside GraphFrontier.
-There is no separate service to install or start. JavaScript dependencies are
-bundled into `main.js`; users do not need npm or a separate Node installation.
-The embedded server requires the Node 18+ runtime and Web Fetch APIs supplied
-by a sufficiently recent desktop Obsidian installer. Failure to start MCP does
-not disable the graph. Mobile keeps the graph but does not load the server.
+## Connect a client
 
-## Enable
+On desktop, enable the official Obsidian CLI and open the target vault. GraphFrontier MCP is on by default; an existing OFF preference stays off. Toggle it in **Sets → MCP** or the plugin settings. There is no network listener, port, or access token.
 
-Open **Settings -> GraphFrontier -> Local MCP** and enable MCP. The default port
-is `27125`, bound only to `127.0.0.1`. A random access token is generated on first
-enable. Use a different port for each vault. The settings page shows status,
-provides **Copy token**, and displays configuration examples.
+Ask your agent to register a local stdio MCP server. It needs Node.js and the `obsidian` executable on PATH. Use the installed plugin in the target vault, not a copy. For Codex:
 
-The server starts when the enabled plugin loads, independently of graph tabs.
-Closing a graph tab leaves MCP running; disabling MCP or the plugin stops it.
-Without an open graph, `list_views` returns an empty list. A tab is opened only
-by an explicit `graph_action` with `action: "open"`. Closing Obsidian makes the
-endpoint unavailable.
-
-Settings and the token live in `<configDir>/plugins/graphfrontier/mcp.json`, not
-`data.json` or `layouts/`. Keep that file private and exclude it from public Git
-repositories, exports and sharing. Vault sync can copy it to another device.
-Changing layouts never changes the MCP token or port. A malformed configuration
-is not overwritten; MCP stays off and reports the problem.
-
-## Client Configurations
-
-All clients use the same Streamable HTTP endpoint and Bearer authentication.
-Set `GRAPHFRONTIER_MCP_TOKEN` in the environment used to launch the client to
-the token copied from Obsidian. Merge the example with your existing settings;
-do not replace other servers. GraphFrontier never changes client configs itself.
-
-### Codex
-
-In `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.graphfrontier]
-url = "http://127.0.0.1:27125/mcp"
-bearer_token_env_var = "GRAPHFRONTIER_MCP_TOKEN"
+```sh
+codex mcp add graphfrontier -- node "/absolute/path/to/vault/.obsidian/plugins/graphfrontier/main.js" --mcp-stdio "vault name or ID"
 ```
 
-See the [official Codex MCP documentation](https://developers.openai.com/codex/mcp).
-
-### Claude Code
-
-In the project's `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "graphfrontier": {
-      "type": "http",
-      "url": "http://127.0.0.1:27125/mcp",
-      "headers": {
-        "Authorization": "Bearer ${GRAPHFRONTIER_MCP_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Claude Code expands the environment variable in the header. See its
-[official MCP documentation](https://code.claude.com/docs/en/mcp).
-This is a Claude Code profile, not a guarantee that every Claude Desktop or
-cloud connector can reach local HTTP. Stdio-only clients need an adapter.
-
-### OpenCode 1.x
-
-In `opencode.json` or `opencode.jsonc`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "graphfrontier": {
-      "type": "remote",
-      "url": "http://127.0.0.1:27125/mcp",
-      "enabled": true,
-      "oauth": false,
-      "headers": {
-        "Authorization": "Bearer {env:GRAPHFRONTIER_MCP_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Here `remote` means HTTP rather than a subprocess; the address is still local.
-OAuth is disabled because this server uses a local access token. See the
-[official OpenCode documentation](https://opencode.ai/docs/mcp-servers/).
-For other major client versions, check their configuration schema and negotiated
-protocol support rather than assuming this 1.x example applies unchanged.
+Adjust the config directory if it differs from .obsidian. Reconnect the client, then ask it to call **list_views**. An empty list means no graph view is open.
 
 ## Tools and Internal API
 
@@ -124,8 +40,7 @@ Use a group query `list:problems` to style its members. `edit_rules` group entri
 accept an optional `settings` object with existing visual keys such as
 `aura_radius`, `aura_brightness`, `node_size_scale` and `label_font_size`.
 Keep color in the existing `color` field. Passing `settings: {}` clears the
-group's additional overrides. These operations reuse the existing MCP endpoint
-and authentication; no additional HTTP service is introduced.
+group's additional overrides. These operations use the same local bridge.
 
 Start with `list_views`. Use an explicit `viewId` from its result. Saved layouts
 are shared plugin state, not independent layouts per tab.
@@ -219,15 +134,14 @@ into the matching results, not the source node array; follow its `nextOffset` to
 New mutations also require `viewId` and `contextToken` (except opening a graph).
 Mutating MCP calls are serialized across clients. Layout file commits use the
 same queue as UI saves/autosave and loads. Reread state after loading a layout,
-rebuilding the graph or creating/removing gravity nodes. An HTTP error after a
+rebuilding the graph or creating/removing gravity nodes. A CLI error after a
 write is not proof that nothing happened: inspect the destination before retrying.
 
 This is graph control, not arbitrary JavaScript execution or a generic note
 editor. Native Obsidian/third-party menu actions such as bookmarking, merging
-notes and deleting vault files are **not** exposed. Neither are MCP credentials
-or server enable/port controls. Those stay in the local settings page. Blacklist
+notes and deleting vault files are **not** exposed. The MCP switch is not exposed either. Those stay in the local settings page. Blacklist
 and whitelist are visual filters, not access control: `visibleOnly: false`
-exposes hidden metadata, and explicit node IDs may be edited/exported even when
+exposes hidden metadata, and explicit node IDs may be edited even when
 hidden. Selection/frame still require visible IDs.
 
 ### Rules, Search and Selection
@@ -274,7 +188,7 @@ reading or editing arbitrary file contents.
 ### Tool Call Examples
 
 These are `tools/call` parameter objects, not complete JSON-RPC messages. The
-client handles the MCP handshake and authentication. Replace `<viewId>` and
+client handles the MCP handshake. Replace `<viewId>` and
 `<contextToken>` with values returned by `list_views`/`get_state`, and replace
 example node IDs with IDs from the actual graph. Read fresh state after a graph
 or layout change. Examples are independent, not a script to run blindly.
@@ -404,7 +318,7 @@ changes:
 Export writes the same page as **Export to**: GraphFrontier running on a snapshot of the
 vault and its layouts. With `nodeIds`, the snapshot holds only those notes, the links
 whose two endpoints are both included and their per-node layout data, and only the
-active layout. Without `nodeIds`, it holds the whole vault and every layout, and the
+active layout. IDs can only narrow the visible graph. Without `nodeIds`, it holds the visible nodes, and the
 page shows what the view shows. API exports include physics and the settings menu,
 without layouts or saving; notes open as text in the page. Node lists are limited to 500 per call; omit them to
 export a larger visible graph. All platforms use vault-relative paths; absolute paths are rejected. A directory gets the default HTML filename.
@@ -417,23 +331,7 @@ paths, tags and properties is still included.
 
 ## Safety and Verification
 
-The listener validates Host, Origin and a constant-time Bearer token check.
-Requests are limited to 64 KiB, 8 concurrently, 120 per 10 seconds, and a
-60-second timeout. Graph result JSON is limited to 2 MiB before wrapping in
-MCP content. Access tokens are never returned by graph tools. No LAN binding,
-CORS wildcard, OAuth discovery, or cloud tunnel is provided.
-
-Anyone holding the token can invoke both read and write tools. There is no
-per-tool permission scope in the server; configure client-side approvals and
-connect only trusted clients. GraphFrontier does not call a model provider, but
-an AI client can forward tool results to its provider. Local transport is not
-a guarantee that the client's later processing stays local.
-
-The implementation pins official `@modelcontextprotocol/sdk` 1.32.1 and uses
-stateless, per-request transports with JSON responses. It supports the SDK's
-2025-era protocol revisions, including 2025-03-26, 2025-06-18 and 2025-11-25.
-Clients must negotiate a revision supported by this SDK; support for future
-protocol revisions or every client major version is not implied.
+Graph requests are limited to 64 KiB; results are limited to 2 MiB. Only connect trusted clients: tools can change layouts and export note text. The switch controls GraphFrontier tools, not the underlying Obsidian CLI.
 
 Automated tests cover the official SDK client handshake, tool discovery and
 calls, security rejection, multiple clients, pagination, stale state, lifecycle
@@ -445,9 +343,7 @@ exact subsets, camera restoration and real HTML files generated in a temporary
 directory. Tests use artificial vaults; no personal layouts are modified.
 
 Build and check with `npm run format:check`, `npm run lint`, `npm test`,
-`npm run build`, and `npm run check:release`. The Community Plugins acceptance
-of optional desktop networking in a mobile-capable plugin remains a separate
-review question; this local implementation does not change the manifest.
+`npm run build`, and `npm run check:release`.
 
 Group `settings` also accepts `edge_color`, `edge_opacity`, `show_arrows`, `reverse_arrows`, `strong_pull` and `strong_pull_multiplier` (1-20).
 They follow group membership without writing individual node overrides. Changing

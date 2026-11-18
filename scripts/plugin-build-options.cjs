@@ -12,7 +12,7 @@ const SDK_ROOT = path.resolve(
 const ADAPTER = path.join(__dirname, 'adapters/mcp-ajv-provider.cjs');
 const { viewerSourcePlugin } = require('./viewer-build.cjs');
 
-// Reviewed Zod 4.6.7 / SDK 1.32.1 sources. Dependency changes require an explicit
+// Reviewed Zod 4.6.7 / SDK 1.32.2 sources. Dependency changes require an explicit
 // review of these narrow adaptations, never a best-effort text substitution.
 const ZOD_HASHES = {
   'doc.cjs': '920b37602309434c783ecd326141418dbb0e2eff560e42cb1b85a91f4fdd9cc4',
@@ -83,7 +83,7 @@ function noDynamicCodePlugin() {
       build.onStart(() => {
         for (const [root, expected] of [
           [ZOD_ROOT, '4.6.7'],
-          [SDK_ROOT, '1.32.1'],
+          [SDK_ROOT, '1.32.2'],
         ]) {
           const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
           if (pkg.version !== expected)
@@ -130,12 +130,13 @@ function noDynamicCodePlugin() {
 function createPluginBuildOptions({ production = false } = {}) {
   return {
     absWorkingDir: ROOT,
-    entryPoints: ['src/main.js'],
+    entryPoints: { main: 'scripts/obsidian-entry.cjs' },
     bundle: true,
     external: ['obsidian', ...builtinModules, 'node:*'],
     format: 'cjs',
     platform: 'browser',
     target: 'es2018',
+    supported: { 'dynamic-import': false },
     sourcemap: production ? false : 'inline',
     minify: false,
     logLevel: 'info',

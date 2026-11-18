@@ -1,4 +1,4 @@
-const { beginPositionAction, finishPositionAction } = require('./position-history');
+import { beginPositionAction, finishPositionAction } from './position-history.js';
 
 // Graph effects change what happens on the graph. Each run is one undo step: the Undo button
 // or Ctrl+Z returns every node to where it was before the effect started.
@@ -237,7 +237,7 @@ function pulseForce(view, node, nowMs = Date.now()) {
   return ax || ay ? [ax, ay] : null;
 }
 
-module.exports = {
+export {
   togglePulse,
   firePulse,
   activePulseWaves,

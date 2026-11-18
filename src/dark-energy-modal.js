@@ -1,4 +1,4 @@
-const { Modal, Notice } = require('obsidian');
+import { Modal, Notice } from 'obsidian';
 
 class DarkEnergyModal extends Modal {
   constructor(view, initial, onSave) {
@@ -160,4 +160,4 @@ class DarkEnergyModal extends Modal {
   }
 }
 
-module.exports = { DarkEnergyModal };
+export { DarkEnergyModal };

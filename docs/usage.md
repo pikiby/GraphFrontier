@@ -231,7 +231,7 @@ If search row is active, save is blocked to avoid saving filtered/focus state as
 ## Static HTML Export
 
 The exported file is GraphFrontier itself running in the browser: the same rendering, physics,
-side panel and menus as in Obsidian, on a snapshot taken at export. The snapshot holds the vault's
+side panel and menus as in Obsidian, on a snapshot taken at export. The snapshot includes only files visible in the exported graph (plus those visible in other saved layouts if **Layouts** is checked). It holds those
 files with their tags, properties, headings and links, the note texts, the plugin's data, its
 layouts (the active one with the positions, camera and settings on screen at export) and node
 lists, the theme colors and the icons. Notes cannot be edited on the page.

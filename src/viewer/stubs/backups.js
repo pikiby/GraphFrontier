@@ -9,4 +9,4 @@ class BackupManager {
   dispose() {}
 }
 
-module.exports = { BackupManager };
+export { BackupManager };

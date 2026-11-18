@@ -1,6 +1,6 @@
-const { z } = require('./schema-runtime');
-const { DEFAULT_DATA, MIN_ZOOM, MAX_ZOOM, HOTKEY_COMMANDS } = require('./constants');
-const { NODE_VISUAL_SETTINGS } = require('./node-visuals');
+import { z } from './schema-runtime.js';
+import { DEFAULT_DATA, MIN_ZOOM, MAX_ZOOM, HOTKEY_COMMANDS } from './constants.js';
+import { NODE_VISUAL_SETTINGS } from './node-visuals.js';
 
 const color = z.string().regex(/^#[0-9a-f]{6}$/i);
 const number = (min, max) => z.number().finite().min(min).max(max);
@@ -16,7 +16,13 @@ const page = {
 const visuals = Object.fromEntries(
   NODE_VISUAL_SETTINGS.map((s) => [
     s.key,
-    s.type === 'color' ? color : s.type === 'boolean' ? z.boolean() : number(s.min, s.max),
+    ['edge_pattern', 'arrow_shape'].includes(s.key)
+      ? z.literal(s.values)
+      : s.type === 'color'
+        ? color
+        : s.type === 'boolean'
+          ? z.boolean()
+          : number(s.min, s.max),
   ])
 );
 const settings = Object.fromEntries(
@@ -404,4 +410,4 @@ function validate(method, args) {
   }
   return result.data;
 }
-module.exports = { EXTENDED_TOOLS, validate };
+export { EXTENDED_TOOLS, validate };

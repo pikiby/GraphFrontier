@@ -35,4 +35,8 @@ export default [
       'no-useless-escape': 'off',
     },
   },
+  {
+    files: ['src/**/*.js'],
+    languageOptions: { ecmaVersion: 2025, sourceType: 'module' },
+  },
 ];

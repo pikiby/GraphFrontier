@@ -1,5 +1,5 @@
-const { Menu, Notice } = require('obsidian');
-const { createEditorRow, setEditorRowReady } = require('./panel-controls');
+import { Menu, Notice } from 'obsidian';
+import { createEditorRow, setEditorRowReady } from './panel-controls.js';
 
 // Layout block: every saved layout is a row; clicking one makes it active. Rows are the shared
 // editor rows of Groups and Custom lists. Layouts follow their file names, so they have no handle.
@@ -23,9 +23,7 @@ class LayoutList {
 
   setRowState(rowState, editing) {
     rowState.editing = editing;
-    setEditorRowReady(rowState, true);
-    rowState.dragHandle.style.visibility = 'hidden';
-    rowState.row.draggable = false;
+    setEditorRowReady(rowState, true, { draggable: false });
   }
 
   onEnter(input, callback) {
@@ -178,4 +176,4 @@ class LayoutList {
   }
 }
 
-module.exports = { LayoutList };
+export { LayoutList };

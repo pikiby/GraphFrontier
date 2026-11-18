@@ -11,11 +11,11 @@
 [GraphFrontier in the official directory](https://community.obsidian.md/plugins/graphfrontier).
 
 You do not need npm, a separate Node.js installation, an AI subscription, or an
-MCP client to use the graph. MCP is optional and disabled by default.
+MCP client to use the graph. Agent access is desktop-only and enabled by default. Turn it off in **Sets → MCP** if you do not use it.
 
 ## Compatibility
 
-GraphFrontier 0.8.5 requires Obsidian **1.12.7 or newer**. Desktop candidate
+GraphFrontier requires Obsidian **1.12.7 or newer**. Desktop candidate
 checks passed on 1.12.7 in an isolated vault. Android checks covered Obsidian
 1.14.4 on Android 11 hardware and an Android 15 emulator. iOS remains unverified.
 Automated tests complement these checks; they do not certify every platform or
@@ -23,9 +23,7 @@ touch workflow. Compatibility entries for earlier plugin releases are unchanged.
 
 The graph is available on desktop and mobile. HTML export stays inside
 the vault on both platforms. External-file and folder navigation remain
-desktop features. MCP additionally requires desktop Obsidian's embedded Node
-18+ runtime and Web Fetch APIs; an unavailable MCP runtime does not disable
-the graph. See [MCP setup](mcp.md) and [mobile export](usage.md#static-html-export-on-mobile).
+desktop features. To connect an MCP client, enable the official desktop Obsidian CLI and make Node.js available to the client. Neither is needed to use the graph itself. See [MCP setup](mcp.md) and [mobile export](usage.md#static-html-export).
 
 ## Manual Installation
 

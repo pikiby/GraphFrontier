@@ -1,101 +1,65 @@
-// Markdown for notes opened on the exported page: headings, paragraphs, lists, quotes, code and
-// rules. Obsidian renders notes itself; a page outside Obsidian uses this renderer instead.
+// The standalone page supports a small Markdown subset. Note contents are always text nodes.
+function renderMarkdown(markdownText, target) {
+  const doc = target.ownerDocument;
+  const root = doc.createDocumentFragment();
+  function add(parent, tag) {
+    const el = doc.createElement(tag);
+    parent.appendChild(el);
+    return el;
+  }
+  function inline(parent, text) {
+    text.split('`').forEach((chunk, i) => {
+      const destination = i % 2 ? add(parent, 'code') : parent;
+      destination.appendChild(doc.createTextNode(chunk));
+    });
+  }
 
-function escapeHtml(text) {
-  return String(text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function renderInline(text) {
-  const chunks = escapeHtml(text).split('`');
-  return chunks.map((chunk, index) => (index % 2 ? `<code>${chunk}</code>` : chunk)).join('');
-}
-
-// Note properties (the leading YAML block) are metadata, not note text.
-function renderMarkdown(markdownText) {
+  let code = null;
+  let list = null;
+  let paragraph = null;
   const lines = String(markdownText || '')
     .replace(/\r/g, '')
     .replace(/^---\n[\s\S]*?\n---(\n|$)/, '')
     .split('\n');
-  const out = [];
-  let inCode = false;
-  let list = null;
-  let paragraph = [];
-  const flushParagraph = () => {
-    if (paragraph.length) out.push(`<p>${paragraph.map(renderInline).join('<br>')}</p>`);
-    paragraph = [];
-  };
-  const closeList = () => {
-    if (list) out.push(`</${list}>`);
-    list = null;
-  };
-  const openList = (tag) => {
-    if (list === tag) return;
-    closeList();
-    out.push(`<${tag}>`);
-    list = tag;
-  };
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.startsWith('```')) {
-      flushParagraph();
-      closeList();
-      const lang = trimmed.slice(3).trim();
-      out.push(
-        inCode
-          ? '</code></pre>'
-          : `<pre><code${lang ? ` class="language-${escapeHtml(lang)}"` : ''}>`
-      );
-      inCode = !inCode;
+      paragraph = list = null;
+      if (code) code = null;
+      else {
+        code = add(add(root, 'pre'), 'code');
+        const lang = trimmed.slice(3).trim();
+        if (lang) code.className = 'language-' + lang;
+      }
       continue;
     }
-    if (inCode) {
-      out.push(`${escapeHtml(line)}\n`);
+    if (code) {
+      code.appendChild(doc.createTextNode(line + '\n'));
       continue;
     }
-    if (!trimmed) {
-      flushParagraph();
-      closeList();
+    const item = /^([-*+] |\d+\. )(.*)$/.exec(trimmed);
+    if (item) {
+      paragraph = null;
+      const type = /^\d/.test(item[1]) ? 'ol' : 'ul';
+      if (list?.localName !== type) list = add(root, type);
+      inline(add(list, 'li'), item[2]);
       continue;
     }
+    list = null;
     const heading = /^(#{1,6}) (.*)$/.exec(trimmed);
-    if (heading) {
-      flushParagraph();
-      closeList();
-      out.push(`<h${heading[1].length}>${renderInline(heading[2])}</h${heading[1].length}>`);
+    if (heading) inline(add(root, 'h' + heading[1].length), heading[2]);
+    else if (trimmed.startsWith('>'))
+      inline(add(add(root, 'blockquote'), 'p'), trimmed.replace(/^> ?/, ''));
+    else if (/^([-*_])\1{2,}$/.test(trimmed)) add(root, 'hr');
+    else if (trimmed) {
+      if (paragraph) add(paragraph, 'br');
+      else paragraph = add(root, 'p');
+      inline(paragraph, line);
       continue;
     }
-    if (trimmed.startsWith('>')) {
-      flushParagraph();
-      closeList();
-      out.push(`<blockquote><p>${renderInline(trimmed.replace(/^> ?/, ''))}</p></blockquote>`);
-      continue;
-    }
-    const bullet = /^[-*+] (.*)$/.exec(trimmed);
-    const ordered = /^\d+\. (.*)$/.exec(trimmed);
-    if (bullet || ordered) {
-      flushParagraph();
-      openList(bullet ? 'ul' : 'ol');
-      out.push(`<li>${renderInline((bullet || ordered)[1])}</li>`);
-      continue;
-    }
-    if (/^([-*_])\1{2,}$/.test(trimmed)) {
-      flushParagraph();
-      closeList();
-      out.push('<hr>');
-      continue;
-    }
-    closeList();
-    paragraph.push(line);
+    paragraph = null;
   }
-  flushParagraph();
-  closeList();
-  if (inCode) out.push('</code></pre>');
-  return out.join('');
+  target.replaceChildren(root);
 }
 
-module.exports = { renderMarkdown, escapeHtml };
+export { renderMarkdown };

@@ -1,5 +1,5 @@
-const { Modal, TFile, TFolder, AbstractInputSuggest } = require('obsidian');
-const { buildVaultExportPath } = require('./vault-export');
+import { Modal, TFile, TFolder, AbstractInputSuggest } from 'obsidian';
+import { buildVaultExportPath } from './vault-export.js';
 
 // Keep typed folder entry working on older hosts without AbstractInputSuggest.
 class VaultFolderSuggest extends (AbstractInputSuggest || class {}) {
@@ -298,4 +298,4 @@ class ExportModal extends Modal {
   }
 }
 
-module.exports = { ExportModal };
+export { ExportModal };

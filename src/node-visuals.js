@@ -1,4 +1,5 @@
-const { DEFAULT_DATA, NODE_MULTIPLIER_MAX } = require('./constants');
+import { markers, markerOrder } from './link-markers.js';
+import { DEFAULT_DATA, NODE_MULTIPLIER_MAX } from './constants.js';
 
 const NODE_SHAPE_NAMES = {
   1: 'Circle',
@@ -30,7 +31,29 @@ const NODE_VISUAL_SETTINGS = [
   { edges: true, key: 'edge_width_scale', label: 'Link width', min: 0.1, max: 5, step: 0.01 },
   { edges: true, key: 'edge_color', label: 'Link color', type: 'color' },
   { edges: true, key: 'edge_opacity', label: 'Link opacity', min: 0, max: 1, step: 0.01 },
+  {
+    edges: true,
+    key: 'edge_pattern',
+    label: 'Link style',
+    min: 0,
+    max: 2,
+    step: 1,
+    values: [0, 1, 2],
+    names: ['Solid', 'Dashed', 'Dotted'],
+  },
   { edges: true, key: 'show_arrows', label: 'Show arrows', type: 'boolean' },
+  {
+    edges: true,
+    key: 'arrow_shape',
+    label: 'Arrow style',
+    min: 0,
+    max: markers.length - 1,
+    step: 1,
+    values: markerOrder,
+    names: markers.map((m) => m?.name),
+  },
+  { edges: true, key: 'arrow_size', label: 'Arrow size', min: 0.5, max: 3, step: 0.1 },
+  { edges: true, key: 'arrow_zoom', label: 'Scale arrows with nodes', type: 'boolean' },
   { edges: true, key: 'reverse_arrows', label: 'Reverse arrows', type: 'boolean' },
   { key: 'label_zoom_steps', label: 'Text zoom', min: 1, max: 40, step: 1 },
   { key: 'label_font_size', label: 'Text size', min: 5, max: 20, step: 1 },
@@ -54,6 +77,11 @@ function normalizeNodeVisuals(raw) {
         if (/^#[0-9a-f]{6}$/i.test(value)) clean[key] = value;
         continue;
       }
+      if (
+        ['edge_pattern', 'arrow_shape'].includes(key) &&
+        !(key === 'arrow_shape' ? markerOrder : [0, 1, 2]).includes(value)
+      )
+        continue;
       if (key === 'node_shape') {
         if (typeof value === 'number' && Number.isFinite(value))
           clean[key] = normalizeNodeShape(value);
@@ -166,7 +194,7 @@ function getNodeColor(plugin, node, groupColor) {
   );
 }
 
-module.exports = {
+export {
   normalizeNodeShape,
   NODE_SHAPE_NAMES,
   traceNodeShape,

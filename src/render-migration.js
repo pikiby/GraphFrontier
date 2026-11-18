@@ -120,7 +120,7 @@ function applyEdgeDprMigration(data, devicePixelRatio) {
   return true;
 }
 
-module.exports = {
+export {
   RENDER_MODEL,
   migrateLegacyNodeSize,
   migrateLegacyEdgeWidth,

@@ -1,4 +1,4 @@
-const { fail } = require('./api-errors');
+import { fail } from './api-errors.js';
 
 class LayoutApi {
   layoutName(raw) {
@@ -262,4 +262,4 @@ class LayoutApi {
     return { ...this.state(view), restored: name, backupId: args.backupId };
   }
 }
-module.exports = { LayoutApi };
+export { LayoutApi };

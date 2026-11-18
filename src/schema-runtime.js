@@ -1,4 +1,5 @@
-// Configure the shared Zod runtime before SDK or application schemas are created.
-require('zod/v4/core').config({ jitless: true });
+import { config } from 'zod/v4/core';
+import { z } from 'zod';
 
-module.exports = require('zod');
+config({ jitless: true });
+export { z };

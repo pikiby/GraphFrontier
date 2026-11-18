@@ -1,37 +1,38 @@
-const { DEFAULT_DATA, MAX_ZOOM, ZOOM_STEP_FACTOR } = require('./constants');
-const { DARK_THEME, getLabelAppearance } = require('./theme');
-const {
+import { markers } from './link-markers.js';
+import { DEFAULT_DATA, MAX_ZOOM, ZOOM_STEP_FACTOR } from './constants.js';
+import { DARK_THEME, getLabelAppearance } from './theme.js';
+import {
   getNodeVisualSetting,
   getNodeVisualOverride,
   NODE_VISUAL_SETTINGS,
   normalizeNodeShape,
   traceNodeShape,
-} = require('./node-visuals');
+} from './node-visuals.js';
 const EMPTY_LISTS = [];
 const LINK_STYLE_KEYS = NODE_VISUAL_SETTINGS.filter((setting) => setting.edges).map(
   ({ key }) => key
 );
 const APPEARANCE_KEYS = NODE_VISUAL_SETTINGS.map(({ key }) => key).concat('attachment_node_color');
-const { nodeListContains, findNodeList } = require('./node-lists');
-const {
+import { nodeListContains, findNodeList } from './node-lists.js';
+import {
   isWaveActive,
   waveLinkState,
   waveRingState,
   activePulseWaves,
   pulseFront,
-} = require('./effects');
-const {
+} from './effects.js';
+import {
   getFocusEdgeWidth,
   getFocusEdgeColor,
   getFocusEdgeAlpha,
   quantizeFocusProgress,
   getNodeScreenRadius,
   getLowDegreeAlpha,
-  getLinkArrowSegments,
+  getLinkHeads,
   getEdgeCssWidth,
   setCrispStroke,
   getCrispCoordinate,
-} = require('./render-metrics');
+} from './render-metrics.js';
 
 // Backing-store pixels per CSS pixel.
 function getBackingScale(view) {
@@ -778,15 +779,28 @@ function drawEdges(view, ctx, appearance) {
   // Edges sharing one appearance are stroked as a single path, so translucent edges
   // never stack where they cross or overlap. Layers keep painted and focused edges on top.
   const edgeBuckets = new Map();
-  const addEdgeSegment = (layer, color, physicalWidth, alpha, x1, y1, x2, y2, arrows) => {
-    const key = `${layer}|${color}|${physicalWidth}|${alpha}`;
+  const addEdgeSegment = (layer, color, physicalWidth, alpha, x1, y1, x2, y2, arrows, pattern) => {
+    const key = `${layer}|${color}|${physicalWidth}|${alpha}|${pattern}`;
     let bucket = edgeBuckets.get(key);
     if (!bucket) {
-      bucket = { layer, color, physicalWidth, alpha, points: [] };
+      bucket = { layer, color, physicalWidth, alpha, pattern, heads: [], fills: [], points: [] };
       edgeBuckets.set(key, bucket);
     }
+    for (const h of arrows || []) {
+      const m = markers[h.shape] || markers[0];
+      const depth = m.circle || m.closed ? h.size : 0;
+      const endX = h.x - h.dx * depth,
+        endY = h.y - h.dy * depth;
+      if (h.source) {
+        x1 = endX;
+        y1 = endY;
+      } else {
+        x2 = endX;
+        y2 = endY;
+      }
+      (m.fill ? bucket.fills : bucket.heads).push(h);
+    }
     bucket.points.push(x1, y1, x2, y2);
-    if (arrows) bucket.points.push(...arrows);
   };
 
   for (let edgeIndex = 0; edgeIndex < view.edges.length; edgeIndex++) {
@@ -839,7 +853,7 @@ function drawEdges(view, ctx, appearance) {
       hoverFadeEdgeProgress
     );
     const arrows = style.show_arrows
-      ? getLinkArrowSegments(
+      ? getLinkHeads(
           sourcePointX,
           sourcePointY,
           targetPointX,
@@ -854,7 +868,9 @@ function drawEdges(view, ctx, appearance) {
           ),
           style.reverse_arrows,
           edge.bidirectional,
-          getEdgeCssWidth(getFocusEdgeWidth(edgeScale, focusEdgeProgress), devicePixelRatio)
+          getEdgeCssWidth(getFocusEdgeWidth(edgeScale, focusEdgeProgress), devicePixelRatio),
+          style.arrow_shape,
+          style.arrow_size * (style.arrow_zoom ? Math.sqrt(zoom) : 1)
         )
       : null;
 
@@ -868,7 +884,8 @@ function drawEdges(view, ctx, appearance) {
         sourcePointY,
         targetPointX,
         targetPointY,
-        arrows
+        arrows,
+        style.edge_pattern
       );
       continue;
     }
@@ -894,7 +911,8 @@ function drawEdges(view, ctx, appearance) {
       sourcePointY,
       targetPointX,
       targetPointY,
-      arrows
+      arrows,
+      style.edge_pattern
     );
   }
 
@@ -908,12 +926,49 @@ function drawEdges(view, ctx, appearance) {
       backingScale
     );
     ctx.beginPath();
+    const oldCap = ctx.lineCap;
+    if (bucket.pattern) {
+      const unit = Math.max(1, ctx.lineWidth);
+      ctx.setLineDash(bucket.pattern === 1 ? [5 * unit, 3 * unit] : [0, 3 * unit]);
+      if (bucket.pattern === 2) ctx.lineCap = 'round';
+    }
     const points = bucket.points;
     for (let i = 0; i < points.length; i += 4) {
       ctx.moveTo(points[i], points[i + 1]);
       ctx.lineTo(points[i + 2], points[i + 3]);
     }
     ctx.stroke();
+    if (bucket.pattern) {
+      ctx.setLineDash([]);
+      ctx.lineCap = oldCap;
+    }
+    for (const heads of [bucket.heads, bucket.fills]) {
+      if (!heads.length) continue;
+      ctx.beginPath();
+      for (const h of heads) {
+        const m = markers[h.shape] || markers[0];
+        if (m.circle) {
+          const r = h.size / 2,
+            x = h.x - h.dx * r,
+            y = h.y - h.dy * r;
+          ctx.moveTo(x + r, y);
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+        } else {
+          for (let j = 0; j < m.points.length; j++) {
+            const [along, across] = m.points[j];
+            const x = h.x + ((along - 1) * h.dx - across * h.dy) * h.size;
+            const y = h.y + ((along - 1) * h.dy + across * h.dx) * h.size;
+            if (j === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          if (m.closed) ctx.closePath();
+        }
+      }
+      if (heads === bucket.fills) {
+        ctx.fillStyle = bucket.color;
+        ctx.fill();
+      } else ctx.stroke();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -1159,7 +1214,7 @@ function drawSelectionBox(view, ctx) {
   ctx.restore();
 }
 
-module.exports = {
+export {
   stepFocusSmoothing,
   renderFrame,
   getHoverDimAlpha,

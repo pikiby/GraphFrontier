@@ -90,4 +90,4 @@ function getLabelAppearance(
   return { alpha: Math.max(0.45, alpha), fontSize };
 }
 
-module.exports = { DARK_THEME, readGraphTheme, getLabelAppearance, getColorInputValue };
+export { DARK_THEME, readGraphTheme, getLabelAppearance, getColorInputValue };

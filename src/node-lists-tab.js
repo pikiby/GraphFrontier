@@ -1,10 +1,10 @@
-const { Menu, Notice } = require('obsidian');
-const {
+import { Menu, Notice } from 'obsidian';
+import {
   createEditorRow,
   setEditorRowReady,
   bindEditorRowDrag,
   keepMenuOpen,
-} = require('./panel-controls');
+} from './panel-controls.js';
 
 const LIST_GROUP_COLOR = '#e5484d';
 const MEMBER_MENU_LIMIT = 100;
@@ -65,7 +65,8 @@ class NodeListsTab {
         const remove = () => {
           if (removed) return;
           removed = true;
-          item.dom.style.display = 'none';
+          item.dom.hidden = true;
+          item.dom.addClass('graphfrontier-removed-member');
           remaining -= 1;
           membersItem?.setTitle(`Members (${remaining})`);
           this.update({ action: 'remove', listId: list.id, nodeIds: [path] });
@@ -180,4 +181,4 @@ class NodeListsTab {
   }
 }
 
-module.exports = { NodeListsTab };
+export { NodeListsTab };
