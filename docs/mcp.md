@@ -401,17 +401,19 @@ changes:
 7. `save_layout` only when the user requested persistence. Restore prior camera,
    selection/filter or layout if the requested operation was temporary.
 
-Export reuses the existing HTML generator (pan/zoom, hover and Markdown preview).
-With `nodeIds`, it contains only those nodes and links whose two endpoints are
-both included, even if other nodes are currently visible. Without `nodeIds`, it
-exports current visibility. Node lists are limited to 500 per call; omit them to
+Export writes the same page as **Export to**: GraphFrontier running on a snapshot of the
+vault and its layouts. With `nodeIds`, the snapshot holds only those notes, the links
+whose two endpoints are both included and their per-node layout data, and only the
+active layout. Without `nodeIds`, it holds the whole vault and every layout, and the
+page shows what the view shows. API exports include physics and the settings menu,
+without layouts or saving; notes open as text in the page. Node lists are limited to 500 per call; omit them to
 export a larger visible graph. All platforms use vault-relative paths; absolute paths are rejected. A directory gets the default HTML filename.
 Existing export files require `overwrite: true`; the plugin serializes its own exports and refuses to modify an existing file
 without permission. Other applications and symlink targets are governed by the
 Obsidian adapter; no cross-process atomic or physical-path sandbox guarantee is made. MCP exports do not change the remembered
 UI export path. The result reports the actual filename and node/link counts.
-`includeContents` defaults to true, matching the existing export; use false to
-omit note previews. Metadata such as paths/properties is still included.
+`includeContents` defaults to true; use false to omit note texts. Metadata such as
+paths, tags and properties is still included.
 
 ## Safety and Verification
 

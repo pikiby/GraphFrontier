@@ -10,6 +10,7 @@ const SDK_ROOT = path.resolve(
   '../../..'
 );
 const ADAPTER = path.join(__dirname, 'adapters/mcp-ajv-provider.cjs');
+const { viewerSourcePlugin } = require('./viewer-build.cjs');
 
 // Reviewed Zod 4.6.7 / SDK 1.32.1 sources. Dependency changes require an explicit
 // review of these narrow adaptations, never a best-effort text substitution.
@@ -139,7 +140,7 @@ function createPluginBuildOptions({ production = false } = {}) {
     minify: false,
     logLevel: 'info',
     outdir: 'dist',
-    plugins: [noDynamicCodePlugin()],
+    plugins: [noDynamicCodePlugin(), viewerSourcePlugin({ production })],
   };
 }
 

@@ -1,5 +1,4 @@
-// Screen metrics shared by the live canvas and static HTML exports.
-// Every function is self-contained: exports embed them verbatim through toString().
+// Screen metrics of the canvas: node and link sizes, arrows, crisp strokes and focus fading.
 
 // Like Obsidian's graph, on-screen node size follows the square root of zoom.
 function getNodeScreenRadius(baseRadius, zoom) {

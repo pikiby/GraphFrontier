@@ -1,5 +1,6 @@
 const { TWO_PI, DEFAULT_DATA } = require('./constants');
 const { getDarkEnergyTargets, applyDarkEnergyForce } = require('./dark-energy');
+const { pulseForce, activePulseWaves } = require('./effects');
 
 const layoutAutosaveStates = new WeakMap();
 const layoutSleepStates = new WeakMap();
@@ -242,6 +243,47 @@ function kickLayoutSearch(view) {
   view.layoutPaused = false;
 }
 
+// Force parameters from the layout settings.
+function getPhysicsParameters(plugin) {
+  const settings = plugin.getSettings();
+  const damping = plugin.clampNumber(settings.damping, 0.01, 0.9, DEFAULT_DATA.settings.damping);
+  const oneSecondRetention = Math.pow(0.01, 1 / 60);
+  const dampingRetention = 1 - damping * 0.95;
+  return {
+    repelStrength: settings.repel_strength * 1,
+    centerStrength: settings.center_strength * 0.000025,
+    baseLinkStrength: settings.base_link_strength * 0.00015,
+    linkDistance: plugin.clampNumber(
+      settings.link_distance,
+      1,
+      50,
+      DEFAULT_DATA.settings.link_distance
+    ),
+    repelRadius: plugin.clampNumber(
+      settings.repel_radius,
+      20,
+      1000,
+      DEFAULT_DATA.settings.repel_radius
+    ),
+    orphanRadiusScale: 1.25,
+    maxCenterForce: 1.6,
+    maxAccel: 6,
+    maxSpeed: 26,
+    impulseGain: 7,
+    velocityRetention: Math.max(0.05, Math.min(0.995, oneSecondRetention * dampingRetention)),
+    settleVelocityEps: 0.02,
+    settleAccelEps: 0.02,
+    stepsPerFrame: Math.round(
+      plugin.clampNumber(
+        settings.physics_steps_per_frame,
+        1,
+        5,
+        DEFAULT_DATA.settings.physics_steps_per_frame
+      )
+    ),
+  };
+}
+
 // Per-node flags of one simulation step.
 const FIXED = 1;
 const ORBIT = 2;
@@ -261,14 +303,6 @@ const DEGREE_MASS_FACTOR = 0.25;
 const ORPHAN_REPEL_SCALE = 1.2;
 const ORPHAN_TO_MAIN_REPEL_SCALE = 5.2;
 const REGULAR_BACK_REACTION_SCALE = 0.06;
-
-const physicsCaches = new WeakMap();
-let sleepForceProbe = null;
-
-// Test hook: receives cached and freshly summed pair/link accelerations of sleeping nodes.
-function setSleepForceProbe(probe) {
-  sleepForceProbe = typeof probe === 'function' ? probe : null;
-}
 
 // Cells keep first-appearance order over `creators` and members keep node order, so pair
 // visits match the original traversal; non-members only shape the cell order.
@@ -566,6 +600,14 @@ function accumulateForces(step, role, ax, ay) {
     }
   }
   if (step.hasLink) linkPairs(step, role, ax, ay);
+}
+
+const physicsCaches = new WeakMap();
+let sleepForceProbe = null;
+
+// Test hook: receives cached and freshly summed pair/link accelerations of sleeping nodes.
+function setSleepForceProbe(probe) {
+  sleepForceProbe = typeof probe === 'function' ? probe : null;
 }
 
 // Repulsion vector pushing `to` away from `from`, or null outside the radius.
@@ -912,29 +954,23 @@ function stepSimulation(view) {
     layoutSleepStates.set(view, sleepStates);
   }
 
-  const repelStrength = settings.repel_strength * 1 * layoutSearchFactor;
-  const centerStrength = settings.center_strength * 0.000025 * layoutSearchFactor;
-  const baseLinkStrength = settings.base_link_strength * 0.00015 * layoutSearchFactor;
-  const linkDistance = view.plugin.clampNumber(
-    settings.link_distance,
-    1,
-    50,
-    DEFAULT_DATA.settings.link_distance
-  );
-  const damping = view.plugin.clampNumber(
-    settings.damping,
-    0.01,
-    0.9,
-    DEFAULT_DATA.settings.damping
-  );
-  const repelRadius = view.plugin.clampNumber(
-    settings.repel_radius,
-    20,
-    1000,
-    DEFAULT_DATA.settings.repel_radius
-  );
-  const orphanRepelRadius = repelRadius * 1.25;
-  const orphanToMainRepelRadius = repelRadius * 1.25;
+  const {
+    repelStrength,
+    centerStrength,
+    baseLinkStrength,
+    linkDistance,
+    repelRadius,
+    orphanRadiusScale,
+    maxCenterForce,
+    maxAccel,
+    maxSpeed,
+    impulseGain,
+    velocityRetention,
+    settleVelocityEps,
+    settleAccelEps,
+  } = getPhysicsParameters(view.plugin);
+  const orphanRepelRadius = repelRadius * orphanRadiusScale;
+  const orphanToMainRepelRadius = repelRadius * orphanRadiusScale;
   const hasRepel = repelStrength > 0;
   const hasCenter = centerStrength > 0;
   const hasLink =
@@ -943,16 +979,7 @@ function stepSimulation(view) {
     (item) => view.nodeById.has(item.id) && (item.strength > 0 || item.repulsion > 0)
   );
   const noForces = !hasRepel && !hasCenter && !hasLink && !hasDarkEnergy;
-  const maxCenterForce = 1.6;
-  const maxAccel = 6;
-  const maxSpeed = 26;
-  const impulseGain = 7;
   const orphanCenterScale = 1;
-  const oneSecondRetention = Math.pow(0.01, 1 / 60);
-  const dampingRetention = 1 - damping * 0.95;
-  const velocityRetention = Math.max(0.05, Math.min(0.995, oneSecondRetention * dampingRetention));
-  const settleVelocityEps = 0.02;
-  const settleAccelEps = 0.02;
 
   const flags = new Uint8Array(nodeCount);
   const pinX = new Array(nodeCount);
@@ -1136,8 +1163,14 @@ function stepSimulation(view) {
 
   const darkEnergyTargets = getDarkEnergyTargets(view);
   const accel = { ax: 0, ay: 0 };
+  const pulseNowMs = Date.now();
   const addSelfForces = (node, index) => {
     applyDarkEnergyForce(view, node, accel, darkEnergyTargets);
+    const pulse = node.id !== view.dragNodeId && pulseForce(view, node, pulseNowMs);
+    if (pulse) {
+      accel.ax += pulse[0];
+      accel.ay += pulse[1];
+    }
     if (hasCenter && node.id !== view.dragNodeId) {
       const nodeCenterScale = structure.degree[index] === 0 ? orphanCenterScale : 1;
       const centerFx = (0 - node.x) * centerStrength * nodeCenterScale;
@@ -1296,7 +1329,13 @@ function stepSimulation(view) {
   }
   stepLayoutAutosave(view, movingNodeCount > 0);
 
-  if (!view.dragNodeId && !activelyDraggedNodeIds.size && awakeNodeCount === 0) {
+  // A shockwave still travelling must reach sleeping nodes, so physics stays awake until it ends.
+  if (
+    !view.dragNodeId &&
+    !activelyDraggedNodeIds.size &&
+    awakeNodeCount === 0 &&
+    !activePulseWaves(view).length
+  ) {
     view.layoutPaused = true;
     const readMultipliers = new Map();
     for (let i = 0; i < nodeCount; i++) {
@@ -1391,4 +1430,5 @@ module.exports = {
   getOrbitRadiusBySpacing,
   getOrbitRadiusForAnchor,
   recomputeOrbitRadii,
+  getPhysicsParameters,
 };

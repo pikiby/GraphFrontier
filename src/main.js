@@ -616,6 +616,34 @@ module.exports = class GraphFrontierPlugin extends Plugin {
       100,
       DEFAULT_DATA.settings.base_link_strength
     );
+    for (const [key, min, max] of [
+      ['wave_speed', 1, 10],
+      ['wave_brightness', 10, 100],
+      ['wave_ring_size', 5, 80],
+      ['pulse_strength', 1, 10],
+      ['pulse_radius', 100, 1000],
+      ['pulse_softness', 1, 10],
+      ['physics_steps_per_frame', 1, 5],
+    ])
+      normalized.settings[key] = this.clampNumber(
+        normalized.settings[key],
+        min,
+        max,
+        DEFAULT_DATA.settings[key]
+      );
+    normalized.settings.pulse_inward = normalized.settings.pulse_inward === true;
+    normalized.settings.wave_depth = this.clampNumber(
+      normalized.settings.wave_depth,
+      1,
+      10,
+      DEFAULT_DATA.settings.wave_depth
+    );
+    normalized.settings.grow_duration = this.clampNumber(
+      normalized.settings.grow_duration,
+      1,
+      60,
+      DEFAULT_DATA.settings.grow_duration
+    );
     normalized.settings.link_distance = this.clampNumber(
       normalized.settings.link_distance,
       1,

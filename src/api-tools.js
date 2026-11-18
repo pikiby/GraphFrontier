@@ -346,6 +346,7 @@ const tools = [
             'groups',
             'lists',
             'filters',
+            'effects',
             'layout',
           ].map((k) => [k, z.boolean()])
         )

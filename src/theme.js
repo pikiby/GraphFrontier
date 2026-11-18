@@ -72,7 +72,8 @@ function readGraphTheme(element) {
   };
 }
 
-// Self-contained: embedded verbatim into static exports to keep label rules identical.
+// Label size and opacity at a zoom level: hidden below the label threshold and fading in above
+// it; emphasized (hovered or selected) labels stay fully visible.
 function getLabelAppearance(
   zoom,
   minZoom,

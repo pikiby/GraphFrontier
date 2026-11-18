@@ -543,6 +543,8 @@ class GraphFrontierActions extends LayoutApi {
       exportPath: args.path,
       nodeIds: args.nodeIds,
       includeContents: args.includeContents !== false,
+      // API exports are interactive graphs: physics and the settings menu, no layout saving.
+      modules: { physics: true, settings: true },
       overwrite: args.overwrite === true,
       rememberPath: false,
       assertCurrent: () => {

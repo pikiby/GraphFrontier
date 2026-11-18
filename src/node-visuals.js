@@ -1,8 +1,29 @@
 const { DEFAULT_DATA, NODE_MULTIPLIER_MAX } = require('./constants');
 
+const NODE_SHAPE_NAMES = {
+  1: 'Circle',
+  3: 'Triangle',
+  4: 'Square',
+  5: 'Pentagon',
+  6: 'Hexagon',
+  7: 'Heptagon',
+  8: 'Octagon',
+};
+
 const NODE_VISUAL_SETTINGS = [
   { key: 'node_size_scale', label: 'Node size', min: 0.1, max: 2, step: 0.005 },
   { key: 'node_color', label: 'Node color', type: 'color' },
+  // 1 is a circle, 3-8 a polygon with that many sides. The slider steps through these shapes
+  // by position, so there is no gap where 2 sides would be.
+  {
+    key: 'node_shape',
+    label: 'Shape',
+    min: 1,
+    max: 8,
+    step: 1,
+    values: [1, 3, 4, 5, 6, 7, 8],
+    names: NODE_SHAPE_NAMES,
+  },
   { key: 'aura_radius', label: 'Color aura', min: 0, max: 5000, step: 10 },
   { key: 'aura_brightness', label: 'Aura brightness', min: 0, max: 50, step: 1 },
   // Edge widths are physical screen pixels, like Obsidian's link thickness.
@@ -33,6 +54,11 @@ function normalizeNodeVisuals(raw) {
         if (/^#[0-9a-f]{6}$/i.test(value)) clean[key] = value;
         continue;
       }
+      if (key === 'node_shape') {
+        if (typeof value === 'number' && Number.isFinite(value))
+          clean[key] = normalizeNodeShape(value);
+        continue;
+      }
       if (typeof value === 'number' && Number.isFinite(value))
         clean[key] = Math.max(min, Math.min(max, value));
     }
@@ -45,6 +71,29 @@ function normalizeNodeVisuals(raw) {
       });
   }
   return result;
+}
+
+// 1 is a circle; 3-8 are polygons. 2 sides is no shape, so it reads as a circle.
+function normalizeNodeShape(value) {
+  const sides = Math.round(Math.max(1, Math.min(8, Number(value) || 1)));
+  return sides === 2 ? 1 : sides;
+}
+
+// Outlines a node: a circle, or a regular polygon with the circle's area, so every shape keeps
+// the same visual weight. Odd polygons point up, even ones sit on a flat side.
+function traceNodeShape(ctx, x, y, radius, sides) {
+  if (!(sides >= 3)) {
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    return;
+  }
+  const r = radius * Math.sqrt((2 * Math.PI) / (sides * Math.sin((2 * Math.PI) / sides)));
+  const start = -Math.PI / 2 + (sides % 2 ? 0 : Math.PI / sides);
+  for (let i = 0; i < sides; i++) {
+    const angle = start + (i * 2 * Math.PI) / sides;
+    if (i === 0) ctx.moveTo(x + r * Math.cos(angle), y + r * Math.sin(angle));
+    else ctx.lineTo(x + r * Math.cos(angle), y + r * Math.sin(angle));
+  }
+  ctx.closePath();
 }
 
 function getNodeVisualOverride(plugin, id, key) {
@@ -118,6 +167,9 @@ function getNodeColor(plugin, node, groupColor) {
 }
 
 module.exports = {
+  normalizeNodeShape,
+  NODE_SHAPE_NAMES,
+  traceNodeShape,
   getNodeGroupVisuals,
   getNodeColor,
   NODE_VISUAL_SETTINGS,

@@ -1,0 +1,357 @@
+/* The exported page: the GraphFrontier view fills the window. Colors and fonts come from the
+   Obsidian theme variables captured at export, so controls look as they did in Obsidian. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-interface, system-ui, sans-serif);
+  font-size: var(--font-ui-small, 13px);
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+#graphfrontier-root,
+#graphfrontier-root > .workspace-leaf-content,
+#graphfrontier-root .view-content {
+  width: 100%;
+  height: 100%;
+}
+
+#graphfrontier-root > .workspace-leaf-content {
+  display: flex;
+  flex-direction: column;
+}
+
+#graphfrontier-root .view-header {
+  display: none;
+}
+
+#graphfrontier-root .view-content {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+
+svg.svg-icon {
+  width: var(--icon-size, 16px);
+  height: var(--icon-size, 16px);
+  stroke-width: var(--icon-stroke, 1.75px);
+}
+
+button {
+  font: inherit;
+  font-size: var(--font-ui-small, 13px);
+  color: var(--text-normal);
+  background: var(--interactive-normal);
+  border: 0;
+  border-radius: var(--button-radius, 4px);
+  box-shadow: var(--input-shadow);
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--interactive-hover);
+}
+
+button.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input[type='text'],
+input[type='search'],
+input[type='number'],
+textarea,
+select {
+  font: inherit;
+  color: var(--text-normal);
+  background: var(--background-modifier-form-field);
+  border: var(--input-border-width, 1px) solid var(--background-modifier-border);
+  border-radius: var(--input-radius, 5px);
+  padding: 4px 8px;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--background-modifier-border-focus);
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  margin: 0;
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--slider-thumb-color, var(--text-normal));
+  border: 0;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--slider-thumb-color, var(--text-normal));
+  border: 0;
+}
+
+.clickable-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-color, var(--text-muted));
+  cursor: pointer;
+}
+
+.menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-s, 0 6px 24px rgba(0, 0, 0, 0.35));
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-wrap: wrap;
+  color: var(--text-normal);
+}
+
+.menu-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.menu-item.is-disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.menu-item.is-label {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.menu-item.is-warning {
+  color: var(--text-error);
+}
+
+.menu-item.has-submenu::after {
+  content: '›';
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.menu-item-icon {
+  display: inline-flex;
+  width: 16px;
+  color: var(--icon-color, var(--text-muted));
+}
+
+.menu-item-icon:empty {
+  display: none;
+}
+
+.menu-item-title {
+  flex: 1;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--background-modifier-border);
+}
+
+.modal-container {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal {
+  position: relative;
+  min-width: min(440px, 92vw);
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow: auto;
+  padding: 20px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-l, 0 10px 40px rgba(0, 0, 0, 0.5));
+}
+
+.modal-title {
+  font-size: 1.2em;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.modal-close-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.notice-container {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notice {
+  max-width: 320px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-s, 0 4px 16px rgba(0, 0, 0, 0.3));
+  cursor: pointer;
+}
+
+/* Opened notes sit at the left, clear of the settings menu on the right. */
+.graphfrontier-reader {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  bottom: 8px;
+  z-index: 800;
+  /* Wide enough to read: about half the window, within comfortable reading limits. */
+  width: clamp(min(360px, calc(100vw - 16px)), 45vw, 760px);
+  display: none;
+  flex-direction: column;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-l, 0 10px 40px rgba(0, 0, 0, 0.5));
+}
+
+.graphfrontier-reader.is-open {
+  display: flex;
+}
+
+.graphfrontier-reader-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.graphfrontier-reader-title {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphfrontier-reader-close {
+  padding: 2px 6px;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Text fits the panel width: long words, paths and code lines wrap, so the note scrolls only
+   vertically and no block gets a scrollbar of its own. */
+.graphfrontier-reader-body {
+  flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px 20px 20px;
+  font-size: var(--font-text-size, 15px);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.graphfrontier-reader-body * {
+  max-width: 100%;
+}
+
+.graphfrontier-reader-body pre {
+  margin: 8px 0;
+  padding: 8px 10px;
+  overflow: visible;
+  white-space: pre-wrap;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+
+.graphfrontier-reader-body code {
+  font-family: var(--font-monospace, monospace);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.graphfrontier-reader-body ul,
+.graphfrontier-reader-body ol {
+  padding-left: 1.4em;
+}
+
+.graphfrontier-reader-body blockquote {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.graphfrontier-boot-error {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-error, #e5484d);
+}

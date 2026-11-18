@@ -24,6 +24,7 @@ function mobileVault(t, mobile = true) {
   const vault = {
     getName: () => 'Test vault',
     getAllLoadedFiles: () => [...entries.values()],
+    getFiles: () => [...entries.values()].filter((entry) => entry instanceof obsidian.TFile),
     getAbstractFileByPath: (path) => entries.get(path) || null,
     async createFolder(path) {
       assert.ok(!entries.has(path));

@@ -101,9 +101,16 @@ test('sidebar order is Search, Settings tabs, Layout and each existing builder i
   ])
     assert(controls.includes(view.sideControls.get(key).input), `${key} stays in Display`);
   // Groups holds the group editor and the Filters subgroup; file filters follow the rules.
+  const effects = view.settingsTabs.get('physics').panel.children.at(-1);
+  assert.equal(effects.children[0].text, 'Effects', 'Effects closes the Physics tab');
+  assert.deepEqual(
+    effects.children[1].children.map((child) => child.children[0].text),
+    ['Grow', 'Wave'],
+    'each effect is its own collapsible subsection'
+  );
   assert.deepEqual(
     view.settingsTabs.get('sets').panel.children.map((child) => child.children[0].text),
-    ['Selection', 'Custom lists'],
+    ['Selection', 'Simulation', 'Custom lists'],
     'Sets subgroups collapse like those of Groups'
   );
   // Groups and Filters are collapsible subgroups; there is no separate Attachments subgroup.

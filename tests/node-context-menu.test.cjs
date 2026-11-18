@@ -94,6 +94,7 @@ test('node menu follows requested sections and puts Delete last', (t) => {
   assert.deepEqual(titles(item(menu, 'Visual settings').submenu), [
     'Node size',
     'Node color',
+    'Shape',
     'Color aura',
     'Aura brightness',
     'Link width',

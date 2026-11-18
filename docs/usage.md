@@ -115,8 +115,8 @@ Orbit pins within one space remain orbit pins. When grouping separates a pin fro
 orbit anchor, it becomes an exact pin at its converted position rather than becoming
 free or pulling across graph spaces. Initial migrated inner cameras are refitted.
 
-Static HTML export includes only the current projected graph and hollow container balls;
-it is not a subgraph editor and cannot open nested panes.
+Static HTML export shows subgraphs as the view does, as container balls; the page has a single
+graph pane, so a subgraph cannot be opened in a separate pane there.
 
 ## Search Row (Find / Filter)
 
@@ -230,6 +230,30 @@ If search row is active, save is blocked to avoid saving filtered/focus state as
 
 ## Static HTML Export
 
+The exported file is GraphFrontier itself running in the browser: the same rendering, physics,
+side panel and menus as in Obsidian, on a snapshot taken at export. The snapshot holds the vault's
+files with their tags, properties, headings and links, the note texts, the plugin's data, its
+layouts (the active one with the positions, camera and settings on screen at export) and node
+lists, the theme colors and the icons. Notes cannot be edited on the page.
+
+**Include** chooses what the page has besides the nodes and links; with nothing checked it shows
+only the graph, as exported:
+
+- **Physics**: nodes move, settle and can be dragged as in Obsidian.
+- **Settings menu**: the side panel with search, groups, display, physics (with Physics) and sets.
+- **Layouts** (with Settings menu): every saved layout, listed in the Layout section to switch
+  between them. Without it the page has only the layout on screen at export.
+- **Saves** (with Settings menu): **Save layout** and **Autosave**, plus renaming, deleting and
+  creating layouts in the list. Saving writes into the exported HTML file itself. The first save
+  asks where to save: choose the page's own file to replace it; later saves, including Autosave,
+  write there without asking. Autosave waits until that first save. Browsers that cannot write
+  files (such as Firefox and Safari) download an updated copy of the page instead.
+
+Clicking a note opens its text in a panel on the left, clear of the settings menu. Attachments
+have no text to show, and a page cannot open files in other apps, so clicking one says it
+cannot be opened in the browser. Other changes on the page (moving nodes, settings) last until
+the page is reloaded, unless a layout is saved.
+
 **Export to** and the static HTML export command open **Export graph**. Choose a
 filename (default: `graphfrontier-static.html`) and a folder **inside the current
 vault**. The folder field suggests existing vault folders; select one or type a
@@ -240,15 +264,16 @@ Absolute paths, URLs, parent traversal, hidden folders and reserved names are re
 Missing folders are created when exporting. For an existing destination, the main
 button becomes **Replace file**; only activating that button permits replacement.
 If a file appears concurrently, export stops instead of silently replacing it.
-**Cancel** closes the dialog without exporting.
+**Cancel** closes the dialog without exporting. The dialog opens with no field focused, so
+the folder list appears only after clicking the folder field.
 
 After saving, the dialog stays open with **Saved** and the full vault-relative
 path. **Open file** opens that result through Obsidian's default-app action;
 if unavailable or opening fails, the path remains visible with an inline error.
 Use **Close** to dismiss the dialog. HTML files may be hidden in Obsidian's file
 explorer; no global visibility settings are changed.
-Filenames and folders are not remembered. The HTML contains note previews and
-metadata; review it before sharing.
+Filenames and folders are not remembered. The HTML contains the note texts and the
+vault's metadata; review it before sharing.
 API/MCP exports may still specify a vault-relative path and require explicit
 permission to overwrite an existing file.
 

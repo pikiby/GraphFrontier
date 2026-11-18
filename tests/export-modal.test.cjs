@@ -42,16 +42,18 @@ test('modal names the current vault, defaults to root, labels inputs and cancels
   assert.match(textOf(modal.contentEl), /Save inside vault/);
   assert.match(textOf(modal.contentEl), /Test vault/);
   assert.equal(modal.filenameInput.value, 'graphfrontier-static.html');
-  assert.equal(modal.filenameInput.selectionEnd, 'graphfrontier-static'.length);
   assert.equal(modal.folderInput.value, '');
   assert.equal(modal.destinationPath, 'graphfrontier-static.html');
   assert.equal(modal.submitButton.text, 'Export');
   assert.equal(modal.replacePath, null);
   assert.equal(descendants(modal.contentEl).filter((el) => el.tag === 'p').length, 1);
-  assert.equal(
-    descendants(modal.contentEl).some((el) => el.type === 'checkbox'),
-    false
-  );
+  // Include checkboxes start unchecked: nothing checked exports only nodes and links.
+  assert.deepEqual(modal.getModules(), {
+    physics: false,
+    settings: false,
+    layouts: false,
+    saves: false,
+  });
   assert.equal(modal.openButton.hidden, true);
   assert.equal(modal.filenameInput.attributes['aria-label'], 'Export filename');
   assert.equal(modal.folderInput.attributes['aria-label'], 'Folder inside vault (optional)');
@@ -64,10 +66,10 @@ test('modal names the current vault, defaults to root, labels inputs and cancels
   assert.deepEqual(requests, []);
 });
 
-test('fields show Folder before Filename without a destination preview and retain filename focus', (t) => {
+test('fields show Folder before Filename without a destination preview and focus no field', (t) => {
   const { modal } = setup(t);
   assert.deepEqual(
-    modal.form.children.map((el) => el.text),
+    modal.form.children.slice(0, 2).map((el) => el.text),
     ['Folder', 'Filename']
   );
   assert.equal(modal.form.children[0].children[0], modal.folderInput);
@@ -81,7 +83,10 @@ test('fields show Folder before Filename without a destination preview and retai
     false
   );
   assert.equal(modal.previewEl, undefined);
-  assert.equal(modal.filenameInput.focused, true);
+  // Opening focuses no field, so the folder list stays closed until the user clicks.
+  assert.equal(modal.hasInitialInputFocus, false);
+  assert.notEqual(modal.filenameInput.focused, true);
+  assert.notEqual(modal.folderInput.focused, true);
 });
 
 test('destination normalizes folders and extensions; success remains open with vault and full path', async (t) => {
@@ -623,4 +628,40 @@ test('closing the actual view export during note reads prevents the HTML write',
   assert.deepEqual(calls, []);
   assert.equal(modal.completed, false);
   assert.equal(notices.length, 0);
+});
+
+test('include checkboxes: Layouts and Saves are separate parts of the settings menu', async (t) => {
+  const { modal, requests } = setup(t);
+  const check = (key, value) => {
+    modal.moduleInputs[key].input.checked = value;
+    modal.moduleInputs[key].input.events.change();
+  };
+  assert.equal(modal.moduleInputs.layouts.input.disabled, true);
+  assert.equal(modal.moduleInputs.saves.input.disabled, true);
+  check('settings', true);
+  assert.equal(modal.moduleInputs.layouts.input.disabled, false);
+  assert.equal(modal.moduleInputs.saves.input.disabled, false);
+  check('saves', true);
+  assert.deepEqual(modal.getModules(), {
+    physics: false,
+    settings: true,
+    layouts: false,
+    saves: true,
+  });
+  check('layouts', true);
+  check('physics', true);
+  check('settings', false);
+  assert.deepEqual(modal.getModules(), {
+    physics: true,
+    settings: false,
+    layouts: false,
+    saves: false,
+  });
+  await modal.submit();
+  assert.deepEqual(requests[0].modules, {
+    physics: true,
+    settings: false,
+    layouts: false,
+    saves: false,
+  });
 });

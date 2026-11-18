@@ -11,6 +11,12 @@ class LayoutList {
     this.renderToken = 0;
   }
 
+  // An exported page without Saves only switches layouts: renaming, deleting and creating a
+  // layout would be saving.
+  canEdit() {
+    return !this.plugin.exportPage || this.plugin.exportPage.saves === true;
+  }
+
   displayName(layoutFileName) {
     return this.view.getLayoutDisplayName(layoutFileName);
   }
@@ -107,8 +113,7 @@ class LayoutList {
     const rowState = createEditorRow(this.containerEl, {
       value: this.displayName(layoutFileName),
       placeholder: 'Layout name',
-      icon: 'more-horizontal',
-      label: 'Layout actions',
+      ...(this.canEdit() ? { icon: 'more-horizontal', label: 'Layout actions' } : {}),
     });
     rowState.id = layoutFileName;
     const { row, queryInput: input, button } = rowState;
@@ -132,7 +137,7 @@ class LayoutList {
         input.value = this.displayName(layoutFileName);
       else await this.render();
     });
-    button.addEventListener('click', (event) => {
+    button?.addEventListener('click', (event) => {
       event.preventDefault?.();
       this.openMenu(layoutFileName, rowState, event);
     });
@@ -155,6 +160,7 @@ class LayoutList {
     const activeName = this.plugin.getActiveLayoutFileName();
     this.containerEl.empty();
     for (const name of names) this.renderLayoutRow(name, name === activeName);
+    if (!this.canEdit()) return;
     // Like the trailing empty group row: a typed name saves the current graph as a new layout.
     const rowState = createEditorRow(this.containerEl, { placeholder: 'New layout...' });
     setEditorRowReady(rowState, false);

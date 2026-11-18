@@ -45,6 +45,7 @@ test('single touch schedules long press on empty background as well as nodes', (
       },
       clearTouchLongPressTimer() {},
       getTouchScreenPoint: () => ({ x: 1, y: 2 }),
+      consumeWavePress: () => false,
       startSingleTouchGesture: () => node,
       scheduleTouchLongPress: (...args) => {
         scheduled = args;

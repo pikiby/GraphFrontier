@@ -3,6 +3,7 @@ const {
   finishPositionAction,
   runPositionAction,
   replayPositionAction,
+  historyFor,
 } = require('./position-history');
 const { ItemView, Notice, Menu, MarkdownRenderer, Modal, Scope, setIcon } = require('obsidian');
 const { nodeListContains } = require('./node-lists');
@@ -17,22 +18,22 @@ const {
 const { observePluginData } = require('./appearance-events');
 const { resolveVaultExportPath, writeVaultExport } = require('./vault-export');
 const { ExportModal } = require('./export-modal');
-const { DARK_THEME, readGraphTheme, getLabelAppearance, getColorInputValue } = require('./theme');
-const {
-  getNodeScreenRadius,
-  getLowDegreeAlpha,
-  getLinkArrowSegments,
-  getNodeWorldRadius,
-  getEdgeCssWidth,
-  setCrispStroke,
-  getCrispCoordinate,
-  quantizeFocusProgress,
-  getFocusEdgeWidth,
-  getFocusEdgeColor,
-} = require('./render-metrics');
+const { hasExportPage, captureExportSnapshot, buildExportHtml } = require('./export-page');
+const { DARK_THEME, readGraphTheme, getColorInputValue } = require('./theme');
+const { getNodeWorldRadius } = require('./render-metrics');
 const { buildNodeContextMenu } = require('./node-context-menu');
 const { NodeListsTab } = require('./node-lists-tab');
 const { LayoutList } = require('./layout-list');
+const {
+  startGrow,
+  stepGrow,
+  isGrowActive,
+  growVisibleNodeIds,
+  startWave,
+  isWaveActive,
+  firePulse,
+  activePulseWaves,
+} = require('./effects');
 const { PREFIX, normalizeDarkEnergy } = require('./dark-energy');
 const { DarkEnergyModal } = require('./dark-energy-modal');
 const {
@@ -48,11 +49,12 @@ const {
 const { SubgraphModal } = require('./subgraph-modal');
 const {
   NODE_VISUAL_SETTINGS,
-  getNodeColor,
   getNodeVisualOverride,
   getNodeVisualSetting,
-  getEdgeVisualSetting,
+  normalizeNodeShape,
+  NODE_SHAPE_NAMES,
 } = require('./node-visuals');
+const NODE_SHAPE_VALUES = NODE_VISUAL_SETTINGS.find((spec) => spec.key === 'node_shape').values;
 
 const {
   DEFAULT_DATA,
@@ -81,6 +83,7 @@ const {
   stepSimulation: stepSimulationPhysics,
   stepLayoutAutosave: stepLayoutAutosavePhysics,
   getLayoutAutosaveDelay,
+  getPhysicsParameters,
 } = require('./physics');
 
 const {
@@ -88,12 +91,9 @@ const {
   renderFrame: renderFrameRender,
   getHoverDimAlpha,
   hexToRgba,
-  getNodeLabelText,
   getNodeRadius: getNodeRadiusRender,
-  getEdgeAppearance: getEdgeAppearanceRender,
   getLabelZoomThreshold: getLabelZoomThresholdRender,
   getLabelFontSize: getLabelFontSizeRender,
-  getLabelMinimumSize: getLabelMinimumSizeRender,
   getGroupColorForNode: getGroupColorForNodeRender,
   nodeMatchesParsedGroup: nodeMatchesParsedGroupRender,
   lineQueryMatches,
@@ -101,6 +101,28 @@ const {
   drawEdges: drawEdgesRender,
   drawNodes: drawNodesRender,
 } = require('./render');
+
+// Every swatch that shows a node color takes that node's shape; a circle keeps it round.
+function applySwatchShape(el, value) {
+  if (!el?.style) return;
+  const clipPath = getShapeClipPath(value);
+  el.style.clipPath = clipPath;
+  el.toggleClass?.('is-shaped', !!clipPath);
+}
+
+function getShapeClipPath(value) {
+  const sides = normalizeNodeShape(value);
+  if (sides < 3) return '';
+  const start = -Math.PI / 2 + (sides % 2 ? 0 : Math.PI / sides);
+  const points = [];
+  for (let i = 0; i < sides; i++) {
+    const angle = start + (i * 2 * Math.PI) / sides;
+    points.push(
+      `${(50 + 50 * Math.cos(angle)).toFixed(1)}% ${(50 + 50 * Math.sin(angle)).toFixed(1)}%`
+    );
+  }
+  return `polygon(${points.join(', ')})`;
+}
 
 // Black or white icon, whichever reads better over a #rrggbb fill.
 let settingsTabsSequence = 0;
@@ -495,11 +517,24 @@ class GraphFrontierView extends ItemView {
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
     this.layoutList = null;
+    // An exported page without its settings menu shows only the graph.
+    const exportPage = this.plugin.exportPage;
+    this.sidePanelEl.toggleClass('is-export-hidden', !!exportPage && !exportPage.settings);
+    if (exportPage && !exportPage.settings) return;
     this.sidePanelEl.toggleClass('is-open', this.sidePanelOpen);
 
     const header = this.sidePanelEl.createDiv({ cls: 'graphfrontier-sidepanel-header' });
     header.createSpan({ text: 'Graph settings', cls: 'graphfrontier-sidepanel-title' });
-    const toggleBtn = header.createEl('button', {
+    // Undo and Redo stay in the header, so they are reachable with the panel hidden too.
+    const headerActions = header.createDiv({ cls: 'graphfrontier-sidepanel-header-actions' });
+    this.historyButtons = ['undo', 'redo'].map((kind) => {
+      const button = headerActions.createEl('button', { cls: 'graphfrontier-history-button' });
+      setIcon(button, kind === 'undo' ? 'undo-2' : 'redo-2');
+      this.registerDomEvent(button, 'click', () => this.replayHistory(kind === 'redo'));
+      return button;
+    });
+    this.syncHistoryButtons();
+    const toggleBtn = headerActions.createEl('button', {
       text: this.sidePanelOpen ? 'Hide' : 'Show',
       cls: 'graphfrontier-sidepanel-toggle',
     });
@@ -536,6 +571,8 @@ class GraphFrontierView extends ItemView {
         type: 'button',
       });
       button.id = `${prefix}-${id}`;
+      // An exported page without physics has no physics settings to offer.
+      if (id === 'physics' && exportPage && !exportPage.physics) button.hidden = true;
       button.setAttribute('role', 'tab');
       button.setAttribute('aria-controls', `${button.id}-panel`);
       const panel = settingsSection.createDiv({ cls: 'graphfrontier-settings-panel' });
@@ -584,6 +621,25 @@ class GraphFrontierView extends ItemView {
       hint: 'Modifier key + node click adds its name to search. None disables this action. Selection takes priority; this action takes priority over quick preview.',
     });
 
+    const simulationSection = this.createSidePanelSection(setsSection, {
+      id: 'simulation',
+      title: 'Simulation',
+      openByDefault: true,
+    });
+    simulationSection.addClass('graphfrontier-subgroup-section');
+    this.addSideSlider(
+      simulationSection,
+      'Physics steps',
+      'physics_steps_per_frame',
+      1,
+      5,
+      1,
+      'render',
+      {
+        hint: 'Physics steps per frame: more steps settle the graph faster. Steps stop for the frame after 8 ms; dragging always takes one step. HTML exports use the same value',
+      }
+    );
+
     const displaySection = this.settingsTabs.get('display').panel;
     // Display rows are grouped without titles: general, nodes, text, edges, grid.
     const generalGroup = this.createSidePanelGroup(displaySection);
@@ -618,6 +674,12 @@ class GraphFrontierView extends ItemView {
     });
     this.addSideSlider(nodeGroup, 'Node size', 'node_size_scale', 0.1, 2, 0.005, 'render', {
       hint: 'Visual node radius scale; on screen nodes follow the square root of zoom',
+    });
+    this.addSideSlider(nodeGroup, 'Shape', 'node_shape', 1, 8, 1, 'render', {
+      hint: 'Node shape: 1 is a circle, 3-8 a polygon with that many sides. Groups and nodes can override it',
+      values: NODE_SHAPE_VALUES,
+      format: (value) => NODE_SHAPE_NAMES[normalizeNodeShape(value)],
+      onChange: () => this.refreshShapeSwatches(),
     });
 
     const textGroup = this.createSidePanelGroup(displaySection);
@@ -704,6 +766,55 @@ class GraphFrontierView extends ItemView {
       hint: 'Speed damping per frame; higher means faster stop',
     });
 
+    // Effects animate how the graph is shown; they never move nodes or change the layout.
+    const effectsSection = this.createSidePanelSection(physicsSection, {
+      id: 'effects',
+      title: 'Effects',
+      openByDefault: true,
+    });
+    effectsSection.addClass('graphfrontier-subgroup-section');
+    // Each effect is its own collapsible subsection, like Groups and Filters.
+    const effectSection = (id, title) => {
+      const section = this.createSidePanelSection(effectsSection, {
+        id,
+        title,
+        openByDefault: true,
+      });
+      section.addClass('graphfrontier-subgroup-section');
+      return section;
+    };
+    const growGroup = effectSection('effect-grow', 'Grow');
+    this.addSideSlider(growGroup, 'Grow duration', 'grow_duration', 1, 60, 1, 'render', {
+      hint: 'Seconds Grow takes to give birth to every node',
+    });
+    const growButton = growGroup
+      .createDiv({ cls: 'graphfrontier-sidepanel-actions-row' })
+      .createEl('button', { cls: 'graphfrontier-sidepanel-save', text: 'Grow' });
+    growButton.setAttr('title', 'Replay the graph being built, in note creation order');
+    this.registerDomEvent(growButton, 'click', () => startGrow(this));
+
+    const waveGroup = effectSection('effect-wave', 'Wave');
+    this.addSideSlider(waveGroup, 'Wave depth', 'wave_depth', 1, 10, 1, 'render', {
+      hint: 'How many link steps the wave spreads from the clicked node',
+    });
+    this.addSideSlider(waveGroup, 'Wave speed', 'wave_speed', 1, 10, 1, 'render', {
+      hint: 'How fast the light runs from node to node',
+    });
+    this.addSideSlider(waveGroup, 'Wave brightness', 'wave_brightness', 10, 100, 5, 'render', {
+      hint: 'Brightness of the running light and the rings, in percent',
+    });
+    this.addSideSlider(waveGroup, 'Wave ring size', 'wave_ring_size', 5, 80, 1, 'render', {
+      hint: 'How far each ring widens around a reached node, in pixels',
+    });
+    const waveRow = waveGroup.createDiv({ cls: 'graphfrontier-sidepanel-actions-row' });
+    this.waveButtonEl = waveRow.createEl('button', { cls: 'graphfrontier-sidepanel-save' });
+    this.waveHintEl = waveRow.createSpan({
+      cls: 'graphfrontier-sidepanel-label',
+      text: 'Click the graph to start the wave',
+    });
+    this.registerDomEvent(this.waveButtonEl, 'click', () => this.setWaveArmed(!this.waveArmed));
+    this.setWaveArmed(!!this.waveArmed);
+
     const groupsSection = this.settingsTabs.get('groups').panel;
     // Groups and Filters are collapsible subgroups of the Groups tab.
     const groupListSection = this.createSidePanelSection(groupsSection, {
@@ -735,13 +846,18 @@ class GraphFrontierView extends ItemView {
     this.nodeListsTab = new NodeListsTab(this, customListsSection.createDiv());
     this.nodeListsTab.render();
 
-    const layoutSection = this.createSidePanelSection(body, {
-      id: 'layout',
-      title: 'Layout',
-      openByDefault: true,
-    });
-    if (!this.plugin.isLocalGraphFrontier) this.buildLayoutList(layoutSection);
-    this.addSideSaveLayoutButton(layoutSection);
+    // An exported page has the layout list with Layouts, and Save layout and Autosave with Saves.
+    const pageLayouts = !exportPage || exportPage.layouts;
+    const pageSaves = !exportPage || exportPage.saves;
+    if (pageLayouts || pageSaves) {
+      const layoutSection = this.createSidePanelSection(body, {
+        id: 'layout',
+        title: 'Layout',
+        openByDefault: true,
+      });
+      if (!this.plugin.isLocalGraphFrontier && pageLayouts) this.buildLayoutList(layoutSection);
+      if (pageSaves) this.addSideSaveLayoutButton(layoutSection);
+    }
     this.syncSidePanelControls();
     this.sidePanelEl.scrollTop = scrollTop;
   }
@@ -1194,12 +1310,16 @@ class GraphFrontierView extends ItemView {
     input.setAttr('title', hintText);
     const valueEl = row.createSpan({ cls: 'graphfrontier-sidepanel-value' });
     valueEl.setAttr('title', hintText);
-    input.min = String(min);
-    input.max = String(max);
-    input.step = String(step);
+    // With a list of values the slider moves by position: 0 is the first value.
+    const values = options.values || null;
+    const toPosition = (value) => Math.max(0, values.indexOf(Number(value)));
+    input.min = String(values ? 0 : min);
+    input.max = String(values ? values.length - 1 : max);
+    input.step = String(values ? 1 : step);
     const getValue = () => this.plugin.data.settings[key] ?? options.fallbackValue?.();
-    input.value = String(getValue());
-    valueEl.setText(this.formatSliderValue(Number(input.value), step));
+    const format = options.format || ((value) => this.formatSliderValue(value, step));
+    input.value = String(values ? toPosition(getValue()) : getValue());
+    valueEl.setText(format(values ? getValue() : Number(input.value)));
 
     this.sideControls.set(key, {
       type: 'slider',
@@ -1209,14 +1329,17 @@ class GraphFrontierView extends ItemView {
       max,
       step,
       getValue,
+      format,
+      toPosition: values ? toPosition : null,
     });
 
     const applyValueFromSlider = () => {
-      const parsed = Number(input.value);
+      const parsed = values ? values[Number(input.value)] : Number(input.value);
       if (!Number.isFinite(parsed)) return;
       const clamped = Math.max(min, Math.min(max, parsed));
       this.plugin.data.settings[key] = clamped;
-      valueEl.setText(this.formatSliderValue(clamped, step));
+      valueEl.setText(format(clamped));
+      options.onChange?.();
       if (key === 'strong_pull_multiplier') {
         this.plugin.applyStrongPullToMarkedNodes();
       }
@@ -1279,8 +1402,10 @@ class GraphFrontierView extends ItemView {
 
     this.registerDomEvent(saveButton, 'click', () => this.saveCurrentLayout());
 
+    // An exported page cannot export again: it has no vault to write to.
+    if (this.plugin.exportPage) return;
     const exportButton = buttonsWrap.createEl('button', {
-      cls: 'graphfrontier-sidepanel-save',
+      cls: 'graphfrontier-sidepanel-save is-accent',
       text: 'Export to',
     });
     exportButton.setAttr('title', 'Export static graph HTML inside the current vault');
@@ -1369,12 +1494,13 @@ class GraphFrontierView extends ItemView {
     });
     this.syncSearchModeToggleUi();
 
-    const getSuggestionPack = () => {
+    // An empty query offers the search options; right after one is chosen, its values follow.
+    const getSuggestionPack = (sourceChosen = false) => {
       const rawQuery = String(searchInput.value || '');
       const prefix = this.getSearchInputPrefix(rawQuery);
       const parsed = this.parseSearchQuery(rawQuery);
       if (
-        (!parsed.query && parsed.source !== 'list') ||
+        (!parsed.query && parsed.source !== 'list' && !sourceChosen) ||
         searchInput.selectionStart < prefix.length
       ) {
         return {
@@ -1387,9 +1513,9 @@ class GraphFrontierView extends ItemView {
 
     const isSuggestPopupSuppressed = () => Date.now() < this.searchSuggestSuppressUntilMs;
 
-    const openSearchSuggestionPopup = () => {
+    const openSearchSuggestionPopup = (sourceChosen = false) => {
       if (isSuggestPopupSuppressed()) return;
-      const suggestionPack = getSuggestionPack();
+      const suggestionPack = getSuggestionPack(sourceChosen);
       this.showInputSuggestMenu(
         searchInput,
         suggestionPack.items,
@@ -1405,7 +1531,7 @@ class GraphFrontierView extends ItemView {
             this.searchSelectedNodeId = null;
             this.syncSearchMatchesLive();
             this.syncSearchClearButtonVisibility();
-            this.contentEl.win.setTimeout(() => openSearchSuggestionPopup(), 0);
+            this.contentEl.win.setTimeout(() => openSearchSuggestionPopup(true), 0);
             return;
           }
           searchInput.value = selectedText;
@@ -2067,6 +2193,10 @@ class GraphFrontierView extends ItemView {
   }
 
   getFilterVisibleNodeIds() {
+    return growVisibleNodeIds(this, this.getRuleAndSearchVisibleNodeIds());
+  }
+
+  getRuleAndSearchVisibleNodeIds() {
     if (this.plugin.data.subgraphs?.length || this.subgraphScope)
       return this.getSubgraphFilterVisibleNodeIds();
     const queryRuleVisibleNodeIds = this.getQueryRuleVisibleNodeIds();
@@ -2898,6 +3028,10 @@ class GraphFrontierView extends ItemView {
       const color = this.plugin.normalizeGroupColor(rowState.colorInput.value);
       rowState.button.style.backgroundColor = color;
       rowState.button.style.color = getContrastIconColor(color);
+      applySwatchShape(
+        rowState.button,
+        rowState.settings?.node_shape ?? this.plugin.getSettings().node_shape
+      );
     };
     rowState.refreshSwatch();
 
@@ -3305,8 +3439,17 @@ class GraphFrontierView extends ItemView {
     else this.plugin.renderAllViews();
   }
 
+  // Color swatches of the base and attachment node color and every group row show the shape.
+  refreshShapeSwatches() {
+    const shape = this.plugin.getSettings().node_shape;
+    applySwatchShape(this.sideControls.get('node_color')?.input, shape);
+    applySwatchShape(this.sideControls.get('attachment_node_color')?.input, shape);
+    for (const rowState of this.groupEditorRows || []) rowState.refreshSwatch?.();
+  }
+
   syncSidePanelControls() {
     this.syncSettingsTabs();
+    this.refreshShapeSwatches();
     if (this.reverseArrowsRowEl)
       this.reverseArrowsRowEl.style.display = this.plugin.getSettings().show_arrows ? '' : 'none';
     if (this.backgroundColorRowEl)
@@ -3335,9 +3478,11 @@ class GraphFrontierView extends ItemView {
       }
       if (meta.type === 'slider' && activeEl !== meta.input) {
         const clamped = Math.max(meta.min, Math.min(meta.max, Number(currentValue)));
-        const nextValue = String(clamped);
+        const nextValue = String(meta.toPosition ? meta.toPosition(clamped) : clamped);
         if (meta.input.value !== nextValue) meta.input.value = nextValue;
-        meta.valueEl.setText(this.formatSliderValue(clamped, meta.step));
+        meta.valueEl.setText(
+          meta.format ? meta.format(clamped) : this.formatSliderValue(clamped, meta.step)
+        );
         continue;
       }
 
@@ -3853,7 +3998,10 @@ class GraphFrontierView extends ItemView {
       this.focusProgress !== (this.getActiveFocusNodeId() ? 1 : 0) ||
       this.hoverFocusProgress !== (this.hoverNodeId ? 1 : 0) ||
       this.hoverFadeProgress > 0 ||
-      !!this.clickFlashNodeId
+      !!this.clickFlashNodeId ||
+      isGrowActive(this) ||
+      isWaveActive(this) ||
+      activePulseWaves(this).length > 0
     );
   }
 
@@ -3874,6 +4022,7 @@ class GraphFrontierView extends ItemView {
       this.finishSubgraphFraming();
       this.stepCameraSmoothing();
       if (!this.waitingForMetadata && !this.plugin.backups?.restoring) {
+        stepGrow(this);
         if (this.physicsVisibilityDirty) {
           this.physicsVisibilityDirty = false;
           if (this.nodes.length) wakeOnPhysicsVisibilityChange(this);
@@ -3887,7 +4036,8 @@ class GraphFrontierView extends ItemView {
           if (this.nodes.length && (!this.layoutPaused || dragging)) {
             const startedAt = performance.now();
             let lastStepMs = 0;
-            for (let step = 0; step < (dragging ? 1 : 3); step++) {
+            const steps = dragging ? 1 : getPhysicsParameters(this.plugin).stepsPerFrame;
+            for (let step = 0; step < steps; step++) {
               if (step > 0 && performance.now() - startedAt + lastStepMs > 8) break;
               const stepStartedAt = performance.now();
               this.stepSimulation();
@@ -3919,6 +4069,11 @@ class GraphFrontierView extends ItemView {
 
   stepSimulation() {
     if (this.plugin.backups?.restoring || this.waitingForMetadata) return;
+    // An exported page without physics keeps the graph as it was exported, and idles.
+    if (this.plugin.exportPage && !this.plugin.exportPage.physics) {
+      this.layoutPaused = true;
+      return;
+    }
     return stepSimulationPhysics(this);
   }
 
@@ -3938,6 +4093,8 @@ class GraphFrontierView extends ItemView {
    */
   render() {
     this.renderCount = (this.renderCount || 0) + 1;
+    // History changes with moves and pins, so the header buttons follow every render.
+    this.syncHistoryButtons();
     const result = renderFrameRender(this);
     this.requestFrame();
     return result;
@@ -4115,6 +4272,7 @@ class GraphFrontierView extends ItemView {
     const rect = this.canvasEl.getBoundingClientRect();
     const screenX = event.clientX - rect.left;
     const screenY = event.clientY - rect.top;
+    if (this.consumeWavePress(screenX, screenY)) return;
 
     const node = this.getNodeAtScreen(screenX, screenY);
     const selectionToggleModifier = this.getSelectionToggleModifier();
@@ -4404,6 +4562,7 @@ class GraphFrontierView extends ItemView {
 
     const point = this.getTouchScreenPoint(event.touches[0]);
     if (!point) return;
+    if (this.consumeWavePress(point.x, point.y)) return;
     const node = this.startSingleTouchGesture(point);
     this.scheduleTouchLongPress(
       node?.id ?? null,
@@ -5136,6 +5295,7 @@ class GraphFrontierView extends ItemView {
       } else if (value === null) delete next.settings[key];
       else next.settings[key] = value;
       rowState.settings = { ...next.settings };
+      rowState.refreshSwatch?.();
       if (!Object.keys(next.settings).length) delete next.settings;
       this.plugin.updateGroups(
         this.plugin.data.groups.map((entry) => (entry.id === rowState.id ? next : entry))
@@ -5189,9 +5349,10 @@ class GraphFrontierView extends ItemView {
                 ? 'graphfrontier-toggle-btn'
                 : 'graphfrontier-sidepanel-slider',
         });
-        input.min = String(spec.min);
-        input.max = String(spec.max);
-        input.step = String(spec.step);
+        // A slider over a list of values moves by position: 0 is the first value.
+        input.min = String(spec.values ? 0 : spec.min);
+        input.max = String(spec.values ? spec.values.length - 1 : spec.max);
+        input.step = String(spec.values ? 1 : spec.step);
         input.setAttribute('aria-label', `${group ? 'Group' : 'Node'} ${spec.label.toLowerCase()}`);
         const value =
           spec.type === 'color' || spec.type === 'boolean'
@@ -5213,7 +5374,20 @@ class GraphFrontierView extends ItemView {
           input.value =
             spec.type === 'color'
               ? getColorInputValue(values[0] ?? this.canvasTheme?.mutedText, '#9ea4af')
-              : String(values[0] ?? '');
+              : spec.values
+                ? String(Math.max(0, spec.values.indexOf(Number(values[0]))))
+                : String(values[0] ?? '');
+          if (spec.key === 'node_color') {
+            const shapeTarget = (current.length ? current : nodes)[0];
+            applySwatchShape(
+              input,
+              group
+                ? group.value('node_shape')
+                : shapeTarget
+                  ? getNodeVisualSetting(this.plugin, shapeTarget.id, 'node_shape')
+                  : this.plugin.getSettings().node_shape
+            );
+          }
           if (spec.type === 'boolean') {
             input.checked = values[0] === true;
             input.toggleClass('is-on', input.checked);
@@ -5229,7 +5403,13 @@ class GraphFrontierView extends ItemView {
             )
               ? ''
               : 'none';
-          value?.setText(mixed ? 'Mixed' : this.formatSliderValue(Number(input.value), spec.step));
+          value?.setText(
+            mixed
+              ? 'Mixed'
+              : spec.values
+                ? spec.names[spec.values[Number(input.value)]]
+                : this.formatSliderValue(Number(input.value), spec.step)
+          );
           input.setAttribute('aria-valuetext', mixed ? 'Mixed' : String(values[0]));
           input.setAttribute(
             'title',
@@ -5253,7 +5433,9 @@ class GraphFrontierView extends ItemView {
               ? input.value
               : spec.type === 'boolean'
                 ? input.checked
-                : Number(input.value);
+                : spec.values
+                  ? spec.values[Number(input.value)]
+                  : Number(input.value);
           if (group) group.set(spec.key, settingValue);
           for (const entry of this.resolveNodeActionTargets(snapshot).filter(eligible)) {
             this.plugin.setNodeVisualSetting(entry.id, spec.key, settingValue);
@@ -5633,931 +5815,39 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
-    const visibleNodeIds = this.getFilterVisibleNodeIds();
-    const hasFilter = visibleNodeIds instanceof Set;
-    const explicitIds = Array.isArray(options.nodeIds) ? new Set(options.nodeIds) : null;
-    const sourceNodes = this.nodes.filter((node) =>
-      explicitIds ? explicitIds.has(node.id) : !hasFilter || visibleNodeIds.has(node.id)
+    if (!hasExportPage()) {
+      reportFailure('This build of GraphFrontier has no export page');
+      return;
+    }
+    let snapshot;
+    try {
+      snapshot = await captureExportSnapshot(this, options);
+    } catch (error) {
+      reportFailure(`Cannot prepare the export: ${error?.message || error}`);
+      return;
+    }
+    const visible = this.getFilterVisibleNodeIds();
+    const nodeIds = new Set(
+      this.nodes
+        .map((node) => node.id)
+        .filter((id) => !(visible instanceof Set) || visible.has(id))
+        .filter((id) => !Array.isArray(options.nodeIds) || options.nodeIds.includes(id))
     );
-    const sourceNodeIdSet = new Set(sourceNodes.map((node) => node.id));
-    const sourceEdges = this.edges.filter(
-      (edge) => sourceNodeIdSet.has(edge.source) && sourceNodeIdSet.has(edge.target)
-    );
-
-    const maxPreviewLines = 220;
-    const maxPreviewChars = 12000;
-    const normalizePreviewText = (text) => {
-      const rawText = String(text || '');
-      if (!rawText) return '';
-      const lines = rawText.split(/\r?\n/);
-      let preview = lines.slice(0, maxPreviewLines).join('\n');
-      if (preview.length > maxPreviewChars) preview = preview.slice(0, maxPreviewChars);
-      if (lines.length > maxPreviewLines || rawText.length > maxPreviewChars) preview += '\n\n...';
-      return preview;
-    };
-    const exportedNodes = await Promise.all(
-      sourceNodes.map(async (node) => {
-        const meta = this.nodeMetaById.get(node.id) || node.meta || null;
-        const isAttachment = !!meta?.isAttachment;
-        const fileType =
-          String(meta?.fileType || '').trim() || (isAttachment ? 'attachment' : 'md');
-        const nodePath = String(meta?.path || node.id || '');
-        const fileName =
-          String(meta?.fileName || '').trim() || String(node.label || '').trim() || nodePath;
-
-        const properties = {};
-        if (meta?.properties instanceof Map) {
-          for (const [propertyKey, values] of meta.properties.entries()) {
-            if (!propertyKey) continue;
-            properties[propertyKey] = Array.isArray(values)
-              ? values.map((value) => String(value || ''))
-              : [];
-          }
-        }
-
-        let contentPreview = '';
-        if (!isAttachment && options.includeContents !== false) {
-          const abstractFile = this.app.vault.getAbstractFileByPath(node.id);
-          const isMarkdownFile =
-            !!abstractFile &&
-            typeof abstractFile.extension === 'string' &&
-            abstractFile.extension.toLowerCase() === 'md';
-          if (isMarkdownFile) {
-            try {
-              const rawText = await this.app.vault.cachedRead(abstractFile);
-              contentPreview = normalizePreviewText(rawText);
-            } catch {
-              contentPreview = '';
-            }
-          }
-        }
-
-        const groupColor = this.getGroupColorForNode(node);
-        const fillColor = getNodeColor(this.plugin, node, groupColor);
-
-        return {
-          id: node.id,
-          label: String(getNodeLabelText({ ...node, meta }) || ''),
-          labelMinimumSize: getLabelMinimumSizeRender(this, node.id),
-          labelMinZoom: getLabelZoomThresholdRender(this, node.id),
-          dimAlpha:
-            getNodeVisualOverride(this.plugin, node.id, 'hover_dim_strength') === null &&
-            this.plugin.getGroupVisualSettings?.(node.id)?.hover_dim_strength == null
-              ? null
-              : getHoverDimAlpha(this.plugin, 1, node.id),
-          labelFontSize:
-            this.plugin.getNodeLabelSize(node.id) === null &&
-            this.plugin.getGroupVisualSettings?.(node.id)?.label_font_size == null
-              ? null
-              : getNodeVisualSetting(this.plugin, node.id, 'label_font_size') / 5,
-          x: Number(node.x) || 0,
-          y: Number(node.y) || 0,
-          degree: Number(node.degree) || 0,
-          radius: Number(this.getNodeRadius(node)) || 1,
-          color: fillColor,
-          auraRadius: getNodeVisualSetting(this.plugin, node.id, 'aura_radius') / 10,
-          auraBrightness: getNodeVisualSetting(this.plugin, node.id, 'aura_brightness'),
-          isAttachment,
-          isSubgraph: !!meta?.subgraph,
-          fileType,
-          path: nodePath,
-          fileName,
-          tags: Array.isArray(meta?.tags) ? meta.tags.map((tag) => String(tag || '')) : [],
-          sections: Array.isArray(meta?.sections)
-            ? meta.sections.map((section) => String(section || ''))
-            : [],
-          properties,
-          contentPreview,
-        };
-      })
-    );
-
-    const linkContext = {};
-    const exportedEdges = sourceEdges.map((edge) => ({
-      source: edge.source,
-      target: edge.target,
-      width: getEdgeVisualSetting(
-        this.plugin,
-        edge.source,
-        edge.target,
-        'edge_width_scale',
-        linkContext
-      ),
-      color: getEdgeVisualSetting(this.plugin, edge.source, edge.target, 'edge_color', linkContext),
-      opacity: getEdgeVisualSetting(
-        this.plugin,
-        edge.source,
-        edge.target,
-        'edge_opacity',
-        linkContext
-      ),
-      showArrows: getEdgeVisualSetting(
-        this.plugin,
-        edge.source,
-        edge.target,
-        'show_arrows',
-        linkContext
-      ),
-      reverseArrows: getEdgeVisualSetting(
-        this.plugin,
-        edge.source,
-        edge.target,
-        'reverse_arrows',
-        linkContext
-      ),
-      bidirectional: !!edge.bidirectional,
-      paintedColor:
-        this.plugin.getPaintedEdgeColor(edge.source, linkContext) ||
-        this.plugin.getPaintedEdgeColor(edge.target, linkContext)
-          ? getEdgeVisualSetting(this.plugin, edge.source, edge.target, 'edge_color', linkContext)
-          : null,
-    }));
-
-    const width = Math.max(1, Math.floor(this.viewWidth || this.canvasEl.clientWidth || 1));
-    const height = Math.max(1, Math.floor(this.viewHeight || this.canvasEl.clientHeight || 1));
-    this.updateCanvasBackgroundColor();
-    const theme = this.canvasTheme;
-    const bgColor = this.canvasBackgroundColor;
-    const textColor = theme.text;
-    const mutedTextColor = theme.mutedText;
-    const edgeAppearance = getEdgeAppearanceRender(this);
-    const exportedAt = new Date().toISOString();
-    const payload = {
-      exportPath: normalizedExportPath,
-      exportedAt,
-      camera: {
-        x: Number(this.camera.x) || 0,
-        y: Number(this.camera.y) || 0,
-        zoom: Number(this.camera.zoom) || 1,
-      },
-      canvas: { width, height },
-      theme: { ...theme, background: bgColor },
-      settings: {
-        dimLowDegreeNodes: this.plugin.getSettings().dim_low_degree_nodes,
-        showGrid: !!this.plugin.getSettings().show_grid,
-        gridColor: this.plugin.getSettings().grid_color || theme.grid,
-        gridOpacity: this.plugin.getSettings().grid_opacity ?? theme.gridOpacity,
-        gridStep: this.plugin.clampGridStep(this.plugin.getSettings().grid_step),
-        gridLineWidth: this.plugin.clampGridLineWidth(this.plugin.getSettings().grid_line_width),
-        edgeWidth: this.plugin.clampNumber(
-          this.plugin.getSettings().edge_width_scale,
-          0.1,
-          5,
-          DEFAULT_DATA.settings.edge_width_scale
-        ),
-        edgeColor: edgeAppearance.color,
-        edgeOpacity: edgeAppearance.opacity,
-        hoverColor: /^#[0-9a-f]{6}$/i.test(this.plugin.getSettings().hover_highlight_color || '')
-          ? this.plugin.getSettings().hover_highlight_color
-          : null,
-        labelMinZoom: this.getLabelZoomThreshold(),
-        labelFontSize: this.getLabelFontSize(),
-        zoomStepFactor: ZOOM_STEP_FACTOR,
-        minZoom: MIN_ZOOM,
-        maxZoom: MAX_ZOOM,
-      },
-      nodes: exportedNodes,
-      edges: exportedEdges,
-    };
-    const payloadJson = JSON.stringify(payload)
-      .replace(/</g, '\\u003c')
-      .replace(/\u2028/g, '\\u2028')
-      .replace(/\u2029/g, '\\u2029');
-
-    const html = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GraphFrontier Static Interactive Export</title>
-  <style>
-    :root {
-      color-scheme: ${theme.colorScheme};
-    }
-    html {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-    }
-    body {
-      margin: 0;
-      width: 100%;
-      height: 100%;
-      min-height: 100vh;
-      background: ${bgColor};
-      color: ${textColor};
-      font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
-      overflow: hidden;
-    }
-    .app {
-      position: fixed;
-      inset: 0;
-      display: grid;
-      grid-template-columns: 1fr 430px;
-      overflow: hidden;
-      min-height: 0;
-    }
-    .graph-wrap {
-      position: relative;
-      overflow: hidden;
-      min-height: 0;
-    }
-    #graph {
-      display: block;
-      width: 100%;
-      height: 100%;
-      background: ${bgColor};
-      cursor: grab;
-    }
-    #graph.is-dragging {
-      cursor: grabbing;
-    }
-    .hud {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: ${theme.surface};
-      border: 1px solid ${theme.border};
-      border-radius: 8px;
-      padding: 6px 8px;
-      color: ${mutedTextColor};
-      backdrop-filter: blur(2px);
-      pointer-events: none;
-    }
-    .panel {
-      background: ${theme.surface};
-      border-left: 1px solid ${theme.border};
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      min-height: 0;
-      overflow: hidden;
-    }
-    .panel-header {
-      padding: 12px;
-      border-bottom: 1px solid ${theme.border};
-    }
-    .panel-title {
-      font-size: 13px;
-      font-weight: 600;
-      margin-bottom: 4px;
-      word-break: break-word;
-    }
-    .panel-meta {
-      color: ${mutedTextColor};
-      word-break: break-word;
-    }
-    .panel-body {
-      padding: 12px;
-      min-height: 0;
-      display: flex;
-      flex-direction: column;
-      flex: 1 1 auto;
-      overflow: hidden;
-      gap: 10px;
-    }
-    .hint {
-      color: ${mutedTextColor};
-    }
-    .content-html {
-      padding: 10px 0 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      flex: 1 1 0;
-      height: 100%;
-      overflow: auto;
-      min-height: 0;
-      line-height: 1.45;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-    }
-    .content-html :is(h1, h2, h3, h4, h5, h6) {
-      margin: 0.2em 0 0.45em;
-    }
-    .content-html p {
-      margin: 0.35em 0;
-    }
-    .content-html pre {
-      margin: 0.4em 0;
-      padding: 8px;
-      border-radius: 6px;
-      background: ${bgColor};
-      max-width: 100%;
-      overflow-x: auto;
-      overflow-y: hidden;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    @media (max-width: 1000px) {
-      .app {
-        grid-template-columns: 1fr;
-      }
-      .panel {
-        position: absolute;
-        right: 8px;
-        top: 8px;
-        bottom: 8px;
-        width: min(94vw, 430px);
-        border-radius: 10px;
-        border: 1px solid ${theme.border};
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="app">
-    <section class="graph-wrap">
-      <canvas id="graph"></canvas>
-      <div class="hud" id="hud"></div>
-    </section>
-    <aside class="panel">
-      <header class="panel-header">
-        <div class="panel-title" id="panel-title">No node selected</div>
-        <div class="panel-meta" id="panel-meta">Click a node to see file content preview</div>
-      </header>
-      <div class="panel-body">
-        <div class="hint">Drag to pan, wheel to zoom, hover for labels.</div>
-        <div class="content-html" id="panel-content-html">Select a node…</div>
-      </div>
-    </aside>
-  </div>
-  <script>
-    const EXPORT_DATA = ${payloadJson};
-    (() => {
-      const getLabelAppearance = ${getLabelAppearance.toString()};
-      const getNodeScreenRadius = ${getNodeScreenRadius.toString()};
-      const getLowDegreeAlpha = ${getLowDegreeAlpha.toString()};
-      const getLinkArrowSegments = ${getLinkArrowSegments.toString()};
-      const getNodeWorldRadius = ${getNodeWorldRadius.toString()};
-      const getEdgeCssWidth = ${getEdgeCssWidth.toString()};
-      const setCrispStroke = ${setCrispStroke.toString()};
-      const quantizeFocusProgress = ${quantizeFocusProgress.toString()};
-      const getFocusEdgeWidth = ${getFocusEdgeWidth.toString()};
-      const getFocusEdgeColor = ${getFocusEdgeColor.toString()};
-      const getCrispCoordinate = ${getCrispCoordinate.toString()};
-      const canvas = document.getElementById('graph');
-      const hud = document.getElementById('hud');
-      const panelTitle = document.getElementById('panel-title');
-      const panelMeta = document.getElementById('panel-meta');
-      const panelContentHtml = document.getElementById('panel-content-html');
-      const ctx = canvas.getContext('2d');
-      const nodeById = new Map(EXPORT_DATA.nodes.map((node) => [node.id, node]));
-      const neighborsById = new Map(EXPORT_DATA.nodes.map((node) => [node.id, new Set()]));
-      for (const edge of EXPORT_DATA.edges) {
-        neighborsById.get(edge.source)?.add(edge.target);
-        neighborsById.get(edge.target)?.add(edge.source);
-      }
-
-      const camera = {
-        x: Number(EXPORT_DATA.camera?.x) || 0,
-        y: Number(EXPORT_DATA.camera?.y) || 0,
-        zoom: Number(EXPORT_DATA.camera?.zoom) || 1,
-      };
-      const edgeWidth = Number(EXPORT_DATA.settings?.edgeWidth) || 0.34;
-      const edgeColor = EXPORT_DATA.settings?.edgeColor || EXPORT_DATA.theme?.mutedText || '#9ea4af';
-      const rawEdgeOpacity = Number(EXPORT_DATA.settings?.edgeOpacity);
-      const edgeOpacity = Number.isFinite(rawEdgeOpacity) ? Math.max(0, Math.min(1, rawEdgeOpacity)) : 1;
-      const hoverColor = /^#[0-9a-f]{6}$/i.test(EXPORT_DATA.settings?.hoverColor || '') ? EXPORT_DATA.settings.hoverColor : null;
-      const labelMinZoom = Number(EXPORT_DATA.settings?.labelMinZoom) || 0.4;
-      const labelFontSize = Number(EXPORT_DATA.settings?.labelFontSize) || 1.8;
-      const showGrid = !!EXPORT_DATA.settings?.showGrid;
-      const gridStep = Number(EXPORT_DATA.settings?.gridStep) || 20;
-      const rawGridLineWidth = Number(EXPORT_DATA.settings?.gridLineWidth);
-      const gridLineWidth = Number.isFinite(rawGridLineWidth)
-        ? Math.max(0.1, Math.min(2, rawGridLineWidth))
-        : 1;
-      const minZoom = Number(EXPORT_DATA.settings?.minZoom) || 0.1;
-      const maxZoom = Number(EXPORT_DATA.settings?.maxZoom) || 12;
-      const zoomStepFactor = Number(EXPORT_DATA.settings?.zoomStepFactor) || 1.12;
-
-      let dpr = 1;
-      let viewWidth = 1;
-      let viewHeight = 1;
-      let hoveredNodeId = null;
-      let selectedNodeId = null;
-      let panDrag = null;
-
-      const worldToScreen = (x, y) => ({
-        x: (x - camera.x) * camera.zoom + viewWidth / 2,
-        y: (y - camera.y) * camera.zoom + viewHeight / 2,
-      });
-      const screenToWorld = (x, y) => ({
-        x: (x - viewWidth / 2) / camera.zoom + camera.x,
-        y: (y - viewHeight / 2) / camera.zoom + camera.y,
-      });
-      const clampZoom = (value) => Math.min(maxZoom, Math.max(minZoom, value));
-
-      function getCanvasPoint(event) {
-        const rect = canvas.getBoundingClientRect();
-        return {
-          x: event.clientX - rect.left,
-          y: event.clientY - rect.top,
-          inside:
-            event.clientX >= rect.left &&
-            event.clientX <= rect.right &&
-            event.clientY >= rect.top &&
-            event.clientY <= rect.bottom,
-        };
-      }
-
-      function getNodeAtScreen(screenX, screenY) {
-        const world = screenToWorld(screenX, screenY);
-        let bestNode = null;
-        let bestDist2 = Infinity;
-        for (const node of EXPORT_DATA.nodes) {
-          const dx = node.x - world.x;
-          const dy = node.y - world.y;
-          const d2 = dx * dx + dy * dy;
-          if (d2 < bestDist2) {
-            bestDist2 = d2;
-            bestNode = node;
-          }
-        }
-        if (!bestNode) return null;
-        const maxDist = Math.max(1, getNodeWorldRadius(Number(bestNode.radius || 1), camera.zoom) + (bestNode.isSubgraph ? 4.2 : 2) / Math.max(camera.zoom, 0.0001));
-        if (bestDist2 > maxDist * maxDist) return null;
-        return bestNode;
-      }
-
-      function drawGrid() {
-        if (!showGrid) return;
-        const scaledStep = gridStep * camera.zoom;
-        if (scaledStep < 8) return;
-        const leftWorld = screenToWorld(0, 0).x;
-        const rightWorld = screenToWorld(viewWidth, 0).x;
-        const topWorld = screenToWorld(0, 0).y;
-        const bottomWorld = screenToWorld(0, viewHeight).y;
-        const startX = Math.floor(leftWorld / gridStep) * gridStep;
-        const endX = Math.ceil(rightWorld / gridStep) * gridStep;
-        const startY = Math.floor(topWorld / gridStep) * gridStep;
-        const endY = Math.ceil(bottomWorld / gridStep) * gridStep;
-
-        ctx.save();
-        const backingScale = dpr;
-        ctx.strokeStyle = EXPORT_DATA.settings.gridColor || EXPORT_DATA.theme.grid;
-        setCrispStroke(ctx, gridLineWidth, EXPORT_DATA.settings.gridOpacity ?? EXPORT_DATA.theme.gridOpacity, backingScale);
-        // Chromium can drop subpixel lines when a crossed grid shares one path.
-        const strokeSeparately = ctx.lineWidth < 1;
-        if (!strokeSeparately) ctx.beginPath();
-        for (let x = startX; x <= endX; x += gridStep) {
-          if (strokeSeparately) ctx.beginPath();
-          const sx = getCrispCoordinate(worldToScreen(x, 0).x, backingScale, ctx.lineWidth);
-          ctx.moveTo(sx, 0);
-          ctx.lineTo(sx, viewHeight);
-          if (strokeSeparately) ctx.stroke();
-        }
-        for (let y = startY; y <= endY; y += gridStep) {
-          if (strokeSeparately) ctx.beginPath();
-          const sy = getCrispCoordinate(worldToScreen(0, y).y, backingScale, ctx.lineWidth);
-          ctx.moveTo(0, sy);
-          ctx.lineTo(viewWidth, sy);
-          if (strokeSeparately) ctx.stroke();
-        }
-        if (!strokeSeparately) ctx.stroke();
-        ctx.restore();
-      }
-
-      function drawEdges() {
-        // One stroke per appearance, so translucent edges never stack where they overlap.
-        const selectedNeighbors = selectedNodeId ? neighborsById.get(selectedNodeId) || new Set() : null;
-        const buckets = new Map();
-        for (const edge of EXPORT_DATA.edges) {
-          const sourceNode = nodeById.get(edge.source);
-          const targetNode = nodeById.get(edge.target);
-          if (!sourceNode || !targetNode) continue;
-          const sourcePoint = worldToScreen(sourceNode.x, sourceNode.y);
-          const targetPoint = worldToScreen(targetNode.x, targetNode.y);
-          const isActive = !!selectedNodeId && (edge.source === selectedNodeId || edge.target === selectedNodeId);
-          const physicalWidth = getFocusEdgeWidth(edge.width ?? edgeWidth, isActive ? 1 : 0);
-          // Highlighted edges are fully opaque; the rest keep the edge opacity.
-          const alpha = isActive ? 1 : (selectedNodeId ? 0.24 : 1) * (edge.opacity ?? edgeOpacity) * (edge.paintedColor ? 0.65 : 1);
-          const color = getFocusEdgeColor(
-            edge.color || edge.paintedColor || edgeColor,
-            EXPORT_DATA.theme?.text,
-            isActive ? 1 : 0,
-            hoverColor
-          );
-          const layer = (edge.paintedColor ? 1 : 0) + (isActive ? 2 : 0);
-          const key = layer + '|' + color + '|' + physicalWidth + '|' + alpha;
-          let bucket = buckets.get(key);
-          if (!bucket) {
-            bucket = { layer, color, physicalWidth, alpha, points: [] };
-            buckets.set(key, bucket);
-          }
-          bucket.points.push(sourcePoint.x, sourcePoint.y, targetPoint.x, targetPoint.y);
-          if (edge.showArrows) bucket.points.push(...getLinkArrowSegments(sourcePoint.x, sourcePoint.y,
-            targetPoint.x, targetPoint.y, getNodeScreenRadius(sourceNode.radius, camera.zoom),
-            getNodeScreenRadius(targetNode.radius, camera.zoom), edge.reverseArrows, edge.bidirectional,
-            getEdgeCssWidth(physicalWidth, dpr)));
-        }
-        const ordered = Array.from(buckets.values()).sort((a, b) => a.layer - b.layer);
-        ctx.save();
-        for (const bucket of ordered) {
-          ctx.strokeStyle = bucket.color;
-          setCrispStroke(ctx, getEdgeCssWidth(bucket.physicalWidth, dpr), bucket.alpha, dpr);
-          ctx.beginPath();
-          const points = bucket.points;
-          for (let i = 0; i < points.length; i += 4) {
-            ctx.moveTo(points[i], points[i + 1]);
-            ctx.lineTo(points[i + 2], points[i + 3]);
-          }
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      function drawAuras() {
-        for (const node of EXPORT_DATA.nodes) {
-          const radius = Number(node.auraRadius || 0) * camera.zoom;
-          const brightness = (node.auraBrightness ?? 22) / 100;
-          if (!(radius > 0) || !(brightness > 0)) continue;
-          const point = worldToScreen(node.x, node.y);
-          if (point.x + radius < 0 || point.y + radius < 0 || point.x - radius > viewWidth || point.y - radius > viewHeight) continue;
-          const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
-          const alphaHex = (alpha) => Math.round(alpha * 255).toString(16).padStart(2, '0');
-          gradient.addColorStop(0, node.color + alphaHex(brightness));
-          gradient.addColorStop(0.4, node.color + alphaHex(brightness * (6 / 11)));
-          gradient.addColorStop(1, node.color + '00');
-          ctx.save();
-          ctx.fillStyle = gradient;
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-        }
-      }
-
-      function drawNodes() {
-        const selectedNeighbors = selectedNodeId ? neighborsById.get(selectedNodeId) || new Set() : new Set();
-        for (const node of EXPORT_DATA.nodes) {
-          const point = worldToScreen(node.x, node.y);
-          if (point.x < -80 || point.x > viewWidth + 80 || point.y < -80 || point.y > viewHeight + 80) continue;
-          const radius = getNodeScreenRadius(Number(node.radius || 1), camera.zoom);
-          const isHovered = hoveredNodeId === node.id;
-          const isSelected = selectedNodeId === node.id;
-          const isNeighbor = selectedNodeId && selectedNeighbors.has(node.id);
-          const alpha = (isHovered ? 1 : selectedNodeId ? (isSelected || isNeighbor ? 1 : (node.dimAlpha ?? 0.32)) : 1)
-            * getLowDegreeAlpha(EXPORT_DATA.settings.dimLowDegreeNodes, node.degree, isHovered || isSelected || isNeighbor);
-
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = node.color || '#7aa2f7';
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, radius + (node.isSubgraph ? 2 : 0), 0, Math.PI * 2);
-          if (node.isSubgraph) {
-            ctx.strokeStyle = node.color || '#7aa2f7';
-            setCrispStroke(ctx, 3, alpha, dpr);
-            ctx.stroke();
-          } else ctx.fill();
-          ctx.restore();
-
-          if (isHovered || isSelected) {
-            ctx.save();
-            ctx.strokeStyle = hoverColor || EXPORT_DATA.theme.selection;
-            setCrispStroke(ctx, isSelected ? 1.8 : 1.3, 1, dpr);
-            ctx.beginPath();
-            ctx.arc(point.x, point.y, radius + (node.isSubgraph ? 4 : 2), 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-          }
-
-          const label = getLabelAppearance(camera.zoom, node.labelMinZoom ?? labelMinZoom, node.labelFontSize ?? labelFontSize, alpha, isHovered || isSelected, node.labelMinimumSize ?? 10);
-          if (label.alpha > 0) {
-            ctx.save();
-            ctx.globalAlpha = label.alpha;
-            ctx.fillStyle = EXPORT_DATA.theme.text;
-            ctx.font = label.fontSize + 'px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
-            ctx.fillText(String(node.label || ''), point.x, point.y - radius - 4);
-            ctx.restore();
-          }
-        }
-      }
-
-      function escapeHtml(text) {
-        return String(text || '')
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#39;');
-      }
-
-      function renderInlineMarkdown(text) {
-        const safeText = escapeHtml(text);
-        if (!safeText) return '';
-        const tick = String.fromCharCode(96);
-        const chunks = safeText.split(tick);
-        if (chunks.length <= 1) return safeText;
-        let html = '';
-        for (let index = 0; index < chunks.length; index += 1) {
-          const chunk = chunks[index];
-          html += index % 2 === 1 ? '<code>' + chunk + '</code>' : chunk;
-        }
-        return html;
-      }
-
-      function startsWithOrderedListItem(text) {
-        const dotIndex = text.indexOf('. ');
-        if (dotIndex <= 0) return false;
-        for (let index = 0; index < dotIndex; index += 1) {
-          const code = text.charCodeAt(index);
-          if (code < 48 || code > 57) return false;
-        }
-        return true;
-      }
-
-      function isHorizontalRule(text) {
-        if (text.length < 3) return false;
-        const firstChar = text.charAt(0);
-        if (firstChar !== '-' && firstChar !== '*') return false;
-        for (let index = 1; index < text.length; index += 1) {
-          if (text.charAt(index) !== firstChar) return false;
-        }
-        return true;
-      }
-
-      function renderSimpleMarkdown(markdownText) {
-        const text = String(markdownText || '').split(String.fromCharCode(13)).join('');
-        if (!text.trim()) return '';
-        const lines = text.split(String.fromCharCode(10));
-        const codeFence = String.fromCharCode(96).repeat(3);
-        const out = [];
-        let inCode = false;
-        let codeLang = '';
-        let inUl = false;
-        let inOl = false;
-        let paragraph = [];
-
-        const flushParagraph = () => {
-          if (paragraph.length <= 0) return;
-          out.push('<p>' + paragraph.map((line) => renderInlineMarkdown(line)).join('<br>') + '</p>');
-          paragraph = [];
-        };
-        const closeLists = () => {
-          if (inUl) {
-            out.push('</ul>');
-            inUl = false;
-          }
-          if (inOl) {
-            out.push('</ol>');
-            inOl = false;
-          }
-        };
-
-        for (const rawLine of lines) {
-          const line = String(rawLine || '');
-          const trimmed = line.trim();
-
-          if (trimmed.startsWith(codeFence)) {
-            flushParagraph();
-            closeLists();
-            if (!inCode) {
-              codeLang = trimmed.slice(3).trim();
-              out.push('<pre><code' + (codeLang ? ' class="language-' + escapeHtml(codeLang) + '"' : '') + '>');
-              inCode = true;
-            } else {
-              out.push('</code></pre>');
-              inCode = false;
-              codeLang = '';
-            }
-            continue;
-          }
-          if (inCode) {
-            out.push(escapeHtml(line));
-            continue;
-          }
-
-          if (!trimmed) {
-            flushParagraph();
-            closeLists();
-            continue;
-          }
-
-          let headingLevel = 0;
-          while (headingLevel < 6 && trimmed.charAt(headingLevel) === '#') headingLevel += 1;
-          if (headingLevel > 0 && trimmed.charAt(headingLevel) === ' ') {
-            flushParagraph();
-            closeLists();
-            const headingText = trimmed.slice(headingLevel + 1);
-            out.push(
-              '<h' +
-                headingLevel +
-                '>' +
-                renderInlineMarkdown(headingText) +
-                '</h' +
-                headingLevel +
-                '>'
-            );
-            continue;
-          }
-
-          if (trimmed.startsWith('>')) {
-            flushParagraph();
-            closeLists();
-            const quoteText = trimmed.startsWith('> ') ? trimmed.slice(2) : trimmed.slice(1);
-            out.push('<blockquote><p>' + renderInlineMarkdown(quoteText) + '</p></blockquote>');
-            continue;
-          }
-
-          const isUnorderedList =
-            trimmed.length > 2 &&
-            (trimmed.charAt(0) === '-' || trimmed.charAt(0) === '*' || trimmed.charAt(0) === '+') &&
-            trimmed.charAt(1) === ' ';
-          if (isUnorderedList) {
-            flushParagraph();
-            if (inOl) {
-              out.push('</ol>');
-              inOl = false;
-            }
-            if (!inUl) {
-              out.push('<ul>');
-              inUl = true;
-            }
-            out.push('<li>' + renderInlineMarkdown(trimmed.slice(2)) + '</li>');
-            continue;
-          }
-
-          if (startsWithOrderedListItem(trimmed)) {
-            flushParagraph();
-            if (inUl) {
-              out.push('</ul>');
-              inUl = false;
-            }
-            if (!inOl) {
-              out.push('<ol>');
-              inOl = true;
-            }
-            const itemText = trimmed.slice(trimmed.indexOf('. ') + 2);
-            out.push('<li>' + renderInlineMarkdown(itemText) + '</li>');
-            continue;
-          }
-
-          if (isHorizontalRule(trimmed)) {
-            flushParagraph();
-            closeLists();
-            out.push('<hr>');
-            continue;
-          }
-
-          closeLists();
-          paragraph.push(line);
-        }
-
-        flushParagraph();
-        closeLists();
-        if (inCode) out.push('</code></pre>');
-        return out.join('');
-      }
-
-      function updatePanel(nodeId) {
-        if (!nodeId) {
-          panelTitle.textContent = 'No node selected';
-          panelMeta.textContent = 'Click a node to see file content preview';
-          panelContentHtml.textContent = 'Select a node…';
-          return;
-        }
-        const node = nodeById.get(nodeId);
-        if (!node) return;
-        panelTitle.textContent = node.label || node.fileName || node.path || node.id;
-        const tagsText = node.tags && node.tags.length ? ' · #' + node.tags.join(' #') : '';
-        panelMeta.textContent = (node.path || node.id) + ' · ' + (node.fileType || 'file') + tagsText;
-        if (node.contentPreview) {
-          const rendered = renderSimpleMarkdown(node.contentPreview);
-          panelContentHtml.innerHTML = rendered || '<p>No readable content</p>';
-        } else if (node.isAttachment) {
-          panelContentHtml.innerHTML = '<p>Attachment node (no markdown content)</p>';
-        } else {
-          panelContentHtml.innerHTML = '<p>No readable content</p>';
-        }
-      }
-
-      function draw() {
-        ctx.clearRect(0, 0, viewWidth, viewHeight);
-        ctx.fillStyle = EXPORT_DATA.theme.background || '#111418';
-        ctx.fillRect(0, 0, viewWidth, viewHeight);
-        drawGrid();
-        drawAuras();
-        drawEdges();
-        drawNodes();
-        const selectedText = selectedNodeId
-          ? nodeById.get(selectedNodeId)?.label || selectedNodeId
-          : 'none';
-        hud.textContent =
-          'GraphFrontier static export · ' +
-          EXPORT_DATA.exportedAt +
-          ' · nodes ' +
-          EXPORT_DATA.nodes.length +
-          ' · links ' +
-          EXPORT_DATA.edges.length +
-          '\\nSelected: ' +
-          selectedText +
-          ' · zoom ' +
-          camera.zoom.toFixed(2);
-      }
-
-      function resize() {
-        const rect = canvas.getBoundingClientRect();
-        dpr = window.devicePixelRatio || 1;
-        viewWidth = Math.max(1, Math.floor(rect.width));
-        viewHeight = Math.max(1, Math.floor(rect.height));
-        canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-        canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        draw();
-      }
-
-      canvas.addEventListener('mousedown', (event) => {
-        if (event.button !== 0) return;
-        const point = getCanvasPoint(event);
-        panDrag = {
-          startClientX: event.clientX,
-          startClientY: event.clientY,
-          startCameraX: camera.x,
-          startCameraY: camera.y,
-          startZoom: camera.zoom,
-          moved: 0,
-          startedInside: point.inside,
-        };
-        canvas.classList.add('is-dragging');
-      });
-
-      window.addEventListener('mousemove', (event) => {
-        const point = getCanvasPoint(event);
-        if (!panDrag) {
-          const nextHover = point.inside ? getNodeAtScreen(point.x, point.y)?.id || null : null;
-          if (nextHover !== hoveredNodeId) {
-            hoveredNodeId = nextHover;
-            draw();
-          }
-          return;
-        }
-        const dx = event.clientX - panDrag.startClientX;
-        const dy = event.clientY - panDrag.startClientY;
-        panDrag.moved = Math.max(panDrag.moved, Math.sqrt(dx * dx + dy * dy));
-        camera.x = panDrag.startCameraX - dx / panDrag.startZoom;
-        camera.y = panDrag.startCameraY - dy / panDrag.startZoom;
-        hoveredNodeId = point.inside ? getNodeAtScreen(point.x, point.y)?.id || null : null;
-        draw();
-      });
-
-      window.addEventListener('mouseup', (event) => {
-        if (!panDrag) return;
-        const point = getCanvasPoint(event);
-        const isClick = panDrag.moved <= 3;
-        const startedInside = panDrag.startedInside;
-        panDrag = null;
-        canvas.classList.remove('is-dragging');
-        if (isClick && startedInside && point.inside) {
-          const clickedNode = getNodeAtScreen(point.x, point.y);
-          selectedNodeId = clickedNode ? clickedNode.id : null;
-          updatePanel(selectedNodeId);
-        }
-        draw();
-      });
-
-      canvas.addEventListener(
-        'wheel',
-        (event) => {
-          event.preventDefault();
-          const point = getCanvasPoint(event);
-          if (!point.inside) return;
-          const before = screenToWorld(point.x, point.y);
-          const factor = event.deltaY < 0 ? zoomStepFactor : 1 / zoomStepFactor;
-          camera.zoom = clampZoom(camera.zoom * factor);
-          const after = screenToWorld(point.x, point.y);
-          camera.x += before.x - after.x;
-          camera.y += before.y - after.y;
-          hoveredNodeId = getNodeAtScreen(point.x, point.y)?.id || null;
-          draw();
-        },
-        { passive: false }
-      );
-
-      window.addEventListener('resize', resize);
-      updatePanel(null);
-      resize();
-    })();
-  </script>
-</body>
-</html>
-`;
+    const edgeCount = this.edges.filter(
+      (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+    ).length;
+    const title = `${this.app.vault.getName()} - GraphFrontier`;
+    const html = buildExportHtml(snapshot, title);
 
     options.assertCurrent?.();
     try {
       await writeVaultExport(this.app.vault, normalizedExportPath, html, options);
       if (!exactPath) {
         new Notice(
-          `Static HTML saved in vault ${normalizedExportPath.includes('/') ? 'at' : 'root:'} ${normalizedExportPath} (${exportedNodes.length} nodes, ${exportedEdges.length} links)`
+          `Static HTML saved in vault ${normalizedExportPath.includes('/') ? 'at' : 'root:'} ${normalizedExportPath} (${nodeIds.size} nodes, ${edgeCount} links)`
         );
       }
-      return {
-        path: normalizedExportPath,
-        nodeCount: exportedNodes.length,
-        edgeCount: exportedEdges.length,
-      };
+      return { path: normalizedExportPath, nodeCount: nodeIds.size, edgeCount };
     } catch (error) {
       reportFailure(`Failed to write static HTML export: ${error.message || 'Unknown error'}`);
     }
@@ -7306,10 +6596,92 @@ class GraphFrontierView extends ItemView {
       return;
     event.preventDefault();
     event.stopPropagation();
+    this.replayHistory(redo);
+    return false;
+  }
+
+  // Wave waits for a target: the cursor becomes a crosshair, and the next press on a node starts
+  // the wave there instead of dragging or opening it. A press elsewhere, or Cancel, ends waiting.
+  setWaveArmed(armed) {
+    this.waveArmed = armed;
+    this.canvasEl?.toggleClass('is-wave-armed', armed);
+    if (!this.waveButtonEl) return;
+    this.waveButtonEl.setText(armed ? 'Cancel' : 'Wave');
+    this.waveButtonEl.toggleClass('is-armed', armed);
+    this.waveButtonEl.setAttr(
+      'title',
+      armed
+        ? 'Stop waiting for a click'
+        : 'Click the graph, and a wave spreads along links from the nearest node'
+    );
+    this.waveHintEl.style.display = armed ? '' : 'none';
+  }
+
+  syncPulseButton() {
+    if (!this.pulseButtonEl) return;
+    const on = !!this.pulseEffect;
+    this.pulseButtonEl.toggleClass('is-armed', on);
+    this.pulseButtonEl.setAttr(
+      'title',
+      on
+        ? 'Pulse is on: tap or click empty space to send a shockwave. Click to turn it off'
+        : 'While on, a tap on empty space sends a shockwave through the nodes; one undo step'
+    );
+  }
+
+  // A click on empty space starts the wave from the nearest visible node.
+  consumeWavePress(screenX, screenY) {
+    // With Pulse on, a press on empty space sends a shockwave instead of panning.
+    if (!this.waveArmed && this.pulseEffect && !this.getNodeAtScreen(screenX, screenY)) {
+      firePulse(this, screenX, screenY);
+      return true;
+    }
+    if (!this.waveArmed) return false;
+    const node =
+      this.getNodeAtScreen(screenX, screenY) || this.getNearestVisibleNode(screenX, screenY);
+    if (node) startWave(this, [node.id]);
+    this.setWaveArmed(false);
+    return true;
+  }
+
+  getNearestVisibleNode(screenX, screenY) {
+    const world = this.screenToWorld(screenX, screenY);
+    const visible = this.getFilterVisibleNodeIds();
+    let nearest = null;
+    let best = Infinity;
+    for (const node of this.nodes) {
+      if (visible instanceof Set && !visible.has(node.id)) continue;
+      const distance = (node.x - world.x) ** 2 + (node.y - world.y) ** 2;
+      if (distance < best) {
+        best = distance;
+        nearest = node;
+      }
+    }
+    return nearest;
+  }
+
+  // The same history as Ctrl+Z / Ctrl+Y: node moves and pins.
+  replayHistory(redo = false) {
     const result = replayPositionAction(this, redo);
     if (result === 'conflict')
       new Notice('Graph changed outside this action. Undo history cleared.');
-    return false;
+    this.syncHistoryButtons();
+    return result;
+  }
+
+  syncHistoryButtons() {
+    if (!this.historyButtons) return;
+    const history = historyFor(this);
+    const isMac = /mac/i.test(this.contentEl.ownerDocument?.defaultView?.navigator?.platform || '');
+    const key = isMac ? 'Cmd' : 'Ctrl';
+    for (const [button, steps, label, shortcut] of [
+      [this.historyButtons[0], history.undo, 'Undo move or pin', key + '+Z'],
+      [this.historyButtons[1], history.redo, 'Redo move or pin', key + '+Y'],
+    ]) {
+      button.disabled = steps.length === 0;
+      button.setAttribute('aria-label', label);
+      button.setAttribute('title', label + ' (' + shortcut + ')');
+    }
   }
 
   onSelectedNodeCopyKeyDown(event) {

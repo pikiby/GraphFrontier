@@ -308,7 +308,7 @@ test('one reset clears all visual controls, identical for notes and attachments'
       row.children.some((child) => child.tag === 'button'),
       spec.type === 'boolean'
     );
-    input.value = String(spec.max);
+    input.value = String(spec.values ? spec.values.length - 1 : spec.max);
     input.events[spec.type === 'boolean' ? 'click' : 'input']();
     assert.equal(getNodeVisualOverride(plugin, node.id, spec.key), spec.max);
   }
@@ -353,15 +353,13 @@ test('visual overrides survive saved layouts and are removed when loading an old
   assert.deepEqual(plugin.data.node_visual_settings, {});
 });
 
-test('HTML export carries individual radii, label thresholds, dimming and edge widths', async (t) => {
+test('HTML export carries individual and group visual settings the plugin draws with', async (t) => {
   const { view, plugin, app } = fixture(t);
   view.canvasEl = { clientWidth: 600, clientHeight: 400 };
   view.ctx = {};
   view.nodes[0].label = 'Alpha';
+  view.nodes[0].meta = { path: 'alpha.md', fileName: 'alpha', tags: [] };
   view.nodes.push({ id: 'b', label: 'B', x: 50, y: 50, degree: 0, meta: { isAttachment: true } });
-  // Raw legacy values must be inert even before persistence normalization.
-  plugin.data.settings.attachment_size_multiplier = 0.1;
-  plugin.data.node_visual_settings.b = { node_size_scale: 1.7, attachment_size_multiplier: 0.1 };
   view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
   view.edges = [{ source: 'alpha.md', target: 'b' }];
   app.vault.getAbstractFileByPath = () => null;
@@ -370,28 +368,22 @@ test('HTML export carries individual radii, label thresholds, dimming and edge w
   plugin.setNodeVisualSetting('alpha.md', 'edge_width_scale', 0.25);
   plugin.setNodeVisualSetting('alpha.md', 'node_color', '#123456');
   plugin.setNodeVisualSetting('alpha.md', 'aura_radius', 4000);
+  plugin.setNodeVisualSetting('b', 'node_shape', 6);
+  plugin.updateGroups([
+    { id: 'g', query: 'name:alpha', color: '#654321', settings: { node_shape: 5 } },
+  ]);
   const { vault, contents } = mobileVault(t, false);
   Object.assign(app.vault, vault);
   view.contentEl.win.require = () => assert.fail('Export must not use Node');
   await view.commandExportStaticHtml({ exportPath: 'node-visual-export.html' });
   const html = contents.get('node-visual-export.html');
-  assert.equal(typeof html, 'string');
-  const payload = JSON.parse(html.match(/const EXPORT_DATA = (.*);/)[1]);
-  for (const node of view.nodes) {
-    const exported = payload.nodes.find((item) => item.id === node.id);
-    assert.equal(exported.radius, render.getNodeRadius(view, node));
-    assert.equal(exported.labelMinZoom, render.getLabelZoomThreshold(view, node.id));
-  }
-  const attachment = view.nodeById.get('b');
-  assert.equal(
-    payload.nodes.find((item) => item.id === 'b').radius,
-    render.getNodeRadius(view, { ...attachment, meta: { isAttachment: false } })
+  const data = JSON.parse(
+    html.match(/<script id="graphfrontier-data" type="application\/json">([\s\S]*?)<\/script>/)[1]
   );
-  assert(html.includes('"auraRadius":400'));
-  assert(html.includes('"color":"#123456"'));
-  assert(html.includes('"dimAlpha":1'));
-  assert(html.includes('"width":0.25'));
-  assert(html.includes('"labelMinZoom":' + render.getLabelZoomThreshold(view, 'alpha.md')));
+  assert.deepEqual(data.pluginData.node_visual_settings, plugin.data.node_visual_settings);
+  assert.deepEqual(data.pluginData.groups, plugin.data.groups);
+  assert.equal(data.pluginData.groups[0].settings.node_shape, 5);
+  assert.equal(data.pluginData.node_visual_settings.b.node_shape, 6);
 });
 
 test('base color, groups and individual color have explicit priority; invalid colors are rejected', (t) => {
@@ -599,7 +591,9 @@ test('groups reuse the node visual menu, write group overrides and reset without
       nodeControls.children.map((el) => [el.tag, el.cls])
     );
     const input = controls.children[0];
-    input.value = String(spec.type === 'color' ? '#abcdef' : spec.max);
+    input.value = String(
+      spec.type === 'color' ? '#abcdef' : spec.values ? spec.values.length - 1 : spec.max
+    );
     input.events[spec.type === 'boolean' ? 'click' : 'input']();
     if (spec.key === 'node_color') {
       assert.equal(plugin.data.groups[0].color, '#abcdef');
@@ -681,4 +675,106 @@ test('node menu removes separate edge reset and general reset clears edge color'
   assert(!menu.items.some((item) => item.title === 'Clear painted edges'));
   menu.items.find((item) => item.title === 'Reset visual settings').callback();
   assert.equal(plugin.getPaintedEdgeColor(node.id), null);
+});
+
+test('group shape: slider steps circle, then 3-8 sides; drawn on canvas, swatch and export', async (t) => {
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const { normalizeNodeShape, traceNodeShape, normalizeGroupVisuals } =
+    loadSource('node-visuals.js');
+  assert.deepEqual([0, 1, 2, 3, 8, 9, 4.6].map(normalizeNodeShape), [1, 1, 1, 3, 8, 8, 5]);
+  assert.deepEqual(normalizeGroupVisuals({ node_shape: 2 }), { node_shape: 1 });
+  const calls = [];
+  const ctx = {
+    arc: () => calls.push('arc'),
+    moveTo: () => calls.push('move'),
+    lineTo: () => calls.push('line'),
+    closePath: () => calls.push('close'),
+  };
+  traceNodeShape(ctx, 0, 0, 10, 1);
+  assert.deepEqual(calls.splice(0), ['arc']);
+  traceNodeShape(ctx, 0, 0, 10, 6);
+  assert.deepEqual(calls.splice(0), ['move', 'line', 'line', 'line', 'line', 'line', 'close']);
+
+  const { view, plugin } = fixture(t, {
+    groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
+  });
+  const button = { style: {} };
+  const row = { id: 'g', settings: {}, colorInput: { value: '#123456' }, button };
+  row.refreshSwatch = () => {
+    button.style.clipPath = row.settings.node_shape > 2 ? 'polygon' : '';
+  };
+  view.groupEditorRows = [row];
+  const menu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(menu, null, 0, 0, { ids: [] }, { group: row });
+  const item = menu.items.find((entry) => entry.title === 'Shape');
+  const [input, value] = item.dom.children[0].children;
+  assert.equal(value.text, 'Circle');
+  assert.deepEqual([input.min, input.max, input.step, input.value], ['0', '6', '1', '0']);
+  input.value = '1';
+  input.events.input();
+  assert.equal(plugin.data.groups[0].settings.node_shape, 3, 'the next position is the triangle');
+  assert.equal(value.text, 'Triangle');
+  assert.equal(input.value, '1', 'the slider stays where it was moved');
+  assert.equal(button.style.clipPath, 'polygon', 'the group row shows the shape');
+  input.value = '0';
+  input.events.input();
+  assert.equal(plugin.data.groups[0].settings.node_shape, 1);
+  input.value = '4';
+  input.events.input();
+  assert.equal(plugin.data.groups[0].settings.node_shape, 6);
+  assert.equal(value.text, 'Hexagon');
+});
+
+test('shape: base value in Display, individual override, and every node color swatch follows', (t) => {
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const { view, plugin } = fixture(t, {
+    groups: [{ id: 'g', query: 'name:alpha', color: '#123456' }],
+  });
+  const node = view.nodes[0];
+  node.meta = { path: 'alpha.md', fileName: 'alpha', tags: [] };
+  view.nodeById.set(node.id, node);
+  // Individual shape beats group and base shape on the canvas.
+  plugin.data.settings.node_shape = 4;
+  assert.equal(render.getPreparedAppearance(view).nodeStyles.get(node.id).shape, 4);
+  plugin.setNodeVisualSetting(node.id, 'node_shape', 7);
+  assert.equal(render.getPreparedAppearance(view).nodeStyles.get(node.id).shape, 7);
+
+  const menu = new obsidian.Menu();
+  view.addVisualSettingsToMenu(menu, node, 0, 0);
+  const swatch = menu.items.find((item) => item.title === 'Node color').dom.children[0].children[0];
+  assert.match(swatch.style.clipPath, /^polygon\(/);
+  const shape = menu.items.find((item) => item.title === 'Shape').dom.children[0].children[0];
+  assert.equal(shape.value, '5', 'heptagon is the sixth position');
+  shape.value = '0';
+  shape.events.input();
+  assert.equal(swatch.style.clipPath, '', 'a circle keeps the swatch round');
+  shape.value = '1';
+  shape.events.input();
+  assert.equal(plugin.data.node_visual_settings[node.id].node_shape, 3);
+  assert.match(swatch.style.clipPath, /^polygon\(/);
+
+  // Display: the base shape slider steps by position and reshapes swatches and group rows.
+  const parent = view.contentEl.createDiv();
+  const button = { style: {} };
+  const row = { settings: {}, button, refreshSwatch: () => (button.style.clipPath = 'group') };
+  view.groupEditorRows = [row];
+  const colorInput = { style: {} };
+  view.sideControls.set('node_color', { type: 'color', input: colorInput });
+  plugin.data.settings.node_shape = 1;
+  view.addSideSlider(parent, 'Shape', 'node_shape', 1, 8, 1, 'render', {
+    values: [1, 3, 4, 5, 6, 7, 8],
+    format: (value) => String(value),
+    onChange: () => view.refreshShapeSwatches(),
+  });
+  const input = view.sideControls.get('node_shape').input;
+  assert.deepEqual([input.min, input.max, input.value], ['0', '6', '0']);
+  input.value = '1';
+  input.events.input();
+  assert.equal(plugin.data.settings.node_shape, 3);
+  assert.match(colorInput.style.clipPath, /^polygon\(/);
+  assert.equal(button.style.clipPath, 'group');
+  plugin.data.settings.node_shape = 8;
+  view.sidePanelOpen = true;
+  view.syncSidePanelControls();
+  assert.equal(input.value, '6', 'panel sync places the slider by position');
 });

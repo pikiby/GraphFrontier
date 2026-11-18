@@ -1,6 +1,5 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const vm = require('node:vm');
 const { fixture, loadSource, obsidian, notices } = require('./helpers/obsidian.cjs');
 const { mobileVault } = require('./helpers/mobile-vault.cjs');
 const { readGraphTheme } = require('../src/theme');
@@ -76,6 +75,7 @@ function themeElement(scheme, variables = {}) {
   const el = {};
   const doc = {
     events: {},
+    createElement: () => ({}),
     body: { classList: { contains: (name) => name === `theme-${scheme}` } },
     documentElement: { classList: { contains: () => false } },
     defaultView: {
@@ -438,47 +438,14 @@ for (const mobile of [false, true]) {
   });
 }
 
-function runExport(html) {
-  const { ctx, calls } = recordingCanvas();
-  const elements = new Map();
-  const canvasEvents = {};
-  const windowEvents = {};
-  const canvas = {
-    getContext: () => ctx,
-    getBoundingClientRect: () => ({
-      left: 0,
-      top: 0,
-      right: 600,
-      bottom: 400,
-      width: 600,
-      height: 400,
-    }),
-    classList: { add() {}, remove() {} },
-    addEventListener: (name, fn) => {
-      canvasEvents[name] = fn;
-    },
-  };
-  elements.set('graph', canvas);
-  const sandbox = {
-    document: {
-      getElementById: (id) => {
-        if (!elements.has(id)) elements.set(id, {});
-        return elements.get(id);
-      },
-    },
-    window: {
-      devicePixelRatio: 2,
-      addEventListener: (name, fn) => {
-        windowEvents[name] = fn;
-      },
-    },
-  };
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-  vm.runInNewContext(script, sandbox, { timeout: 1000 });
-  return { calls, canvasEvents, windowEvents, elements };
+// The exported file carries the data the plugin runs on, and one page script.
+function exportedData(html) {
+  return JSON.parse(
+    html.match(/<script id="graphfrontier-data" type="application\/json">([\s\S]*?)<\/script>/)[1]
+  );
 }
 
-test('mobile export produces executable graph HTML through Vault without any Node access', async (t) => {
+test('mobile export writes the graph page through Vault without any Node access', async (t) => {
   const { view, app, plugin } = graph(t, 'light');
   const { vault, contents, file } = mobileVault(t);
   Object.assign(app.vault, vault);
@@ -493,12 +460,12 @@ test('mobile export produces executable graph HTML through Vault without any Nod
   await view.commandExportStaticHtml({ exportPath: 'Exports/graph.html' });
   const html = contents.get('Exports/graph.html');
   assert.equal(typeof html, 'string');
-  const { canvasEvents, windowEvents, elements } = runExport(html);
-  const point = { button: 0, clientX: 300, clientY: 200 };
-  canvasEvents.mousedown(point);
-  windowEvents.mouseup(point);
-  assert.equal(elements.get('panel-title').textContent, 'Alpha');
-  assert.match(elements.get('panel-content-html').innerHTML, /Mobile preview/);
+  const data = exportedData(html);
+  assert.equal(data.texts['alpha.md'], '# Mobile preview');
+  assert.deepEqual(
+    data.files.map((entry) => entry.path),
+    ['alpha.md']
+  );
   assert.equal(plugin.data.settings.export_static_html_mobile_path, '');
   assert.equal(plugin.data.settings.export_static_html_path, '/desktop/graph.html');
   vault.create = async () => {
@@ -511,106 +478,19 @@ test('mobile export produces executable graph HTML through Vault without any Nod
   assert.equal(contents.has('/desktop/invalid.html'), false);
 });
 
-test('exported HTML executes aura drawing with the node color and transparent outer edge', async (t) => {
-  const { html } = await exportGraph(t, 'dark', undefined, true);
-  const { calls } = runExport(html);
-  assert.deepEqual(
-    calls.filter((call) => call.kind === 'gradient'),
-    [
-      { kind: 'gradient', offset: 0, color: '#12345638' },
-      { kind: 'gradient', offset: 0.4, color: '#1234561f' },
-      { kind: 'gradient', offset: 1, color: '#12345600' },
-    ]
-  );
-});
-
-test('exported HTML renders attachment filenames and unchanged note labels', async (t) => {
-  const { view, app } = graph(t, 'dark');
-  view.nodes.push(
-    { id: 'assets/report.PDF', label: 'report', x: 30, y: 0, degree: 0 },
-    { id: 'assets/README', label: 'README', x: 60, y: 0, degree: 0 }
-  );
-  view.nodeMetaById = new Map([
-    ['assets/report.PDF', { isAttachment: true, path: 'assets/report.PDF', fileType: 'pdf' }],
-    ['assets/README', { isAttachment: true, path: 'assets/README', fileType: 'attachment' }],
-  ]);
-  const { vault, contents } = mobileVault(t, false);
-  Object.assign(app.vault, vault);
-  await view.commandExportStaticHtml({ exportPath: 'labels.html' });
-  const html = contents.get('labels.html');
-  assert.equal(typeof html, 'string');
-  const payload = JSON.parse(html.match(/const EXPORT_DATA = (.*);/)[1]);
-  assert.deepEqual(
-    payload.nodes.map((node) => node.label),
-    ['Alpha', 'report.PDF', 'README']
-  );
-  const { calls } = runExport(html);
-  assert.deepEqual(
-    calls.filter((call) => call.kind === 'text').map((call) => call.text),
-    ['Alpha', 'report.PDF', 'README']
-  );
-});
-
-for (const scheme of ['light', 'dark']) {
-  test(`${scheme}: generated HTML executes themed drawing, hover, selection, zoom and panel updates`, async (t) => {
-    const { view, html } = await exportGraph(t, scheme);
-    assert(html.includes(`color-scheme: ${scheme};`));
-    assert(html.includes(`background: ${view.canvasTheme.surface};`));
-    assert(html.includes(`border-left: 1px solid ${view.canvasTheme.border};`));
-    const { calls, canvasEvents, windowEvents, elements } = runExport(html);
-    const text = calls.find((call) => call.kind === 'text');
-    assert.equal(text.color, view.canvasTheme.text);
-    assert(text.alpha >= 0.65);
-    assert.equal(calls.find((call) => call.kind === 'stroke').color, view.canvasTheme.grid);
-    assert.equal(calls.find((call) => call.kind === 'stroke').alpha, 0.2);
-
-    const point = { button: 0, clientX: 300, clientY: 200 };
-    canvasEvents.mousedown(point);
-    windowEvents.mouseup(point);
-    assert.equal(elements.get('panel-title').textContent, 'Alpha');
-    assert.equal(calls.at(-1).color, view.canvasTheme.text);
-    assert.equal(calls.at(-1).alpha, 1);
-    calls.length = 0;
-    for (let i = 0; i < 20; i++) {
-      canvasEvents.wheel({ ...point, deltaY: 100, preventDefault() {} });
-    }
-    windowEvents.mousemove({ clientX: 500, clientY: 350 });
-    const selectedLabels = calls.filter((call) => call.kind === 'text' && call.text === 'Alpha');
-    assert.equal(selectedLabels.at(-1).alpha, 1);
-    assert.equal(parseFloat(selectedLabels.at(-1).font), 10);
-    assert(
-      calls.some((call) => call.kind === 'stroke' && call.color === view.canvasTheme.selection)
-    );
-    calls.length = 0;
-    windowEvents.mousemove(point);
-    const hoveredLabels = calls.filter((call) => call.kind === 'text');
-    assert.deepEqual(
-      hoveredLabels.map((call) => call.text),
-      ['Alpha']
-    );
-    assert.equal(hoveredLabels[0].color, view.canvasTheme.text);
-    assert(
-      calls.some((call) => call.kind === 'stroke' && call.color === view.canvasTheme.selection)
-    );
-  });
-}
-
 test('theme fallback works without a DOM and follows light mode when variables are absent', () => {
   assert.equal(readGraphTheme(null).colorScheme, 'dark');
   assert.equal(readGraphTheme(themeElement('light')).background, '#ffffff');
 });
 
-test('custom theme colours are carried into standalone HTML without Obsidian CSS', async (t) => {
+test('custom theme colours are carried into the exported page as the graph shows them', async (t) => {
   const { html } = await exportGraph(t, 'light', {
     '--text-normal': '#46342a',
-    '--text-muted': '#836d5c',
     '--background-primary': '#fff8e8',
-    '--background-secondary': '#f2e6cc',
   });
-  const { calls } = runExport(html);
-  assert.equal(calls.find((call) => call.kind === 'text').color, '#46342a');
-  assert.equal(calls.find((call) => call.kind === 'stroke').color, '#836d5c');
-  assert(html.includes('background: #f2e6cc;'));
+  assert(html.includes('--text-normal: #46342a;'));
+  assert(html.includes('--background-primary: #fff8e8;'));
+  assert.deepEqual(exportedData(html).bodyClasses, ['theme-light']);
 });
 
 test('special attachment filenames remain literal and safe in canvas and exported HTML', async (t) => {
@@ -641,24 +521,21 @@ test('special attachment filenames remain literal and safe in canvas and exporte
     calls.filter((call) => call.kind === 'text').map((call) => call.text),
     expected
   );
-  const { vault, contents } = mobileVault(t, false);
+  const { vault, contents, file } = mobileVault(t, false);
   Object.assign(app.vault, vault);
+  for (const node of [note, ...nodes]) file(node.id, 'text </script> <img onerror="x">');
   await view.commandExportStaticHtml({ exportPath: 'special-labels.html', includeContents: false });
   const html = contents.get('special-labels.html');
   assert.equal(typeof html, 'string');
-  assert.equal((html.match(/<script>/g) || []).length, 1);
-  assert.equal((html.match(/<\/script>/g) || []).length, 1);
+  // Only the two page scripts open and close; no file name or text can end them early.
+  assert.equal((html.match(/<script/g) || []).length, 2);
+  assert.equal((html.match(/<\/script>/g) || []).length, 2);
   assert.ok(!html.includes('<img onerror='));
-  const payload = JSON.parse(html.match(/const EXPORT_DATA = (.*);/)[1]);
+  const data = exportedData(html);
   assert.deepEqual(
-    payload.nodes.map((node) => node.label),
-    expected
+    data.files.map((entry) => entry.path).sort(),
+    [note.id, ...nodes.map((node) => node.id)].sort()
   );
-  assert.deepEqual(
-    runExport(html)
-      .calls.filter((call) => call.kind === 'text')
-      .map((call) => call.text),
-    expected
-  );
+  assert.deepEqual(data.texts, {}, 'note texts stay out when contents are excluded');
   assert.equal(nodes[0].label, 'short 0');
 });

@@ -137,3 +137,31 @@ test('two panes share the layout history and local data has a separate history',
   other.plugin.isLocalGraphFrontier = true;
   assert.equal(replayPositionAction(other, true), 'empty');
 });
+
+test('Undo and Redo buttons beside Hide/Show use the same history and follow its state', (t) => {
+  const { view, plugin } = setup(t);
+  const { element } = require('./helpers/obsidian.cjs');
+  view.sidePanelEl = element();
+  view.sidePanelOpen = false;
+  Object.getPrototypeOf(view).buildSidePanel.call(view);
+  const actions = view.sidePanelEl.children[0].children[1];
+  const [undo, redo, toggle] = actions.children;
+  assert.deepEqual(
+    [undo.icon, redo.icon, toggle.text],
+    ['undo-2', 'redo-2', 'Show'],
+    'reachable with the panel hidden'
+  );
+  assert.deepEqual([undo.disabled, redo.disabled], [true, true]);
+  assert.match(undo.attributes.title, /Undo move or pin \((Ctrl|Cmd)\+Z\)/);
+
+  const token = beginPositionAction(view, ['alpha.md']);
+  plugin.setPin('alpha.md', { x: 5, y: 6 });
+  finishPositionAction(view, token);
+  view.syncHistoryButtons();
+  assert.deepEqual([undo.disabled, redo.disabled], [false, true]);
+  undo.events.click();
+  assert.equal(plugin.getPin('alpha.md'), null);
+  assert.deepEqual([undo.disabled, redo.disabled], [true, false]);
+  redo.events.click();
+  assert.deepEqual(plugin.getPin('alpha.md'), { x: 5, y: 6, mode: 'exact' });
+});

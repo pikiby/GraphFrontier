@@ -865,26 +865,25 @@ test('renderer and hit target retain a thick hollow ring at tiny radii', (t) => 
   );
 });
 
-test('exports include only projected nodes/links and never hidden inner note contents', async (t) => {
+test('export carries subgraphs and their member notes; the page projects them like the view', async (t) => {
   const f = setup(t);
   f.makeGroup();
   f.view.canvasEl = { clientWidth: 800, clientHeight: 600 };
   f.view.ctx = {};
-  const { vault, contents } = mobileVault(t, false);
+  const { vault, contents, file } = mobileVault(t, false);
   Object.assign(f.app.vault, vault);
-  f.app.vault.getAbstractFileByPath = (id) =>
-    id.endsWith('.md') ? { path: id, extension: 'md' } : null;
-  const reads = [];
-  f.app.vault.cachedRead = async (file) => {
-    reads.push(file.path);
-    return `private-${file.path}`;
-  };
+  for (const path of ['a.md', 'b.md', 'c.md']) file(path, `text-${path}`);
   await f.view.commandExportStaticHtml({ exportPath: 'subgraphs.html' });
-  const html = contents.get('subgraphs.html');
-  assert(html.includes('"isSubgraph":true'));
-  assert(!reads.includes('a.md'));
-  assert(!reads.includes('b.md'));
-  assert(!html.includes('private-a.md'));
+  const data = JSON.parse(
+    contents
+      .get('subgraphs.html')
+      .match(/<script id="graphfrontier-data" type="application\/json">([\s\S]*?)<\/script>/)[1]
+  );
+  assert.deepEqual(data.pluginData.subgraphs, f.plugin.data.subgraphs);
+  assert.equal(data.pluginData.subgraphs.length, 1);
+  assert.equal(data.texts['a.md'], 'text-a.md');
+  await f.view.commandExportStaticHtml({ exportPath: 'no-text.html', includeContents: false });
+  assert(!contents.get('no-text.html').includes('text-a.md'));
 });
 
 test('missing members keep a usable container and local saved state without phantom notes', (t) => {

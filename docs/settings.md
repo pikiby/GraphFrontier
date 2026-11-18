@@ -13,6 +13,10 @@ field (default: **Alt**; **None** disables it). On conflicting shortcuts, node
 selection takes priority, followed by Add to search, then quick preview.
 Local GraphFrontier starts with its settings panel hidden; click **Show** to open it.
 
+**Simulation** -> **Physics steps** (1–5, default 3) sets how many physics steps run per frame:
+more steps settle the graph faster. Steps stop for that frame once they take 8 ms, and dragging
+always takes one step per frame. HTML exports run the same number of steps.
+
 ## Visibility Toggles
 
 - `Show grid`: show/hide background grid
@@ -75,8 +79,8 @@ collapsible subgroups, Groups and Filters: one list of rules and, below a divide
 **Exclude / Include only** switch (blacklist / whitelist) and Delete rule; in Groups,
 Filters and Custom lists rows are reordered by their handle, the handle and buttons appear once
 you finish editing a row, and each editor keeps a single empty row; a
-summary shows how many notes the rules hide; Sets holds two
-collapsible subgroups, Selection (modifiers) and Custom lists. All controls keep
+summary shows how many notes the rules hide; Sets holds three
+collapsible subgroups, Selection (modifiers), Simulation (physics steps) and Custom lists. All controls keep
 their previous behavior. Left/Right arrow keys switch tabs, Home/End select the first/last.
 The selected tab is a global UI preference, not part of named layouts or backup payloads;
 Load and restore keep the current tab. Local Graph keeps its own workspace UI state and
@@ -149,6 +153,19 @@ and **Aura brightness** (0-50%, default 22%). Auras default off and do not affec
 Gravity nodes omit link controls and Strong pull. Overrides are stored with the layout and
 included in static HTML exports.
 
+## Node Shape
+
+**Shape** sets how nodes are drawn: 1 is a circle (the default), then 3 to 8 sides: Triangle,
+Square, Pentagon, Hexagon, Heptagon, Octagon. The slider steps through these
+shapes in order, one shape per position. The base shape sits in **Display** next to Node color and Node
+size; a group's settings menu (the colored button of its row) and a node's **Visual settings**
+override it, individual > group > base, like other visual settings. Every shape keeps the
+circle's area, so nodes keep the same visual weight. Nodes are drawn with their shape on the
+canvas and in static HTML exports, and hover and selection outlines follow it. Every swatch
+that shows a node color takes the shape it stands for: the base and attachment node color in
+the panel, each group row button, and Node color in group and node menus. Clicks still hit the
+node's circle. **Reset visual settings** clears a group or node shape.
+
 ## Force And Layout Controls
 
 - `Link strength`: spring force for link attraction
@@ -158,6 +175,19 @@ included in static HTML exports.
 - `Repel radius`: cutoff distance for repel calculations, 20-1000; default 265 (larger value means wider repel influence)
 - `Center strength`: pull toward layout center
 - `Damping`: per-frame velocity damping
+
+The collapsible **Effects** subgroup at the end of Physics holds effects that change what
+happens on the graph. **Grow** replays the graph being built: nodes are born in the order their
+notes were created and physics arranges them as they appear. Pinned, orbiting and gravity nodes keep
+their places; other nodes start again next to a born neighbor. `Grow duration` sets how many seconds it
+takes (1–60, default 8). The whole Grow is one undo step: **↶** or Ctrl/Cmd+Z returns every node
+to where it was before. **Wave**: press it, and the cursor becomes a crosshair; click the graph and a
+light runs along links from the clicked node, or from the nearest node when the click lands on
+empty space. Each reached node sends out a widening ring, step by step. Settings: `Wave depth`
+(link steps, 1–10, default 3), `Wave speed` (1–10, default 4), `Wave brightness` (10–100%,
+default 90) and `Wave ring size` (how far rings widen, 5–80 px, default 26). While Wave waits,
+clicking a node starts the wave instead of opening the note; **Cancel** stops waiting. Wave
+only draws over the graph and changes nothing. Effects currently exposes Grow and Wave; Pulse is hidden.
 
 ## Groups
 

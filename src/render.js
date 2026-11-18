@@ -4,6 +4,8 @@ const {
   getNodeVisualSetting,
   getNodeVisualOverride,
   NODE_VISUAL_SETTINGS,
+  normalizeNodeShape,
+  traceNodeShape,
 } = require('./node-visuals');
 const EMPTY_LISTS = [];
 const LINK_STYLE_KEYS = NODE_VISUAL_SETTINGS.filter((setting) => setting.edges).map(
@@ -11,6 +13,13 @@ const LINK_STYLE_KEYS = NODE_VISUAL_SETTINGS.filter((setting) => setting.edges).
 );
 const APPEARANCE_KEYS = NODE_VISUAL_SETTINGS.map(({ key }) => key).concat('attachment_node_color');
 const { nodeListContains, findNodeList } = require('./node-lists');
+const {
+  isWaveActive,
+  waveLinkState,
+  waveRingState,
+  activePulseWaves,
+  pulseFront,
+} = require('./effects');
 const {
   getFocusEdgeWidth,
   getFocusEdgeColor,
@@ -156,9 +165,113 @@ function renderFrame(view) {
   const appearance = getPreparedAppearance(view);
   drawNodeAuras(view, ctx, appearance);
   drawEdges(view, ctx, appearance);
+  drawWave(view, ctx);
+  drawPulse(view, ctx);
   drawNodes(view, ctx, appearance);
   drawHiddenGridMarkers(view, ctx);
   drawSelectionBox(view, ctx);
+}
+
+// Wave: a bright point with a fading tail runs along each link; every reached node sends out
+// a ring that widens and fades, like circles on water. Glow is a wide translucent stroke, not a
+// blur, and anything off screen is skipped, so large waves stay cheap.
+function drawWave(view, ctx) {
+  const nowMs = Date.now();
+  if (!isWaveActive(view, nowMs)) return;
+  const settings = view.plugin.getSettings();
+  const brightness = view.plugin.clampNumber(settings.wave_brightness, 10, 100, 90) / 100;
+  const ringSize = view.plugin.clampNumber(settings.wave_ring_size, 5, 80, 26);
+  const zoom = Math.max(view.camera.zoom, 0.0001);
+  const width = view.viewWidth;
+  const height = view.viewHeight;
+  const toScreen = (node) => [
+    (node.x - view.camera.x) * zoom + width / 2,
+    (node.y - view.camera.y) * zoom + height / 2,
+  ];
+  const margin = ringSize + 20;
+  const offScreen = (x, y) =>
+    x < -margin || y < -margin || x > width + margin || y > height + margin;
+  const color = getHoverHighlightColor(view) || (view.canvasTheme || DARK_THEME).selection;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  for (const ring of view.waveEffect.rings) {
+    const state = waveRingState(view, ring, nowMs);
+    const node = state && view.nodeById.get(ring.id);
+    if (!node) continue;
+    const [x, y] = toScreen(node);
+    if (offScreen(x, y)) continue;
+    const radius =
+      getNodeScreenRadius(view.getNodeRadius(node), zoom) + 3 + state.spread * ringSize;
+    ctx.globalAlpha = state.alpha * brightness;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  for (const link of view.waveEffect.links) {
+    const state = waveLinkState(view, link, nowMs);
+    const from = state && view.nodeById.get(link.from);
+    const to = state && view.nodeById.get(link.to);
+    if (!from || !to) continue;
+    const [x1, y1] = toScreen(from);
+    const [x2, y2] = toScreen(to);
+    const at = (t) => [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t];
+    const [hx, hy] = at(state.progress);
+    if (offScreen(hx, hy)) continue;
+    const [tx, ty] = at(Math.max(0, state.progress - 0.3));
+    const [mx, my] = at(Math.max(0, state.progress - 0.12));
+    ctx.lineWidth = 6;
+    ctx.globalAlpha = 0.18 * brightness;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
+    ctx.lineWidth = 2.5;
+    ctx.globalAlpha = 0.35 * brightness;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(mx, my);
+    ctx.stroke();
+    ctx.globalAlpha = brightness;
+    ctx.beginPath();
+    ctx.moveTo(mx, my);
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Pulse: each shockwave is drawn as its front, a ring that widens and fades.
+function drawPulse(view, ctx) {
+  const nowMs = Date.now();
+  const waves = activePulseWaves(view, nowMs);
+  if (!waves.length) return;
+  const zoom = Math.max(view.camera.zoom, 0.0001);
+  const color = getHoverHighlightColor(view) || (view.canvasTheme || DARK_THEME).selection;
+  ctx.save();
+  ctx.strokeStyle = color;
+  for (const wave of waves) {
+    const front = pulseFront(wave, nowMs);
+    const x = (wave.x - view.camera.x) * zoom + view.viewWidth / 2;
+    const y = (wave.y - view.camera.y) * zoom + view.viewHeight / 2;
+    const radius = front.radius * zoom;
+    ctx.globalAlpha = front.fade * 0.25;
+    ctx.lineWidth = Math.max(2, wave.width * zoom);
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = front.fade * 0.8;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function getNodeLabelText(node) {
@@ -338,6 +451,7 @@ function getPreparedAppearance(view) {
         2,
         DEFAULT_DATA.settings.node_size_scale
       ),
+      shape: normalizeNodeShape(value('node_shape')),
       color:
         individual.node_color ??
         group?.node_color ??
@@ -968,7 +1082,7 @@ function drawNodes(view, ctx, appearance) {
     ctx.globalAlpha = nodeAlpha;
     ctx.fillStyle = fillColor;
     ctx.beginPath();
-    ctx.arc(pointX, pointY, radius + (node.meta?.subgraph ? 2 : 0), 0, Math.PI * 2);
+    traceNodeShape(ctx, pointX, pointY, radius + (node.meta?.subgraph ? 2 : 0), style.shape);
     if (node.meta?.subgraph) {
       ctx.strokeStyle = fillColor;
       setCrispStroke(ctx, 3, nodeAlpha, backingScale);
@@ -979,7 +1093,7 @@ function drawNodes(view, ctx, appearance) {
       ctx.strokeStyle = fillColor;
       setCrispStroke(ctx, 1.5, nodeAlpha, backingScale);
       ctx.beginPath();
-      ctx.arc(pointX, pointY, radius + 4, 0, Math.PI * 2);
+      traceNodeShape(ctx, pointX, pointY, radius + 4, style.shape);
       ctx.stroke();
     }
     if (isHover || isSelectedNode) {
@@ -995,7 +1109,7 @@ function drawNodes(view, ctx, appearance) {
         backingScale
       );
       ctx.beginPath();
-      ctx.arc(pointX, pointY, radius + (node.meta?.subgraph ? 4 : 2), 0, Math.PI * 2);
+      traceNodeShape(ctx, pointX, pointY, radius + (node.meta?.subgraph ? 4 : 2), style.shape);
       ctx.stroke();
     }
 

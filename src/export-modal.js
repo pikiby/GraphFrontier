@@ -57,6 +57,18 @@ class VaultFolderSuggest extends (AbstractInputSuggest || class {}) {
   }
 }
 
+const EXPORT_MODULES = [
+  ['physics', 'Physics', 'Nodes move, settle and can be dragged as in Obsidian'],
+  ['settings', 'Settings menu', 'The side panel: search, groups, display, physics and sets'],
+  [
+    'layouts',
+    'Layouts',
+    'Every saved layout, to switch between them; without it only the layout on screen',
+    'settings',
+  ],
+  ['saves', 'Saves', 'Save layout and Autosave; saving writes into the exported file', 'settings'],
+];
+
 class ExportModal extends Modal {
   constructor(app, exportHtml) {
     super(app);
@@ -64,6 +76,9 @@ class ExportModal extends Modal {
     this.busy = false;
     this.completed = false;
     this.closed = false;
+    // Obsidian focuses the first field after opening, which is Folder, and focus opens its
+    // folder list. Nothing is focused until the user clicks a field.
+    this.hasInitialInputFocus = false;
   }
 
   onOpen() {
@@ -93,6 +108,7 @@ class ExportModal extends Modal {
     this.filenameInput.setAttribute('aria-label', 'Export filename');
     this.filenameInput.setAttribute('autocapitalize', 'off');
     this.filenameInput.setAttribute('spellcheck', 'false');
+    this.buildModuleChecks();
     this.errorEl = contentEl.createDiv({ cls: 'graphfrontier-export-error' });
     this.errorEl.setAttribute('role', 'alert');
     this.successEl = contentEl.createDiv({ cls: 'graphfrontier-export-success' });
@@ -131,8 +147,40 @@ class ExportModal extends Modal {
     if (typeof AbstractInputSuggest === 'function')
       this.folderSuggest = new VaultFolderSuggest(this);
     this.refreshDestination();
-    this.filenameInput.focus();
-    this.filenameInput.setSelectionRange(0, this.filenameInput.value.length - 5);
+  }
+
+  // What the page includes besides the nodes. Nothing checked exports only the graph's nodes and
+  // links; Layouts and Saves belong to the settings menu.
+  buildModuleChecks() {
+    const include = this.form.createDiv({ cls: 'graphfrontier-export-include' });
+    include.createDiv({ cls: 'graphfrontier-export-include-title', text: 'Include' });
+    this.moduleInputs = {};
+    for (const [key, label, hint, parent] of EXPORT_MODULES) {
+      const row = include.createEl('label', { cls: 'graphfrontier-export-check' });
+      if (parent) row.addClass('is-nested');
+      const input = row.createEl('input', { type: 'checkbox' });
+      input.checked = false;
+      input.setAttribute('aria-label', label);
+      row.createSpan({ text: label });
+      row.setAttribute('title', hint);
+      input.addEventListener('change', () => this.syncModuleChecks());
+      this.moduleInputs[key] = { input, parent };
+    }
+    this.syncModuleChecks();
+  }
+
+  syncModuleChecks() {
+    for (const { input, parent } of Object.values(this.moduleInputs)) {
+      const available = !parent || this.moduleInputs[parent].input.checked;
+      input.disabled = this.busy || this.completed || !available;
+      if (!available) input.checked = false;
+    }
+  }
+
+  getModules() {
+    return Object.fromEntries(
+      Object.entries(this.moduleInputs).map(([key, { input }]) => [key, !!input.checked])
+    );
   }
 
   showError(message = '') {
@@ -168,6 +216,7 @@ class ExportModal extends Modal {
     for (const input of [this.filenameInput, this.folderInput]) {
       input.disabled = busy || this.completed;
     }
+    this.syncModuleChecks();
     this.cancelButton.disabled = busy;
     this.submitButton.disabled = busy || this.completed || !this.destinationPath;
     this.submitButton.setText(busy ? 'Exporting...' : this.replacePath ? 'Replace file' : 'Export');
@@ -190,6 +239,7 @@ class ExportModal extends Modal {
       const result = await this.exportHtml({
         exportPath: path,
         overwrite,
+        modules: this.getModules(),
         assertCurrent: () => {
           if (this.closed) throw new Error('Export cancelled');
         },

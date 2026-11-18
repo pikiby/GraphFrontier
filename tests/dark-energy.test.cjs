@@ -424,3 +424,14 @@ test('layout save and reload preserve repulsion', async (t) => {
   assert.equal(await view.loadSavedLayout(), true);
   assert.equal(plugin.data.dark_energy[0].repulsion, 35);
 });
+
+test('legacy field shapes load as ordinary point attractors', (t) => {
+  const { plugin } = fixture(t);
+  for (const shape of ['line', 'area']) {
+    const item = center({ repulsion: 35 });
+    const data = plugin.normalizeData({
+      dark_energy: [{ ...item, shape, angle: 30, radius: 500, rotation: 2 }],
+    });
+    assert.deepEqual(data.dark_energy, [item]);
+  }
+});

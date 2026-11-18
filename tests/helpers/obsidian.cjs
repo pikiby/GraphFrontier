@@ -10,12 +10,24 @@ class Notice {
   }
 }
 
+// The document an element belongs to: export reads its theme variables and builds icons in it.
+const testDocument = {
+  createElement: (tag) => Object.assign(element(), { tag }),
+  body: { classList: { contains: (name) => name === 'theme-dark' } },
+  defaultView: {
+    getComputedStyle: () => ({
+      getPropertyValue: (name) => ({ '--background-primary': '#101010' })[name] || '',
+    }),
+  },
+};
+
 function element() {
   return {
     children: [],
     events: {},
     attributes: {},
     style: {},
+    ownerDocument: testDocument,
     win: { cancelAnimationFrame() {} },
     empty() {
       this.children.length = 0;
@@ -263,7 +275,7 @@ function fixture(t, data = {}) {
   const leaves = [];
   const app = {
     vault: { adapter, configDir: '.test-config', on, getMarkdownFiles: () => [] },
-    metadataCache: { resolvedLinks: {}, on },
+    metadataCache: { resolvedLinks: {}, unresolvedLinks: {}, getFileCache: () => null, on },
     workspace: {
       layoutReady: true,
       getLeavesOfType: () => leaves,
@@ -323,5 +335,14 @@ function fixture(t, data = {}) {
     flushTimers,
   };
 }
+
+// Unbuilt sources have no export page script; tests export with a placeholder page script
+// (tests/export-page.test.cjs builds the real one).
+Object.assign(loadSource('viewer-source.js'), {
+  viewerScript: '/* GraphFrontier export page */',
+  viewerStyles: '.graphfrontier-host{}',
+  cssVariables: ['--background-primary', '--text-normal'],
+  iconCandidates: ['x', 'pin'],
+});
 
 module.exports = { loadSource, notices, element, deferred, fixture, obsidian };

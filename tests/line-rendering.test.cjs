@@ -443,8 +443,7 @@ test('API exposes physical edge widths, edge color and opacity', () => {
   assert(!visuals.safeParse({ edge_width_scale: 0.05 }).success);
 });
 
-test('HTML export carries physical edge widths, edge color and opacity', async (t) => {
-  const vm = require('node:vm');
+test('HTML export carries the link settings and per-node link overrides the plugin draws with', async (t) => {
   const { mobileVault } = require('./helpers/mobile-vault.cjs');
   const { view, plugin, app } = fixture(t, {
     settings: {
@@ -476,36 +475,30 @@ test('HTML export carries physical edge widths, edge color and opacity', async (
   view.contentEl.win.require = () => assert.fail('Export must not use Node');
   await view.commandExportStaticHtml({ exportPath: 'line-export.html' });
   const html = contents.get('line-export.html');
-  const payload = JSON.parse(html.match(/const EXPORT_DATA = (.*);/)[1]);
-  assert.equal(payload.settings.edgeWidth, 3);
-  assert.equal(payload.settings.edgeColor, '#ff0000');
-  assert.equal(payload.settings.edgeOpacity, 0.4);
-  assert.equal(payload.theme.background, '#123456');
-  assert.equal(payload.settings.gridColor, '#334455');
-  assert.equal(payload.settings.gridOpacity, 0.3);
-  assert.equal(payload.settings.gridLineWidth, 2);
-  assert.equal(payload.settings.dimLowDegreeNodes, true);
-  assert.equal(payload.edges[0].showArrows, false);
-  assert.equal(payload.edges[0].reverseArrows, true);
-  assert.equal(payload.edges[0].opacity, 0);
-  assert.equal(payload.edges[0].color, '#abcdef');
-  assert.equal(payload.nodes[0].degree, view.nodes[0].degree);
-  assert(!('renderResolutionScale' in payload.settings));
-  assert(!('paintedEdgeWidth' in payload.settings));
-  assert(!('paintedWidth' in payload.edges[0]));
-  assert.equal(payload.edges[0].width, 3);
-  assert.equal(plugin.getSettings().edge_color, '#ff0000');
-  // The same metric helpers are embedded and the generated script compiles.
-  for (const name of [
-    'getNodeScreenRadius',
-    'getNodeWorldRadius',
-    'setCrispStroke',
-    'getLowDegreeAlpha',
-    'getLinkArrowSegments',
+  const data = JSON.parse(
+    html.match(/<script id="graphfrontier-data" type="application\/json">([\s\S]*?)<\/script>/)[1]
+  );
+  // The page runs the plugin's own drawing on the same settings, so they travel unchanged.
+  for (const key of [
+    'edge_width_scale',
+    'edge_color',
+    'edge_opacity',
+    'dim_low_degree_nodes',
+    'custom_background',
+    'background_color',
+    'grid_color',
+    'grid_opacity',
+    'grid_line_width',
+    'show_arrows',
+    'reverse_arrows',
   ])
-    assert.match(html, new RegExp(`const ${name} = function ${name}\\(`));
-  const script = html.match(/<script>([\s\S]*)<\/script>/)[1];
-  assert.doesNotThrow(() => new vm.Script(script));
+    assert.deepEqual(data.pluginData.settings[key], plugin.getSettings()[key], key);
+  assert.deepEqual(data.pluginData.node_visual_settings.b, {
+    show_arrows: false,
+    edge_opacity: 0,
+    edge_color: '#abcdef',
+  });
+  assert.deepEqual(data.pluginData.saved_positions.b, { x: 50, y: 50 });
 });
 
 test('highlighted edges are fully opaque regardless of edge and painted opacity', (t) => {

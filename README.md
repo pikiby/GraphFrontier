@@ -212,8 +212,9 @@ through the API/MCP without editing your notes.
 
 ## Undo And Backups
 
-Undo manual moves and pin actions with **Ctrl/Cmd+Z**. Redo with **Ctrl+Y** or
-**Ctrl/Cmd+Shift+Z**. Physics movement, colors and other settings are not part of
+Undo manual moves and pin actions with **Ctrl/Cmd+Z** or the **↶** button next to
+Hide/Show at the top of the side panel. Redo with **Ctrl+Y**, **Ctrl/Cmd+Shift+Z** or **↷**;
+the buttons are grey when there is nothing to undo or redo. Physics movement, colors and other settings are not part of
 this history. See [undo and redo](docs/hotkeys.md#undo-and-redo-in-the-graph).
 
 Automatic backups keep one current copy of layouts, lists and preferences outside

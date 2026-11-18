@@ -17,6 +17,26 @@
   min-width: 0;
 }
 
+.graphfrontier-export-include {
+  display: grid;
+  gap: 6px;
+}
+
+.graphfrontier-export-include-title {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.graphfrontier-export-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.graphfrontier-export-check.is-nested {
+  padding-left: 22px;
+}
+
 .graphfrontier-export-hint {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
@@ -72,6 +92,18 @@
   display: block;
   cursor: grab;
   touch-action: none;
+}
+
+.graphfrontier-canvas.is-wave-armed {
+  cursor: crosshair;
+}
+
+/* An effect waiting for a click on the graph shows its button in the accent color. */
+/* Accent outline: an armed effect button, and Export, which stands out from Save layout. */
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-save.is-armed,
+.graphfrontier-sidepanel button.graphfrontier-sidepanel-save.is-accent {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
 }
 
 .graphfrontier-canvas.is-dragging {
@@ -175,6 +207,38 @@
   font-size: 12px;
   color: var(--text-normal);
   padding-right: 8px;
+}
+
+.graphfrontier-sidepanel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Undo and Redo: the toggle's frame, with the accent color on the icon while available. */
+.graphfrontier-sidepanel button.graphfrontier-history-button {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-modifier-form-field);
+  color: var(--interactive-accent);
+  cursor: pointer;
+}
+
+.graphfrontier-sidepanel button.graphfrontier-history-button:disabled {
+  color: var(--text-faint);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.graphfrontier-history-button svg {
+  width: 14px;
+  height: 14px;
 }
 
 .graphfrontier-sidepanel-toggle {
@@ -1496,4 +1560,17 @@ input[type='color'].graphfrontier-group-color-input:focus-visible {
 
 .graphfrontier-group-mode-caption {
   margin-right: 4px;
+}
+
+/* A node shape other than a circle: the swatch is clipped to the polygon, so it is square. */
+.graphfrontier-sidepanel button.graphfrontier-group-settings.is-shaped,
+input[type='color'].graphfrontier-group-color-input.is-shaped,
+input[type='color'].graphfrontier-group-color-input.is-shaped::-webkit-color-swatch,
+input[type='color'].graphfrontier-group-color-input.is-shaped::-moz-color-swatch {
+  border-radius: 0;
+}
+
+/* An exported page without the settings menu shows only the graph. */
+.graphfrontier-sidepanel.is-export-hidden {
+  display: none;
 }
