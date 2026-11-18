@@ -53,11 +53,20 @@ function dynamicCodeReferences(code) {
   const ast = acorn.parse(code, { ecmaVersion: 'latest', locations: true, ranges: true });
   const scope = eslintScope.analyze(ast, { ecmaVersion: 2022, sourceType: 'script' });
   const forbidden = new Set(['Function', 'AsyncFunction', 'GeneratorFunction', 'eval']);
+  const typeChecks = new Set();
   const references = scope.globalScope.through
     .filter((reference) => forbidden.has(reference.identifier.name))
-    .map(({ identifier }) => `${identifier.name}:${identifier.loc.start.line}`);
+    .map(({ identifier }) => identifier);
+  const violations = [];
   const visit = (node) => {
     if (!node || typeof node !== 'object') return;
+    // Hono delegates instanceof to the native hook; it does not invoke Function().
+    if (
+      node.type === 'CallExpression' &&
+      code.slice(node.start, node.end) ===
+        'Function.prototype[Symbol.hasInstance].call(this, instance)'
+    )
+      typeChecks.add(node.callee.object.object.object);
     if (
       node.type === 'MemberExpression' &&
       node.object.type === 'Identifier' &&
@@ -65,7 +74,7 @@ function dynamicCodeReferences(code) {
     ) {
       const name = node.computed ? node.property.value : node.property.name;
       if (forbidden.has(name))
-        references.push(`${node.object.name}.${name}:${node.loc.start.line}`);
+        violations.push(`${node.object.name}.${name}:${node.loc.start.line}`);
     }
     for (const child of Object.values(node)) {
       if (Array.isArray(child)) child.forEach(visit);
@@ -73,7 +82,9 @@ function dynamicCodeReferences(code) {
     }
   };
   visit(ast);
-  return references;
+  return violations.concat(
+    references.filter((id) => !typeChecks.has(id)).map((id) => id.name + ':' + id.loc.start.line)
+  );
 }
 
 test('AST codegen check ignores comments, strings and ordinary local constructors', () => {
@@ -81,6 +92,7 @@ test('AST codegen check ignores comments, strings and ordinary local constructor
     dynamicCodeReferences(`
       // new Function('return 1'); eval('1');
       const description = 'new Function and eval are forbidden';
+      Function.prototype[Symbol.hasInstance].call(this, instance);
       class F {};
       new F();
       function ordinary(Function) { return new Function(); }
