@@ -144,11 +144,11 @@ test('reviewed Zod transforms fail closed on dependency source drift', () => {
   });
 });
 
-test('direct source keeps the full Zod runtime configured jitless', () => {
+test('direct source keeps the full Zod runtime configured jitless', async () => {
   const runtime = require('../src/schema-runtime');
-  const zod = require('zod');
-  const core = require('zod/v4/core');
-  assert.equal(runtime, zod);
+  const zod = await import('zod');
+  const core = await import('zod/v4/core');
+  assert.equal(runtime.z, zod.z);
   assert.equal(core.globalConfig.jitless, true);
   assert.equal(runtime.z.compile, core.compile);
   assert.equal(runtime.z.core.compileFn, core.compileFn);
@@ -220,7 +220,7 @@ test('bundled Zod compiler fallback preserves strict schema validation without c
 });
 
 test('SDK default uses the real cfworker provider inside a codegen-disabled VM', () => {
-  assert.equal(require('@cfworker/json-schema/package.json').version, '4.1.1');
+  assert.equal(require('@cfworker/json-schema/package.json').version, '4.1.6');
   const { provider, CfWorkerJsonSchemaValidator } = loadProvider();
   assert.ok(provider instanceof CfWorkerJsonSchemaValidator);
   const schema = {

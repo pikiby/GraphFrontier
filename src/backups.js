@@ -1,9 +1,10 @@
-const { TFile, TFolder, Notice } = require('obsidian');
-const { DEFAULT_DATA, GRAPHFRONTIER_VIEW_TYPE } = require('./constants');
-const { NodeListStore } = require('./node-lists');
+import { TFile, TFolder, Notice } from 'obsidian';
+import { DEFAULT_DATA, GRAPHFRONTIER_VIEW_TYPE } from './constants.js';
+import { NodeListStore } from './node-lists.js';
 const DEFAULT_FOLDER = 'GraphFrontier backups';
 const FILE_NAME = 'graphfrontier-backup.json';
 const copy = (value) => JSON.parse(JSON.stringify(value));
+class BackupSnapshotChanged extends Error {}
 
 function backupFolder(value, configDir) {
   const path = String(value || '').trim();
@@ -166,6 +167,11 @@ class BackupManager {
     this.timer = window.setTimeout(() => {
       this.timer = null;
       void this.write().catch((error) => {
+        if (this.disposed) return;
+        if (error instanceof BackupSnapshotChanged) {
+          this.schedule();
+          return;
+        }
         this.error = error.message;
         new Notice(`GraphFrontier backup: ${error.message}`);
       });
@@ -223,7 +229,7 @@ class BackupManager {
       data.active_layout_name = active;
     } else layouts.push({ name: active, data: copy(data) });
     if (revision !== this.plugin._persistRevision)
-      throw new Error('Settings changed while preparing backup. Retry.');
+      throw new BackupSnapshotChanged('Settings changed while preparing backup. Retry.');
     return {
       format: 'graphfrontier-backup',
       version: 1,
@@ -437,4 +443,4 @@ class BackupManager {
     }
   }
 }
-module.exports = { BackupManager, backupFolder, cleanData, DEFAULT_FOLDER };
+export { BackupManager, backupFolder, cleanData, DEFAULT_FOLDER };

@@ -1,7 +1,8 @@
+import { drawIcon } from '../export-icon.js';
 // The Obsidian API for the exported page. The page runs the plugin's own code (plugin, view,
 // rendering, physics, menus), so this module provides what that code imports from 'obsidian',
 // backed by the browser and the exported vault snapshot instead of the Obsidian app.
-const { renderMarkdown } = require('./markdown');
+import { renderMarkdown } from './markdown.js';
 
 // Obsidian adds these helpers to every DOM node; the plugin builds its interface with them.
 function applyElementInfo(el, info) {
@@ -99,13 +100,19 @@ function installDomHelpers(win = window) {
     return Array.from(this.querySelectorAll(selector));
   });
   define(ElementProto, 'show', function () {
-    this.style.display = '';
+    this.classList.remove('graphfrontier-viewer-hidden');
+    this.style.removeProperty('display');
   });
   define(ElementProto, 'hide', function () {
-    this.style.display = 'none';
+    this.style.removeProperty('display');
+    this.classList.add('graphfrontier-viewer-hidden');
   });
   define(ElementProto, 'isShown', function () {
-    return this.style.display !== 'none' && this.isConnected;
+    return (
+      !this.classList.contains('graphfrontier-viewer-hidden') &&
+      this.style.display !== 'none' &&
+      this.isConnected
+    );
   });
   for (const proto of [win.Document.prototype, win.DocumentFragment.prototype])
     for (const name of ['createEl', 'createDiv', 'createSpan'])
@@ -268,7 +275,6 @@ class Scope {
 
 // A menu laid out like Obsidian's: items with an icon and a title, separators and submenus.
 // It closes on Escape, on a press outside it, or when an item is chosen.
-let openMenu = null;
 class MenuItem {
   constructor(menu) {
     this.menu = menu;
@@ -343,6 +349,8 @@ class MenuItem {
 }
 
 class Menu extends Component {
+  static active = null;
+
   constructor() {
     super();
     this.items = [];
@@ -382,8 +390,8 @@ class Menu extends Component {
   }
   showAtPosition(position, nested = false) {
     if (!nested) {
-      if (openMenu && openMenu !== this) openMenu.hide();
-      openMenu = this;
+      if (Menu.active && Menu.active !== this) Menu.active.hide();
+      Menu.active = this;
     }
     document.body.appendChild(this.dom);
     const { innerWidth, innerHeight } = window;
@@ -413,7 +421,7 @@ class Menu extends Component {
     this.dom.remove();
     if (this.outside) document.removeEventListener('pointerdown', this.outside, true);
     if (this.escape) document.removeEventListener('keydown', this.escape, true);
-    if (!nested && openMenu === this) openMenu = null;
+    if (!nested && Menu.active === this) Menu.active = null;
     if (!nested && this.parentMenu) this.parentMenu.hide();
     for (const callback of this.hideCallbacks) callback();
     return this;
@@ -497,7 +505,8 @@ function setIconSet(icons) {
 function setIcon(el, name) {
   el.empty();
   const svg = iconSvgs[name];
-  if (svg) el.insertAdjacentHTML('beforeend', svg);
+  const node = svg?.tag === 'svg' ? drawIcon(el.ownerDocument, svg) : null;
+  if (node) el.appendChild(node);
 }
 function getIcon(name) {
   const holder = document.createElement('div');
@@ -513,9 +522,6 @@ const Platform = {
   isMobileApp: false,
   isPhone: !!coarse,
   isTablet: false,
-  isMacOS: typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || ''),
-  isWin: typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || ''),
-  isLinux: typeof navigator !== 'undefined' && /Linux/i.test(navigator.platform || ''),
   isIosApp: false,
   isAndroidApp: false,
   isSafari: false,
@@ -523,10 +529,10 @@ const Platform = {
 
 const MarkdownRenderer = {
   async render(app, markdown, el) {
-    el.innerHTML = renderMarkdown(markdown);
+    renderMarkdown(markdown, el);
   },
   async renderMarkdown(markdown, el) {
-    el.innerHTML = renderMarkdown(markdown);
+    renderMarkdown(markdown, el);
   },
 };
 
@@ -597,7 +603,7 @@ class AbstractInputSuggest {
   close() {}
 }
 
-module.exports = {
+export {
   installDomHelpers,
   setIconSet,
   Events,

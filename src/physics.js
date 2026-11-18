@@ -1,6 +1,6 @@
-const { TWO_PI, DEFAULT_DATA } = require('./constants');
-const { getDarkEnergyTargets, applyDarkEnergyForce } = require('./dark-energy');
-const { pulseForce, activePulseWaves } = require('./effects');
+import { TWO_PI, DEFAULT_DATA } from './constants.js';
+import { getDarkEnergyTargets, applyDarkEnergyForce } from './dark-energy.js';
+import { pulseForce, activePulseWaves } from './effects.js';
 
 const layoutAutosaveStates = new WeakMap();
 const layoutSleepStates = new WeakMap();
@@ -1413,7 +1413,7 @@ function recomputeOrbitRadii(view) {
   view.plugin.renderAllViews();
 }
 
-module.exports = {
+export {
   setSleepForceProbe,
   wakeOnPhysicsVisibilityChange,
   resetPhysicsVisibilityBaseline,

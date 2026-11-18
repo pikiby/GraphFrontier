@@ -12,7 +12,7 @@ const {
   getFocusEdgeWidth,
   getFocusEdgeColor,
   getLowDegreeAlpha,
-  getLinkArrowSegments,
+  getLinkHeads,
 } = loadSource('render-metrics.js');
 const { getNodeVisualSetting } = loadSource('node-visuals.js');
 
@@ -96,22 +96,22 @@ test('low-degree dimming uses established degree and highlights restore full opa
 });
 
 test('arrows follow stored source, reverse only visuals and reciprocal links draw both heads', (t) => {
-  const forward = getLinkArrowSegments(0, 0, 100, 0, 5, 7, false, false, 1);
-  const reverse = getLinkArrowSegments(0, 0, 100, 0, 5, 7, true, false, 1);
-  assert.equal(forward[2], 91);
-  assert.equal(reverse[2], 7);
-  assert.equal(getLinkArrowSegments(0, 0, 100, 0, 5, 7, false, true, 1).length, 16);
-  assert.deepEqual(getLinkArrowSegments(0, 0, 2, 0, 5, 7, false, true, 1), []);
+  const forward = getLinkHeads(0, 0, 100, 0, 5, 7, false, false, 1);
+  const reverse = getLinkHeads(0, 0, 100, 0, 5, 7, true, false, 1);
+  assert.equal(forward[0].x, 91);
+  assert.equal(reverse[0].x, 7);
+  assert.equal(getLinkHeads(0, 0, 100, 0, 5, 7, false, true, 1).length, 2);
+  assert.deepEqual(getLinkHeads(0, 0, 2, 0, 5, 7, false, true, 1), []);
   const { view, plugin } = edgeView(t, { show_arrows: true });
   const original = JSON.stringify(view.edges);
   for (const [reciprocal, expected] of [
-    [false, 3],
-    [true, 5],
+    [false, 1],
+    [true, 2],
   ]) {
     view.edges[0].bidirectional = reciprocal;
     const { ctx, segments } = strokeRecorder();
     render.drawEdges(view, ctx);
-    assert.deepEqual(segments, [expected]);
+    assert.deepEqual(segments, [1, expected]);
   }
   delete view.edges[0].bidirectional;
   plugin.data.settings.reverse_arrows = true;

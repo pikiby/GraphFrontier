@@ -2,8 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { loadSource } = require('./helpers/obsidian.cjs');
-const { GraphFrontierView } = loadSource('view.js');
+const { build } = require('esbuild');
+const { viewerResolvePlugin } = require('../scripts/viewer-build.cjs');
 
 // Opt in with the locally available Playwright module and Chromium executable.
 test(
@@ -25,22 +25,18 @@ test(
       await page.addStyleTag({
         content: fs.readFileSync(path.join(__dirname, '../src/static/styles.css'), 'utf8'),
       });
-      const methods = [
-        'buildAttachmentFileTypesControl',
-        'showInputSuggestMenu',
-        'closeInputSuggestMenu',
-        'moveInputSuggestSelection',
-        'selectInputSuggestActive',
-        'protectQueryInputPrefix',
-      ];
-      await page.addScriptTag({
-        content: `
-      function normalizeAttachmentExtensions(values) { return values || []; }
-      window.view = new (class {
-        ${methods.map((name) => GraphFrontierView.prototype[name].toString()).join('\n')}
-      })();
-    `,
+      const fixture = await build({
+        stdin: {
+          contents:
+            "import { GraphFrontierView } from './view.js'; window.view = Object.create(GraphFrontierView.prototype);",
+          resolveDir: path.resolve(__dirname, '../src'),
+        },
+        bundle: true,
+        write: false,
+        format: 'iife',
+        plugins: [viewerResolvePlugin()],
       });
+      await page.addScriptTag({ content: fixture.outputFiles[0].text });
       await page.evaluate(() => {
         const { HTMLElement } = window;
         HTMLElement.prototype.createEl = function (tag, options = {}) {

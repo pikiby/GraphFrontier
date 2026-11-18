@@ -296,7 +296,7 @@ test('one reset clears all visual controls, identical for notes and attachments'
       definition.type === 'color'
         ? { ...definition, max: '#abcdef' }
         : definition.type === 'boolean'
-          ? { ...definition, max: true }
+          ? { ...definition, max: definition.key !== 'arrow_zoom' }
           : definition;
     const row = visual.items.find((item) => item.title === spec.label).dom.children[0];
     const [input] = row.children;
@@ -309,7 +309,10 @@ test('one reset clears all visual controls, identical for notes and attachments'
       spec.type === 'boolean'
     );
     input.value = String(spec.values ? spec.values.length - 1 : spec.max);
-    input.events[spec.type === 'boolean' ? 'click' : 'input']();
+    if (input.cls === 'graphfrontier-style-strip') {
+      const index = spec.values.indexOf(spec.max);
+      input.children[index].events.click({ stopPropagation() {} });
+    } else input.events[spec.type === 'boolean' ? 'click' : 'input']();
     assert.equal(getNodeVisualOverride(plugin, node.id, spec.key), spec.max);
   }
   const resets = visual.items.filter((item) => item.title === 'Reset visual settings');
@@ -594,14 +597,21 @@ test('groups reuse the node visual menu, write group overrides and reset without
     input.value = String(
       spec.type === 'color' ? '#abcdef' : spec.values ? spec.values.length - 1 : spec.max
     );
-    input.events[spec.type === 'boolean' ? 'click' : 'input']();
+    if (input.cls === 'graphfrontier-style-strip') {
+      const index = spec.values.indexOf(spec.max);
+      input.children[index].events.click({ stopPropagation() {} });
+    } else input.events[spec.type === 'boolean' ? 'click' : 'input']();
     if (spec.key === 'node_color') {
       assert.equal(plugin.data.groups[0].color, '#abcdef');
       assert.equal(row.colorInput.value, '#abcdef');
     } else
       assert.equal(
         plugin.data.groups[0].settings[spec.key],
-        spec.type === 'color' ? '#abcdef' : spec.type === 'boolean' ? true : spec.max
+        spec.type === 'color'
+          ? '#abcdef'
+          : spec.type === 'boolean'
+            ? spec.key !== 'arrow_zoom'
+            : spec.max
       );
   }
   assert.deepEqual(plugin.data.node_visual_settings, before);

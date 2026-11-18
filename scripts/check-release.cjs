@@ -12,7 +12,7 @@ function checkRelease(rootDir, { tag } = {}) {
     try {
       value = JSON.parse(fs.readFileSync(resolve(file), 'utf8'));
     } catch (error) {
-      throw new Error(`${file}: ${error.message}`);
+      throw new Error(`${file}: ${error.message}`, { cause: error });
     }
     check(
       value !== null && typeof value === 'object' && !Array.isArray(value),

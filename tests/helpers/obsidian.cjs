@@ -84,6 +84,7 @@ class Plugin {
 class ItemView {
   constructor(leaf) {
     this.app = leaf.app;
+    this.leaf = leaf;
     this.contentEl = element();
   }
   registerDomEvent(el, name, callback) {
@@ -199,7 +200,7 @@ const obsidian = {
 };
 const sourceCache = new Map();
 
-// Load real CommonJS source with a local Obsidian stub, without patching Node's
+// Load the plugin source with a local Obsidian stub, without patching Node's
 // global module loader or ever connecting to an Obsidian vault.
 function loadSource(name) {
   const filename = path.resolve(__dirname, '../../src', name);
@@ -210,13 +211,19 @@ function loadSource(name) {
   sourceCache.set(filename, source);
   source.require = (request) => {
     if (request === 'obsidian') return obsidian;
+    if (request.endsWith('.json')) return require(path.resolve(path.dirname(filename), request));
     if (request.startsWith('.')) {
       const resolved = require.resolve(path.resolve(path.dirname(filename), request));
       return loadSource(resolved);
     }
     return require(request);
   };
-  source._compile(fs.readFileSync(filename, 'utf8'), filename);
+  const text = fs.readFileSync(filename, 'utf8');
+  // Keep ESM dependencies in the same fixture cache and Obsidian stub as CommonJS.
+  const code = /^(?:import|export) /m.test(text)
+    ? require('esbuild').transformSync(text, { format: 'cjs', sourcefile: filename }).code
+    : text;
+  source._compile(code, filename);
   return source.exports;
 }
 
@@ -284,7 +291,7 @@ function fixture(t, data = {}) {
       getActiveFile: () => null,
     },
   };
-  const GraphFrontierPlugin = loadSource('main.js');
+  const GraphFrontierPlugin = loadSource('main.js').default;
   const { GraphFrontierView } = loadSource('view.js');
   const plugin = new GraphFrontierPlugin(app);
   // Fixtures describe current-model data unless a test opts into legacy migration.
@@ -338,7 +345,7 @@ function fixture(t, data = {}) {
 
 // Unbuilt sources have no export page script; tests export with a placeholder page script
 // (tests/export-page.test.cjs builds the real one).
-Object.assign(loadSource('viewer-source.js'), {
+Object.assign(loadSource('viewer-source.js').default, {
   viewerScript: '/* GraphFrontier export page */',
   viewerStyles: '.graphfrontier-host{}',
   cssVariables: ['--background-primary', '--text-normal'],

@@ -1,5 +1,5 @@
-const { Menu, Notice } = require('obsidian');
-const { addNoteTargetActions, editNoteTarget, NOTE_TARGET_HINT } = require('./note-navigation');
+import { Menu, Notice } from 'obsidian';
+import { addNoteTargetActions, editNoteTarget, NOTE_TARGET_HINT } from './note-navigation.js';
 
 function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   const { app, plugin } = view;
@@ -353,4 +353,4 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
   return menu;
 }
 
-module.exports = { buildNodeContextMenu };
+export { buildNodeContextMenu };

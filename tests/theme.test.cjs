@@ -6,8 +6,16 @@ const { readGraphTheme } = require('../src/theme');
 const render = require('../src/render');
 const { GraphFrontierView } = loadSource('view.js');
 
+function wrapStyle() {
+  return {
+    removeProperty(key) {
+      delete this[key === 'max-height' ? 'maxHeight' : key];
+    },
+  };
+}
+
 test('graph height excludes floating navigation and the keyboard viewport', () => {
-  const style = {};
+  const style = Object.assign(wrapStyle(), { height: '500px' });
   const viewport = { offsetTop: 0, height: 851 };
   const navbar = { left: 30, right: 360, top: 770, height: 52 };
   const view = {
@@ -21,6 +29,7 @@ test('graph height excludes floating navigation and the keyboard viewport', () =
     },
   };
   GraphFrontierView.prototype.updateWrapHeightForKeyboard.call(view);
+  assert.equal(style.height, undefined);
   assert.equal(style.maxHeight, '661px');
   viewport.height = 500;
   GraphFrontierView.prototype.updateWrapHeightForKeyboard.call(view);
@@ -49,7 +58,7 @@ test('parent resize releases the keyboard cap even when the capped wrapper does 
   });
   let bottom = 549;
   const view = {
-    wrapEl: { style: {} },
+    wrapEl: { style: wrapStyle() },
     contentEl: {
       getBoundingClientRect: () => ({ left: 0, right: 393, top: 88, bottom }),
       ownerDocument: {

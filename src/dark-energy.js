@@ -97,10 +97,4 @@ function applyDarkEnergyForce(view, node, accel, targets) {
   }
 }
 
-module.exports = {
-  PREFIX,
-  normalizeDarkEnergy,
-  darkEnergyNodes,
-  getDarkEnergyTargets,
-  applyDarkEnergyForce,
-};
+export { PREFIX, normalizeDarkEnergy, darkEnergyNodes, getDarkEnergyTargets, applyDarkEnergyForce };

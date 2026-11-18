@@ -5,4 +5,5 @@ class GraphFrontierApi {
   close() {}
 }
 
-module.exports = { GraphFrontierApi, GraphApiError, MAX_PAGE: 0 };
+const MAX_PAGE = 0;
+export { GraphFrontierApi, GraphApiError, MAX_PAGE };

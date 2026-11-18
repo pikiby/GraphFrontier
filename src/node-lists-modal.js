@@ -1,5 +1,5 @@
-const { Modal, Menu, Notice, setIcon } = require('obsidian');
-const { DataConfirmModal } = require('./data-confirm-modal');
+import { Modal, Menu, Notice, setIcon } from 'obsidian';
+import { DataConfirmModal } from './data-confirm-modal.js';
 const PAGE_SIZE = 50;
 
 class NodeListsPanel {
@@ -264,4 +264,4 @@ class NodeListsPanel {
     this.contentEl.empty();
   }
 }
-module.exports = { NodeListsPanel };
+export { NodeListsPanel };

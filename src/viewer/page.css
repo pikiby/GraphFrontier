@@ -355,3 +355,6 @@ input[type='range']::-moz-range-thumb {
   justify-content: center;
   color: var(--text-error, #e5484d);
 }
+:is(body, #graphfrontier-root) .graphfrontier-viewer-hidden {
+  display: none;
+}

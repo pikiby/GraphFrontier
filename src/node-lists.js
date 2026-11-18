@@ -170,4 +170,4 @@ class NodeListStore {
   }
 }
 
-module.exports = { NodeListStore, validatePaths, nodeListContains, findNodeList };
+export { NodeListStore, validatePaths, nodeListContains, findNodeList };

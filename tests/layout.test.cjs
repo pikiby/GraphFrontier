@@ -2144,7 +2144,7 @@ test('Filters edit blacklist and whitelist as one list with modes and a hidden t
   // Like group rows, the empty trailing row has no handle and no mode button.
   assert.equal(rows.at(-1).queryInput.placeholder, 'Enter filter...');
   assert.equal(rows.at(-1).button.style.display, 'none');
-  assert.equal(rows.at(-1).dragHandle.style.visibility, 'hidden');
+  assert.equal(rows.at(-1).dragHandle.attributes['data-inactive'], 'true');
   assert.equal(rows[0].button.style.display, '');
   // While the text changes the button stays hidden; it appears once the field is left.
   view.getGroupQuerySuggestions = () => ({ items: [] });
@@ -2155,7 +2155,7 @@ test('Filters edit blacklist and whitelist as one list with modes and a hidden t
   assert.equal(typed.button.style.display, 'none');
   typed.queryInput.events.blur();
   assert.equal(typed.button.style.display, '');
-  assert.equal(typed.dragHandle.style.visibility, 'visible');
+  assert.equal(typed.dragHandle.attributes['data-inactive'], 'false');
   rows[1].row.remove = () => {};
   openMenu(rows[1])
     .items.find((item) => item.title === 'Delete rule')

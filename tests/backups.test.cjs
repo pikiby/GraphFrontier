@@ -103,6 +103,25 @@ test('corrupt backup, unreadable layouts and failed writes do not publish succes
   assert.equal(f.contents.get(f.manager.path), '{broken');
   assert.equal(f.manager.lastSuccess, last);
 });
+test('a concurrent camera preference change retries the automatic backup without a notice', async (t) => {
+  const f = await setup(t);
+  const { notices } = require('./helpers/obsidian.cjs');
+  const list = f.adapter.list;
+  f.adapter.list = async (...args) => {
+    f.adapter.list = list;
+    f.plugin.schedulePersist(1200, { layout: false });
+    return list(...args);
+  };
+  f.flushTimers();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.contents.has(f.manager.path), false);
+  assert.ok(f.manager.timer);
+  assert.deepEqual(notices, []);
+  f.flushTimers();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(f.contents.has(f.manager.path));
+  assert.deepEqual(notices, []);
+});
 test('disabled automatic backups stay disabled while manual backup remains available', async (t) => {
   const f = await setup(t);
   await f.manager.configure({ enabled: false });

@@ -116,7 +116,8 @@ function loadReferencePhysics() {
   loaded.filename = filename;
   loaded.paths = Module._nodeModulePaths(path.dirname(filename));
   loaded._compile(
-    `const {applyReferenceRepulsion} = require(${JSON.stringify(__filename)});\n` + source,
+    `const {applyReferenceRepulsion} = require(${JSON.stringify(__filename)});\n` +
+      require('esbuild').transformSync(source, { format: 'cjs' }).code,
     filename
   );
   return loaded.exports;

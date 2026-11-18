@@ -1,6 +1,6 @@
-const { Notice } = require('obsidian');
-const { GraphFrontierView } = require('./view');
-const { LOCAL_GRAPHFRONTIER_VIEW_TYPE } = require('./constants');
+import { Notice } from 'obsidian';
+import { GraphFrontierView } from './view.js';
+import { LOCAL_GRAPHFRONTIER_VIEW_TYPE } from './constants.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -230,4 +230,4 @@ class LocalGraphFrontierView extends GraphFrontierView {
   }
 }
 
-module.exports = { LocalGraphFrontierView, createLocalFacade };
+export { LocalGraphFrontierView, createLocalFacade };

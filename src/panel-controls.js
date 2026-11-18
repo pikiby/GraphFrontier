@@ -1,4 +1,4 @@
-const { setIcon } = require('obsidian');
+import { setIcon } from 'obsidian';
 
 // Side panel controls shared by the Search, Groups, Filters and Custom lists blocks.
 
@@ -29,11 +29,11 @@ function createEditorRow(parentEl, { value = '', placeholder, icon, label }) {
 }
 
 // The handle and controls show only on a ready row, and hide while its text is being changed.
-function setEditorRowReady(rowState, ready) {
+function setEditorRowReady(rowState, ready, { draggable = true } = {}) {
   const shown = ready && !rowState.editing;
-  rowState.dragHandle.style.visibility = shown ? 'visible' : 'hidden';
+  rowState.dragHandle.setAttribute('data-inactive', String(!(draggable && shown)));
   for (const control of rowState.controls) control.style.display = shown ? '' : 'none';
-  rowState.row.draggable = shown;
+  rowState.row.draggable = draggable && shown;
 }
 
 // Handle drag between rows of one editor; `editor` keeps drops inside it.
@@ -126,7 +126,7 @@ function createModeSwitch(parentEl, { left, right, leftTitle, rightTitle }) {
   };
 }
 
-module.exports = {
+export {
   createEditorRow,
   setEditorRowReady,
   bindEditorRowDrag,

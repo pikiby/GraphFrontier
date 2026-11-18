@@ -865,7 +865,7 @@ test('renderer and hit target retain a thick hollow ring at tiny radii', (t) => 
   );
 });
 
-test('export carries subgraphs and their member notes; the page projects them like the view', async (t) => {
+test('export keeps the visible subgraph container and its links without embedding collapsed notes', async (t) => {
   const f = setup(t);
   f.makeGroup();
   f.view.canvasEl = { clientWidth: 800, clientHeight: 600 };
@@ -879,11 +879,17 @@ test('export carries subgraphs and their member notes; the page projects them li
       .get('subgraphs.html')
       .match(/<script id="graphfrontier-data" type="application\/json">([\s\S]*?)<\/script>/)[1]
   );
-  assert.deepEqual(data.pluginData.subgraphs, f.plugin.data.subgraphs);
+  assert.deepEqual(data.pluginData.subgraphs[0].members, []);
+  assert.ok(
+    data.layoutGraphs[data.pluginData.active_layout_name].edges.some((e) =>
+      [e.source, e.target].includes(P + 'one')
+    )
+  );
   assert.equal(data.pluginData.subgraphs.length, 1);
-  assert.equal(data.texts['a.md'], 'text-a.md');
+  assert.equal(data.texts['c.md'], 'text-c.md');
+  assert.doesNotMatch(contents.get('subgraphs.html'), /[ab]\.md/);
   await f.view.commandExportStaticHtml({ exportPath: 'no-text.html', includeContents: false });
-  assert(!contents.get('no-text.html').includes('text-a.md'));
+  assert(!contents.get('no-text.html').includes('text-c.md'));
 });
 
 test('missing members keep a usable container and local saved state without phantom notes', (t) => {

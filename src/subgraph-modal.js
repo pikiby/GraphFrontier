@@ -1,4 +1,4 @@
-const { Modal, Notice } = require('obsidian');
+import { Modal, Notice } from 'obsidian';
 
 class SubgraphModal extends Modal {
   constructor(view, initial, onSave) {
@@ -44,4 +44,4 @@ class SubgraphModal extends Modal {
   }
 }
 
-module.exports = { SubgraphModal };
+export { SubgraphModal };

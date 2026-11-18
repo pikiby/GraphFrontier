@@ -1,4 +1,4 @@
-const { Menu, Notice, Platform } = require('obsidian');
+import { Menu, Notice, Platform } from 'obsidian';
 
 // Shown on hover over the menu items that add or edit url/path.
 const NOTE_TARGET_HINT =
@@ -176,7 +176,7 @@ function addNoteNavigationActions(menu, app, file, hostWindow) {
     addNoteTargetActions(menu, app, key, frontmatter[key], hostWindow);
 }
 
-module.exports = {
+export {
   addNoteNavigationActions,
   addNoteTargetActions,
   editNoteTarget,

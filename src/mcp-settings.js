@@ -1,148 +1,150 @@
-const { PluginSettingTab, Setting, Notice, Platform } = require('obsidian');
+import { PluginSettingTab, Notice, Platform, Setting } from 'obsidian';
 
-const { NodeListsPanel } = require('./node-lists-modal');
-const { BackupsPanel } = require('./backups-modal');
+import { NodeListsPanel } from './node-lists-modal.js';
+import { BackupsPanel } from './backups-modal.js';
 
-const DEFAULT_MCP_SETTINGS = { enabled: false, port: 27125, token: '' };
-
-function normalizeMcpSettings(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('Invalid MCP settings.');
-  const result = { ...DEFAULT_MCP_SETTINGS, ...value };
-  if (
-    typeof result.enabled !== 'boolean' ||
-    !Number.isInteger(result.port) ||
-    result.port < 1024 ||
-    result.port > 65535 ||
-    typeof result.token !== 'string' ||
-    (result.token !== '' && !/^[a-f0-9]{64}$/.test(result.token))
-  ) {
-    throw new Error('Invalid MCP settings: use a port from 1024 to 65535 and a generated token.');
-  }
-  return { enabled: result.enabled, port: result.port, token: result.token };
-}
-
-function clientConfigs(port) {
-  const url = `http://127.0.0.1:${port}/mcp`;
-  return {
-    codex: `[mcp_servers.graphfrontier]\nurl = "${url}"\nbearer_token_env_var = "GRAPHFRONTIER_MCP_TOKEN"\n`,
-    claude: JSON.stringify(
-      {
-        mcpServers: {
-          graphfrontier: {
-            type: 'http',
-            url,
-            headers: { Authorization: 'Bearer ${GRAPHFRONTIER_MCP_TOKEN}' },
-          },
-        },
-      },
-      null,
-      2
-    ),
-    opencode: JSON.stringify(
-      {
-        $schema: 'https://opencode.ai/config.json',
-        mcp: {
-          graphfrontier: {
-            type: 'remote',
-            url,
-            enabled: true,
-            oauth: false,
-            headers: { Authorization: 'Bearer {env:GRAPHFRONTIER_MCP_TOKEN}' },
-          },
-        },
-      },
-      null,
-      2
-    ),
-  };
-}
-
+import { tools } from './mcp-definitions.js';
+import { GraphApiError } from './api-errors.js';
 class McpController {
   constructor(plugin, options = {}) {
     this.plugin = plugin;
     this.desktop = options.desktop ?? Platform.isDesktopApp;
-    this.settings = { ...DEFAULT_MCP_SETTINGS };
-    this.queue = Promise.resolve();
+    this.enabled = false;
     this.disposed = false;
     this.error = '';
     this.loadFailed = false;
-    this.server = null;
-    this.factory =
-      options.factory ||
-      ((settings) => {
-        const { GraphFrontierMcpServer } = require('./mcp-server');
-        return new GraphFrontierMcpServer(plugin.api, settings, plugin.manifest.version);
-      });
-    this.makeToken =
-      options.makeToken || (() => require('node:crypto').randomBytes(32).toString('hex'));
-    const dir = plugin.getLayoutsFolderRelativePath().replace(/\/layouts$/, '');
-    this.path = `${dir}/mcp.json`;
+    this.queue = Promise.resolve();
+    this.switches = new Set();
+    this.dir = plugin.getLayoutsFolderRelativePath().replace(/\/layouts$/, '');
+    this.path = this.dir + '/mcp.json';
+    this.session = new AbortController();
   }
 
   async load() {
     if (!this.desktop) return;
     try {
       const adapter = this.plugin.app.vault.adapter;
-      if (await adapter.exists(this.path)) {
-        this.settings = normalizeMcpSettings(JSON.parse(await adapter.read(this.path)));
+      if (!(await adapter.exists(this.path))) {
+        this.enabled = !this.disposed;
+        return;
       }
-      if (!this.disposed) await this.restart();
+      const stored = JSON.parse(await adapter.read(this.path));
+      if (typeof stored?.enabled !== 'boolean') throw new Error();
+      // Preserve the previous choice, but discard obsolete HTTP credentials.
+      if (Object.keys(stored).some((key) => key !== 'enabled')) await this.persist(stored.enabled);
+      this.enabled = !this.disposed && stored.enabled;
     } catch {
       this.loadFailed = true;
-      this.settings = { ...DEFAULT_MCP_SETTINGS };
-      this.error = 'Cannot read mcp.json. MCP is disabled; the file was not overwritten.';
+      this.error = 'Cannot load MCP preferences. MCP remains off.';
     }
   }
 
-  update(patch, rotateToken = false) {
-    const run = async () => {
-      if (this.disposed) throw new Error('GraphFrontier is unloaded.');
-      if (!this.desktop) throw new Error('MCP is available on desktop only.');
-      if (this.loadFailed) throw new Error(this.error);
-      const next = normalizeMcpSettings({ ...this.settings, ...patch });
-      if (rotateToken || (next.enabled && !next.token)) next.token = this.makeToken();
-      normalizeMcpSettings(next);
-      await this.plugin.app.vault.adapter.write(this.path, `${JSON.stringify(next, null, 2)}\n`);
-      this.settings = next;
-      if (!this.disposed) await this.restart();
-    };
-    const pending = this.queue.then(run);
+  persist(enabled) {
+    return this.plugin.app.vault.adapter.write(this.path, JSON.stringify({ enabled }) + '\n');
+  }
+
+  update({ enabled }) {
+    const pending = this.queue
+      .then(async () => {
+        if (!this.desktop || this.disposed || this.loadFailed || typeof enabled !== 'boolean')
+          throw new Error(this.error || 'MCP unavailable.');
+        if (!enabled) {
+          this.enabled = false;
+          this.session.abort();
+        }
+        await this.persist(enabled);
+        if (enabled && !this.disposed) {
+          if (this.session.signal.aborted) this.session = new AbortController();
+          this.enabled = true;
+        }
+      })
+      .finally(() => this.refreshToggles());
     this.queue = pending.catch(() => {});
     return pending;
   }
 
-  async restart() {
-    const old = this.server;
-    this.server = null;
-    if (old) await old.stop();
-    this.error = '';
-    if (this.disposed || !this.desktop || !this.settings.enabled) return;
-    if (!this.settings.token) {
-      this.error = 'Generate a token before enabling MCP.';
-      return;
-    }
-    let next;
+  async dispatch(encoded) {
+    const pack = (data) => 'GF_RESULT:' + Buffer.from(JSON.stringify(data)).toString('base64');
     try {
-      next = this.factory(this.settings);
-      this.server = next;
-      await next.start();
-      if (this.disposed) await next.stop();
-    } catch (error) {
-      if (next) await next.stop();
-      if (this.server === next) this.server = null;
-      this.error =
-        error.code === 'EADDRINUSE'
-          ? 'MCP port is in use. Choose a different port.'
-          : 'Cannot start MCP. It requires desktop Obsidian with Node 18+ and Web Fetch APIs.';
+      if (!this.desktop || !this.enabled || this.disposed)
+        throw new GraphApiError('MCP_OFF', 'Turn MCP ON in GraphFrontier.');
+      if (typeof encoded !== 'string' || encoded.length > 87384)
+        throw new GraphApiError('REQUEST_TOO_LARGE', 'Request too large.');
+      const { dir, name, args } = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+      const path = await import('node:path');
+      const actual = this.plugin.app.vault.adapter.getFullPath(this.dir);
+      if (typeof dir !== 'string' || path.relative(actual, dir) !== '')
+        throw new GraphApiError('WRONG_VAULT', 'Connector and CLI target different vaults.');
+      const tool = tools.find((entry) => entry.name === name);
+      if (!tool) throw new GraphApiError('UNKNOWN_TOOL', 'Unknown GraphFrontier tool.');
+      const parsed = tool.schema.safeParse(args);
+      if (!parsed.success)
+        throw new GraphApiError('INVALID_ARGUMENT', 'Invalid arguments for ' + tool.name);
+      const value = await this.plugin.api.runTool(
+        tool.method,
+        parsed.data,
+        tool.readOnly,
+        this.session.signal
+      );
+      if (Buffer.byteLength(JSON.stringify(value)) > 2 * 1024 * 1024)
+        throw new GraphApiError('RESPONSE_TOO_LARGE', 'Request a smaller page.');
+      return pack({ value });
+    } catch (e) {
+      return pack({
+        error:
+          e instanceof GraphApiError
+            ? { code: e.code, message: e.message }
+            : { code: 'INTERNAL_ERROR', message: 'Graph operation failed.' },
+      });
+    }
+  }
+
+  renderToggle(el) {
+    if (!this.desktop) return;
+    el.createDiv({
+      cls: 'setting-item-description',
+      text: 'Let local AI agents read and change graphs in this vault through the Obsidian CLI.',
+    });
+    const row = el.createDiv({ cls: 'graphfrontier-sidepanel-row' });
+    row.createSpan({ text: 'Allow agent access', cls: 'graphfrontier-sidepanel-label' });
+    const button = row.createEl('button', {
+      cls: 'graphfrontier-toggle-btn',
+      attr: { type: 'button', role: 'switch', 'aria-label': 'Allow agent access' },
+    });
+    this.switches.add(new WeakRef(button));
+    this.syncToggle(button);
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await this.update({ enabled: !this.enabled });
+        if (this.error) new Notice(this.error);
+      } catch (error) {
+        new Notice(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  syncToggle(button) {
+    const on = this.enabled;
+    button.toggleClass('is-on', on);
+    button.setAttribute('aria-checked', String(on));
+  }
+
+  refreshToggles() {
+    for (const ref of this.switches) {
+      const button = ref.deref();
+      if (!button || button.isConnected === false) this.switches.delete(ref);
+      else this.syncToggle(button);
     }
   }
 
   async stop() {
     this.disposed = true;
-    const server = this.server;
-    this.server = null;
-    if (server) await server.stop();
+    this.enabled = false;
+    this.session.abort();
+    this.refreshToggles();
   }
 }
 
@@ -157,9 +159,7 @@ class GraphFrontierMcpSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass('graphfrontier-settings');
-    this.renderMcp(
-      this.section('Local MCP', 'Connect a local AI client to the graph. Access requires a token.')
-    );
+    if (this.plugin.mcp.desktop) this.plugin.mcp.renderToggle(this.section('MCP'));
     const listsEl = this.section('Node lists', 'Files used by group filters and the API.');
     this.listsPanel = new NodeListsPanel(
       {
@@ -186,96 +186,14 @@ class GraphFrontierMcpSettingTab extends PluginSettingTab {
 
   section(title, description) {
     const section = this.containerEl.createDiv({ cls: 'graphfrontier-settings-section' });
-    section.createEl('h3', { text: title });
-    section.createEl('p', {
-      text: description,
-      cls: 'setting-item-description graphfrontier-settings-description',
-    });
-    return section.createDiv();
-  }
-
-  renderMcp(containerEl) {
-    const controller = this.plugin.mcp;
-    if (!controller.desktop) {
-      containerEl.createEl('p', {
-        text: 'The MCP server is desktop-only. The graph remains available on mobile.',
+    new Setting(section).setName(title).setHeading();
+    if (description)
+      section.createEl('p', {
+        text: description,
+        cls: 'setting-item-description graphfrontier-settings-description',
       });
-      return;
-    }
-    const update = async (patch, rotate = false) => {
-      try {
-        await controller.update(patch, rotate);
-      } catch (error) {
-        new Notice(error.message);
-      }
-      this.display();
-    };
-    new Setting(containerEl)
-      .setName('Enable MCP')
-      .addToggle((toggle) =>
-        toggle.setValue(controller.settings.enabled).onChange((enabled) => update({ enabled }))
-      );
-    new Setting(containerEl)
-      .setName('Port')
-      .setDesc('Use a different port for each vault. Changes take effect on Apply.')
-      .addText((text) => {
-        this.portInput = text;
-        text.setValue(String(controller.settings.port));
-      })
-      .addButton((button) =>
-        button
-          .setButtonText('Apply')
-          .onClick(() => update({ port: Number(this.portInput.getValue()) }))
-      );
-    const status =
-      controller.error ||
-      (controller.server
-        ? `Listening on http://127.0.0.1:${controller.settings.port}/mcp`
-        : 'MCP is off.');
-    new Setting(containerEl).setName('Status').setDesc(status);
-    new Setting(containerEl)
-      .setName('Access token')
-      .setDesc(
-        'Stored in the plugin mcp.json, outside layouts. Keep this file private. Regenerating invalidates existing client access.'
-      )
-      .addButton((button) =>
-        button
-          .setButtonText('Copy token')
-          .setDisabled(!controller.settings.token)
-          .onClick(async () => {
-            try {
-              await containerEl.win.navigator.clipboard.writeText(controller.settings.token);
-              new Notice('MCP token copied');
-            } catch {
-              new Notice('Cannot access clipboard');
-            }
-          })
-      )
-      .addButton((button) =>
-        button.setButtonText('Generate new token').onClick(() => update({}, true))
-      );
-    const client = this.client || 'codex';
-    new Setting(containerEl)
-      .setName('Client configuration')
-      .setDesc(
-        'Set GRAPHFRONTIER_MCP_TOKEN in the client environment to the copied token. Merge this example into your config.'
-      )
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOptions({ codex: 'Codex', claude: 'Claude Code', opencode: 'OpenCode 1.x' })
-          .setValue(client)
-          .onChange((value) => {
-            this.client = value;
-            this.display();
-          })
-      );
-    const textarea = containerEl.createEl('textarea', {
-      cls: 'graphfrontier-mcp-config',
-      attr: { 'aria-label': 'MCP client configuration', readonly: '' },
-    });
-    textarea.value = clientConfigs(controller.settings.port)[client];
-    textarea.rows = 5;
+    return section.createDiv();
   }
 }
 
-module.exports = { McpController, GraphFrontierMcpSettingTab, clientConfigs, normalizeMcpSettings };
+export { McpController, GraphFrontierMcpSettingTab };

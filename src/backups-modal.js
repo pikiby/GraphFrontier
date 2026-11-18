@@ -1,5 +1,5 @@
-const { Notice } = require('obsidian');
-const { DataConfirmModal } = require('./data-confirm-modal');
+import { Notice } from 'obsidian';
+import { DataConfirmModal } from './data-confirm-modal.js';
 class BackupsPanel {
   constructor(plugin, containerEl) {
     this.app = plugin.app;
@@ -118,4 +118,4 @@ class BackupsPanel {
     this.contentEl.empty();
   }
 }
-module.exports = { BackupsPanel };
+export { BackupsPanel };

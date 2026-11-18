@@ -1,6 +1,6 @@
-const { GRAPHFRONTIER_VIEW_TYPE } = require('./constants');
-const { GraphFrontierActions } = require('./api-actions');
-const { GraphApiError, fail } = require('./api-errors');
+import { GRAPHFRONTIER_VIEW_TYPE } from './constants.js';
+import { GraphFrontierActions } from './api-actions.js';
+import { GraphApiError, fail } from './api-errors.js';
 
 const MAX_PAGE = 500;
 const MAX_SCAN = 10000;
@@ -225,4 +225,4 @@ class GraphFrontierApi extends GraphFrontierActions {
   }
 }
 
-module.exports = { GraphFrontierApi, GraphApiError, MAX_PAGE };
+export { GraphFrontierApi, GraphApiError, MAX_PAGE };

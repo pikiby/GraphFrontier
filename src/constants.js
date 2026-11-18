@@ -62,6 +62,10 @@ const DEFAULT_DATA = {
     edge_width_scale: 0.34,
     edge_opacity: 1,
     edge_color: null,
+    edge_pattern: 0,
+    arrow_shape: 0,
+    arrow_size: 1,
+    arrow_zoom: true,
     show_arrows: false,
     reverse_arrows: false,
     label_zoom_steps: 10,
@@ -187,7 +191,7 @@ function normalizeAttachmentExtensions(value) {
     : [];
 }
 
-module.exports = {
+export {
   SETTINGS_TABS,
   LEGACY_SETTINGS_TABS,
   normalizeAttachmentExtensions,

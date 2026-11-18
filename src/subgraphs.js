@@ -200,7 +200,7 @@ function normalizeSubgraphSpaces(data, previousFormat) {
   return data;
 }
 
-module.exports = {
+export {
   SUBGRAPH_PREFIX,
   LOCAL_COORDINATES,
   normalizeSubgraphs,

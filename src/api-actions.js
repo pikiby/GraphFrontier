@@ -1,11 +1,12 @@
-const { invalidatePositionHistory } = require('./position-history');
-const { LayoutApi } = require('./api-layouts');
-const { GraphApiError, fail } = require('./api-errors');
-const { validate } = require('./api-tools');
-const { NODE_VISUAL_SETTINGS, getNodeVisualSetting } = require('./node-visuals');
-const { PREFIX } = require('./dark-energy');
-const { SUBGRAPH_PREFIX } = require('./subgraphs');
-const { HOTKEY_COMMANDS, normalizeAttachmentExtensions } = require('./constants');
+import { getNoteTargets, openNoteTarget } from './note-navigation.js';
+import { invalidatePositionHistory } from './position-history.js';
+import { LayoutApi } from './api-layouts.js';
+import { GraphApiError, fail } from './api-errors.js';
+import { validate } from './api-tools.js';
+import { NODE_VISUAL_SETTINGS, getNodeVisualSetting } from './node-visuals.js';
+import { PREFIX } from './dark-energy.js';
+import { SUBGRAPH_PREFIX } from './subgraphs.js';
+import { HOTKEY_COMMANDS, normalizeAttachmentExtensions } from './constants.js';
 const copy = (value) => JSON.parse(JSON.stringify(value));
 
 class GraphFrontierActions extends LayoutApi {
@@ -674,7 +675,7 @@ class GraphFrontierActions extends LayoutApi {
     if (args.action === 'open_path' || args.action === 'open_url') {
       const key = args.action === 'open_path' ? 'path' : 'url',
         value = file && app.metadataCache.getFileCache(file)?.frontmatter?.[key];
-      const { getNoteTargets, openNoteTarget } = require('./note-navigation');
+
       const targets = getNoteTargets(key, value);
       if (!targets.length) fail('UNAVAILABLE', `No valid ${key} property.`);
       if (targets.length > 1)
@@ -687,4 +688,4 @@ class GraphFrontierActions extends LayoutApi {
     return { ok: true, action: args.action };
   }
 }
-module.exports = { GraphFrontierActions };
+export { GraphFrontierActions };

@@ -89,7 +89,7 @@ test('Members submenu removes several notes in a row without closing', async (t)
   alpha.dom.events.click(click);
   beta.dom.events.click(click);
   assert.equal(stopped, 3, 'clicks never reach the menu item, so the menu stays open');
-  assert.equal(alpha.dom.style.display, 'none');
+  assert.equal(alpha.dom.hidden, true);
   assert.equal(members.title, 'Members (0)');
   assert.deepEqual(requests, [
     { action: 'remove', listId: 'problems', nodeIds: ['alpha.md'] },
@@ -109,7 +109,7 @@ test('dragging a list by its handle moves it into the target place', async (t) =
   const { el, requests } = setup(t);
   const [problems, deploys, newRow] = el.children;
   assert.equal(problems.draggable, true);
-  assert.equal(newRow.children[0].style.visibility, 'hidden');
+  assert.equal(newRow.children[0].attributes['data-inactive'], 'true');
   assert.equal(byLabel(el, 'New list name').placeholder, 'New list...');
   const event = { preventDefault() {} };
   deploys.events.dragstart(event);

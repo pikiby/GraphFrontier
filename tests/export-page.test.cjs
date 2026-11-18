@@ -17,7 +17,10 @@ test('the page script is the plugin itself with the browser Obsidian API, withou
   // The plugin's own modules are bundled, not copies of them.
   for (const module of ['main', 'view', 'physics', 'render', 'effects', 'node-visuals'])
     assert.ok(source.viewerScript.includes(`// src/${module}.js\n`), module);
-  assert.match(source.viewerScript, /GraphFrontierView = class extends ItemView/);
+  assert.match(
+    source.viewerScript,
+    /GraphFrontierView = class(?: _GraphFrontierView)? extends ItemView/
+  );
   assert.doesNotMatch(source.viewerScript, /require\("node:http"\)|createServer/);
   assert.doesNotMatch(source.viewerScript, /McpServer|zod/);
   assert.match(source.viewerStyles, /#graphfrontier-root/);
@@ -47,6 +50,7 @@ test('export writes the vault snapshot the plugin reads, with the layout as it i
       : null;
   app.metadataCache.resolvedLinks = { 'alpha.md': { 'beta.md': 1 } };
   app.metadataCache.unresolvedLinks = { 'alpha.md': { missing: 1 } };
+  view.nodes.push(...['beta.md', 'pic.png', 'missing'].map((id) => ({ id, x: 0, y: 0 })));
   view.nodes[0].x = 123;
   view.nodes[0].y = -45;
   await view.commandExportStaticHtml({ exportPath: 'graph.html' });
@@ -87,6 +91,7 @@ test('an export of chosen nodes carries only their files, links and per-node dat
     'alpha.md': { 'beta.md': 1, 'gamma.md': 1 },
     'gamma.md': { 'alpha.md': 1 },
   };
+  view.nodes.push({ id: 'beta.md', x: 1, y: 1 });
   plugin.setPin('gamma.md', { x: 1, y: 2, mode: 'exact' });
   await view.commandExportStaticHtml({ exportPath: 'part.html', nodeIds: ['alpha.md', 'beta.md'] });
   const data = exportedData(contents.get('part.html'));
@@ -140,16 +145,46 @@ test('the page app serves the snapshot: files, metadata, links, note text and pl
   );
 });
 
+function markdownTree(text) {
+  const element = (localName) => ({
+    localName,
+    children: [],
+    appendChild(node) {
+      this.children.push(node);
+    },
+  });
+  let result;
+  renderMarkdown(text, {
+    ownerDocument: {
+      createElement: element,
+      createDocumentFragment: () => element('fragment'),
+      createTextNode: (value) => value,
+    },
+    replaceChildren(fragment) {
+      result = fragment.children;
+    },
+  });
+  const tree = (node) =>
+    typeof node === 'string'
+      ? node
+      : [node.localName + (node.className ? '.' + node.className : ''), ...node.children.map(tree)];
+  return result.map(tree);
+}
+
 test('notes opened on the page render as Markdown with text kept literal', () => {
-  const html = renderMarkdown('# Title\n\n- one\n- two\n\n`code` <b>x</b>\n\n```js\na < b\n```');
-  assert.match(html, /<h1>Title<\/h1>/);
-  assert.match(html, /<ul><li>one<\/li><li>two<\/li><\/ul>/);
-  assert.match(html, /<code>code<\/code> &lt;b&gt;x&lt;\/b&gt;/);
-  assert.match(html, /<pre><code class="language-js">a &lt; b\n<\/code><\/pre>/);
+  assert.deepEqual(
+    markdownTree('# Title\n\n- one\n- two\n\n`code` <b>x</b>\n\n```js\na < b\n```'),
+    [
+      ['h1', 'Title'],
+      ['ul', ['li', 'one'], ['li', 'two']],
+      ['p', '', ['code', 'code'], ' <b>x</b>'],
+      ['pre', ['code.language-js', 'a < b\n']],
+    ]
+  );
 });
 
 test('without a built page script the export says so instead of writing a broken file', async (t) => {
-  const source = loadSource('viewer-source.js');
+  const source = loadSource('viewer-source.js').default;
   const previous = source.viewerScript;
   source.viewerScript = null;
   t.after(() => {
@@ -197,7 +232,7 @@ test('the chosen parts travel with the page; Layouts brings every saved layout',
     modules: { settings: true, layouts: true },
   });
   data = exportedData(contents.get('b.html'));
-  assert.equal(data.pluginFiles[other], '{"settings":{}}');
+  assert.ok(JSON.parse(data.pluginFiles[other]).settings);
   assert.equal(data.exportOptions.saves, false);
   // Layouts and Saves belong to the settings menu: without it they are not included.
   await view.commandExportStaticHtml({
@@ -350,8 +385,8 @@ test('a page saves into the file the user chose; without a click it asks for one
 });
 
 test('notes on the page render without their properties block', () => {
-  assert.equal(renderMarkdown('---\ntags: [a]\n---\n# Note'), '<h1>Note</h1>');
-  assert.equal(renderMarkdown('a\n\n___\n\nb'), '<p>a</p><hr><p>b</p>');
+  assert.deepEqual(markdownTree('---\ntags: [a]\n---\n# Note'), [['h1', 'Note']]);
+  assert.deepEqual(markdownTree('a\n\n___\n\nb'), [['p', 'a'], ['hr'], ['p', 'b']]);
 });
 
 test('choosing a search option shows that option’s values, not the options again', async (t) => {
@@ -378,4 +413,102 @@ test('choosing a search option shows that option’s values, not the options aga
   assert.equal(input.value, 'tag:');
   assert.equal(menus.at(-1).meta.title, 'Values');
   assert.deepEqual(menus.at(-1).items, [{ value: 'tag:db' }]);
+});
+
+test('HTML contains only displayed notes; only Layouts adds notes visible elsewhere', async (t) => {
+  const { view, plugin, app, adapter, files, graph } = fixture(t);
+  view.canvasEl = {};
+  view.ctx = {};
+  const { vault, contents, file } = mobileVault(t, false);
+  Object.assign(app.vault, vault);
+  const ids = ['alpha.md', 'beta.md', 'private.md'];
+  for (const id of ids) file(id, 'BODY:' + id);
+  const read = [];
+  app.vault.cachedRead = (entry) => {
+    read.push(entry.path);
+    return vault.cachedRead(entry);
+  };
+  graph.nodes = ids.map((id) => ({ id, label: id, meta: { path: id } }));
+  view.nodes = graph.nodes.map((node) => ({ ...node, x: 1, y: 1 }));
+  view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
+  view.apiVisibleNodeIds = new Set(['alpha.md']);
+  plugin.setPin('private.md', { x: 1, y: 2, mode: 'exact' });
+  app.metadataCache.resolvedLinks = { 'alpha.md': { 'private.md': 1 } };
+  app.metadataCache.unresolvedLinks = { 'alpha.md': { SECRET_MISSING: 1 } };
+  app.metadataCache.getFileCache = (entry) => ({ frontmatter: { marker: 'META:' + entry.path } });
+  const other = plugin.getLayoutFileRelativePath('other.json');
+  files.set(
+    other,
+    JSON.stringify({
+      settings: {},
+      view_state: { node_filter: ['beta.md'] },
+      saved_positions: { 'private.md': { x: 0, y: 1 } },
+    })
+  );
+  plugin.nodeListStore = { path: 'lists.json', lists: [] };
+  files.set(
+    'lists.json',
+    JSON.stringify({ version: 1, lists: [{ id: 'test', name: 'Test', nodeIds: ids }] })
+  );
+  adapter.list = async () => ({ files: [other], folders: [] });
+  for (const [name, opts, expected] of [
+    ['plain', {}, ['alpha.md']],
+    ['menu', { modules: { settings: true } }, ['alpha.md']],
+    ['explicit', { nodeIds: ids }, ['alpha.md']],
+    ['layers', { modules: { settings: true, layouts: true } }, ['alpha.md', 'beta.md']],
+  ]) {
+    read.length = 0;
+    await view.commandExportStaticHtml(
+      { exportPath: name + '.html', ...opts },
+      { throwOnError: true }
+    );
+    const html = contents.get(name + '.html');
+    assert.doesNotMatch(html, /private\.md|SECRET_MISSING/);
+    const data = exportedData(html);
+    assert.deepEqual(read, expected);
+    assert.deepEqual(Object.keys(data.texts), expected);
+    assert.deepEqual(JSON.parse(data.pluginFiles['lists.json']).lists[0].nodeIds, expected);
+    if (name !== 'layers') assert.doesNotMatch(html, /beta\.md/);
+  }
+  view.apiVisibleNodeIds.clear();
+  view.markGraphVisibilityDirty();
+  await view.commandExportStaticHtml({ exportPath: 'empty.html' }, { throwOnError: true });
+  assert.deepEqual(exportedData(contents.get('empty.html')).files, []);
+});
+
+test('exported DOM helpers hide, show and report detached elements', () => {
+  const { installDomHelpers } = require('../src/viewer/obsidian.js');
+  class Node {}
+  class Element extends Node {}
+  installDomHelpers({
+    Node,
+    Element,
+    Document: class extends Node {},
+    DocumentFragment: class extends Node {},
+  });
+  const classes = new Set();
+  const el = Object.assign(new Element(), {
+    isConnected: true,
+    classList: {
+      add: (c) => classes.add(c),
+      remove: (c) => classes.delete(c),
+      contains: (c) => classes.has(c),
+    },
+    style: {
+      display: 'flex',
+      removeProperty(k) {
+        delete this[k];
+      },
+    },
+  });
+  el.hide();
+  assert.equal(el.isShown(), false);
+  el.show();
+  assert.equal(el.isShown(), true);
+  el.style.display = 'none';
+  assert.equal(el.isShown(), false);
+  el.show();
+  assert.equal(el.isShown(), true);
+  el.isConnected = false;
+  assert.equal(el.isShown(), false);
 });

@@ -1011,6 +1011,12 @@ input[type='color'].graphfrontier-group-color-input:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.graphfrontier-trailing-menu-icon > .menu-item-icon {
+  order: 1;
+  margin-inline-start: auto;
+  margin-inline-end: 0;
+}
+
 .graphfrontier-node-visual-control {
   margin-left: auto;
   padding-left: 8px;
@@ -1427,7 +1433,7 @@ input[type='color'].graphfrontier-group-color-input:focus-visible {
   margin-top: 36px;
   padding-top: 28px;
 }
-.graphfrontier-settings .graphfrontier-settings-section h3 {
+.graphfrontier-settings .graphfrontier-settings-section > .setting-item-heading {
   margin: 0 0 8px;
   font-size: var(--font-ui-medium);
   font-weight: var(--font-semibold);
@@ -1572,5 +1578,129 @@ input[type='color'].graphfrontier-group-color-input.is-shaped::-moz-color-swatch
 
 /* An exported page without the settings menu shows only the graph. */
 .graphfrontier-sidepanel.is-export-hidden {
+  display: none;
+}
+
+.graphfrontier-inline-mcp .setting-item {
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 6px 0;
+}
+.graphfrontier-inline-mcp .setting-item-control {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.graphfrontier-inline-mcp .graphfrontier-mcp-config {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.graphfrontier-style-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px 8px;
+  margin: 3px 0;
+}
+.graphfrontier-style-strip {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.graphfrontier-style-strip[data-style='edge_pattern'] {
+  column-gap: 7px;
+}
+.graphfrontier-style-strip[data-style='edge_pattern'] button.graphfrontier-style-choice {
+  width: 24px;
+}
+.graphfrontier-style-strip[data-style='edge_pattern'] span {
+  width: 22px;
+}
+.graphfrontier-style-strip button.graphfrontier-style-choice {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 20px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+.graphfrontier-style-choice span {
+  width: 15px;
+  height: 14px;
+  background: currentColor;
+  mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+}
+.graphfrontier-style-strip button.graphfrontier-style-choice:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.graphfrontier-style-strip button.graphfrontier-style-choice[aria-pressed='true'] {
+  color: var(--text-accent);
+}
+.graphfrontier-style-strip button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+}
+@media (pointer: coarse) {
+  .graphfrontier-style-strip button.graphfrontier-style-choice {
+    width: 28px;
+    height: 28px;
+  }
+}
+.graphfrontier-node-visual-control.graphfrontier-style-picker-control {
+  width: auto;
+  max-width: 100%;
+}
+.graphfrontier-inline-mcp summary,
+.graphfrontier-mcp-status {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.graphfrontier-inline-mcp summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.graphfrontier-inline-mcp input[type='number'] {
+  width: 6em;
+}
+
+.graphfrontier-inline-mcp .graphfrontier-sidepanel-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 5px;
+}
+.graphfrontier-input-menu .graphfrontier-suggestion-with-action {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.graphfrontier-suggestion-text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+input.graphfrontier-floating-color-input {
+  position: fixed;
+  opacity: 0;
+  z-index: 9999;
+  pointer-events: none;
+}
+textarea.graphfrontier-clipboard-input {
+  position: fixed;
+  top: -10000px;
+  opacity: 0;
+}
+.graphfrontier-group-drag[data-inactive='true'] {
+  visibility: hidden;
+}
+.menu-item.graphfrontier-removed-member[hidden] {
   display: none;
 }

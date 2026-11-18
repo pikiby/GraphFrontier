@@ -18,9 +18,9 @@ function viewerResolvePlugin() {
     name: 'graphfrontier-viewer-resolve',
     setup(build) {
       build.onResolve({ filter: /^obsidian$/ }, () => ({ path: path.join(VIEWER, 'obsidian.js') }));
-      build.onResolve({ filter: /^\.\/(mcp-settings|api|backups)$/ }, (args) => {
+      build.onResolve({ filter: /^\.\/(mcp-settings|api|backups)\.js$/ }, (args) => {
         if (path.resolve(args.resolveDir) !== path.join(ROOT, 'src')) return null;
-        return { path: REPLACED[`${path.basename(args.path)}.js`] };
+        return { path: REPLACED[path.basename(args.path)] };
       });
       build.onResolve({ filter: /^node:|^(fs|path|http|crypto|electron)$/ }, (args) => ({
         path: args.path,
@@ -95,7 +95,7 @@ function viewerSourcePlugin({ production = false } = {}) {
     name: 'graphfrontier-viewer-source',
     setup(build) {
       build.onLoad({ filter: /[\\/]src[\\/]viewer-source\.js$/ }, async () => ({
-        contents: `module.exports = ${JSON.stringify(await buildViewerSource({ production }))};`,
+        contents: `export default ${JSON.stringify(await buildViewerSource({ production }))};`,
         loader: 'js',
         watchDirs: [
           path.join(ROOT, 'src'),
@@ -107,4 +107,4 @@ function viewerSourcePlugin({ production = false } = {}) {
   };
 }
 
-module.exports = { buildViewerScript, buildViewerSource, viewerSourcePlugin };
+module.exports = { buildViewerScript, buildViewerSource, viewerResolvePlugin, viewerSourcePlugin };

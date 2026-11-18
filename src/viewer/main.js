@@ -1,15 +1,15 @@
 // The exported page: the plugin itself (data, view, rendering, physics, menus) running on the
 // vault snapshot taken at export, with the Obsidian API provided by ./obsidian.
-const obsidian = require('obsidian');
+import * as obsidian from 'obsidian';
 
 obsidian.installDomHelpers(window);
 
-const { createApp } = require('./app');
-const { renderMarkdown } = require('./markdown');
-const { createFileSaver } = require('./file-save');
-const { buildPageHtml } = require('../export-html');
-const GraphFrontierPlugin = require('../main');
-const { GRAPHFRONTIER_VIEW_TYPE } = require('../constants');
+import { createApp } from './app.js';
+import { renderMarkdown } from './markdown.js';
+import { createFileSaver } from './file-save.js';
+import { buildPageHtml } from '../export-html.js';
+import GraphFrontierPlugin from '../main.js';
+import { GRAPHFRONTIER_VIEW_TYPE } from '../constants.js';
 
 // Notes open in a panel at the left of the graph, rendered from the exported note text; the
 // settings menu stays on the right.
@@ -29,7 +29,8 @@ function createNoteReader(app) {
     async open(file) {
       title.setText(file.basename || file.path);
       title.setAttr('title', file.path);
-      body.innerHTML = renderMarkdown(await app.vault.cachedRead(file)) || '<p>(empty)</p>';
+      renderMarkdown(await app.vault.cachedRead(file), body);
+      if (!body.firstChild) body.createEl('p', { text: '(empty)' });
       body.scrollTop = 0;
       panel.addClass('is-open');
     },
@@ -55,6 +56,7 @@ async function boot() {
   reader = createNoteReader(app);
   const plugin = new GraphFrontierPlugin(app, snapshot.manifest);
   plugin.exportPage = options;
+  plugin.exportLayoutGraphs = snapshot.layoutGraphs;
   await plugin.onload();
   if (!options.physics && plugin.data.view_state?.settings_tab === 'physics')
     plugin.data.view_state.settings_tab = 'groups';

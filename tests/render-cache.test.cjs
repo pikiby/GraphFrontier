@@ -298,3 +298,23 @@ test('local raw edits, setters, groups and local Load invalidate without leaking
   assert.equal(get().auraNodes.length, 3);
   assert.equal(f.draw(), global);
 });
+
+test('marker tips stay anchored when changing head shape or zoom', () => {
+  const { getLinkHeads } = require('../src/render-metrics');
+  for (let shape = 0; shape < 9; shape++) {
+    const heads = (scale) => getLinkHeads(0, 0, 100, 0, 4, 4, false, true, 1, shape, scale);
+    assert.equal(heads(1).length, 2);
+    assert.equal(heads(1)[0].shape, shape);
+    assert.equal(heads(2)[0].size, heads(1)[0].size * 2);
+    assert.equal(heads(2)[0].x, heads(1)[0].x);
+  }
+});
+
+test('arrow zoom modes name their reference frame and preserve saved fixed-pixel layouts', (t) => {
+  const { plugin } = fixture(t);
+  assert.equal(plugin.normalizeData({}).settings.arrow_zoom, true);
+  assert.equal(
+    plugin.normalizeData({ settings: { arrow_zoom: false } }).settings.arrow_zoom,
+    false
+  );
+});
