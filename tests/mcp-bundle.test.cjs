@@ -1,28 +1,39 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const fs = require('node:fs');
 const Module = require('node:module');
 const vm = require('node:vm');
 const { build } = require('esbuild');
 const { createPluginBuildOptions } = require('../scripts/plugin-build-options.cjs');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+const {
+  StreamableHTTPClientTransport,
+} = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const { fixture, obsidian } = require('./helpers/obsidian.cjs');
 
 let code;
+let inputs;
 test.before(async () => {
   const result = await build({
     ...createPluginBuildOptions({ production: true }),
     write: false,
     sourcemap: false,
+    metafile: true,
     logLevel: 'silent',
   });
   code = result.outputFiles[0].text;
+  inputs = Object.keys(result.metafile.inputs);
 });
 
-test('runtime bundle has no direct filesystem imports', () => {
+test('runtime bundle has no direct filesystem, child_process, or hono imports', () => {
   assert.doesNotMatch(code, /(?:require|nodeRequire)\(["'](?:node:)?fs(?:\/promises)?["']\)/);
+  assert.doesNotMatch(code, /(?:require|nodeRequire)\(["'](?:node:)?child_process["']\)/);
+  assert.equal(
+    inputs.some((name) => /(?:^|\/)node_modules\/(?:@hono\/|hono(?:\/|$))/.test(name)),
+    false,
+    'Hono packages must not enter the bundle'
+  );
+  assert.doesNotMatch(code, /@hono\/node-server/);
 });
 
 function loadBundle(desktop) {
@@ -115,6 +126,7 @@ test('bundled mobile plugin opens without requiring any Node or MCP module', asy
   const f = fixture(t);
   const old = { ...obsidian.Platform };
   obsidian.Platform.isDesktopApp = false;
+  obsidian.Platform.isDesktop = false;
   obsidian.Platform.isMobile = true;
   t.after(() => Object.assign(obsidian.Platform, old));
   const { Plugin, imports } = loadBundle(false);
@@ -127,20 +139,29 @@ test('bundled mobile plugin opens without requiring any Node or MCP module', asy
   plugin.onunload();
 });
 
-test('bundled stdio subprocess negotiates tools without a vault node_modules', async (t) => {
-  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'gf-stdio-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const entry = path.join(dir, 'main.js');
-  fs.writeFileSync(entry, code);
+test('bundled desktop plugin serves all MCP tools over localhost HTTP without codegen', async (t) => {
+  const f = fixture(t);
+  const { Plugin } = loadBundle(true);
+  const plugin = new Plugin(f.app, { id: 'graphfrontier', version: '0.9.5' });
+  plugin.loadData = f.plugin.loadData;
+  plugin.saveData = f.plugin.saveData;
+  t.after(() => plugin.mcp?.stop());
+  await plugin.onload();
+
+  const saved = JSON.parse(f.files.get('.test-config/plugins/graphfrontier/mcp.json'));
+  assert.equal(saved.enabled, true);
+  assert.ok(saved.url.startsWith('http://127.0.0.1:'));
+
   const c = new Client({ name: 'bundle-test', version: '1.0.0' });
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [entry, '--mcp-stdio', 'fixture'],
-    env: { PATH: dir },
-  });
+  const transport = new StreamableHTTPClientTransport(new URL(saved.url));
   t.after(() => c.close());
   await c.connect(transport);
+
   assert.equal((await c.listTools()).tools.length, 35);
-  const result = await c.callTool({ name: 'list_views', arguments: {} });
-  assert.equal(JSON.parse(result.content[0].text).code, 'CLI_UNAVAILABLE');
+  const res = await c.callTool({ name: 'list_views', arguments: {} });
+  assert.equal(res.isError, undefined);
+  assert.equal(res.structuredContent.views.length, 1);
+
+  await plugin.mcp.stop();
+  plugin.onunload();
 });

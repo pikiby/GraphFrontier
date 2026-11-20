@@ -221,7 +221,11 @@ function loadSource(name) {
   const text = fs.readFileSync(filename, 'utf8');
   // Keep ESM dependencies in the same fixture cache and Obsidian stub as CommonJS.
   const code = /^(?:import|export) /m.test(text)
-    ? require('esbuild').transformSync(text, { format: 'cjs', sourcefile: filename }).code
+    ? require('esbuild').transformSync(text, {
+        format: 'cjs',
+        supported: { 'dynamic-import': false },
+        sourcefile: filename,
+      }).code
     : text;
   source._compile(code, filename);
   return source.exports;
@@ -294,6 +298,7 @@ function fixture(t, data = {}) {
   const GraphFrontierPlugin = loadSource('main.js').default;
   const { GraphFrontierView } = loadSource('view.js');
   const plugin = new GraphFrontierPlugin(app);
+  t.after(() => plugin.mcp?.stop());
   // Fixtures describe current-model data unless a test opts into legacy migration.
   if (!('render_model' in data) && !('legacy_render_settings' in data))
     data = { render_model: 2, ...data };

@@ -1613,7 +1613,7 @@ input[type='color'].graphfrontier-group-color-input.is-shaped::-moz-color-swatch
   flex-wrap: nowrap;
 }
 .graphfrontier-style-strip[data-style='edge_pattern'] {
-  column-gap: 7px;
+  gap: 0 7px;
 }
 .graphfrontier-style-strip[data-style='edge_pattern'] button.graphfrontier-style-choice {
   width: 24px;

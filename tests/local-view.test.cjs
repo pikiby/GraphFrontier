@@ -6,6 +6,7 @@ const { LOCAL_GRAPHFRONTIER_VIEW_TYPE, GRAPHFRONTIER_VIEW_TYPE } = require('../s
 
 function setup(t) {
   const f = fixture(t, { settings: { hide_orphans: true, layout_autosave: false } });
+  f.files.set('.test-config/plugins/graphfrontier/mcp.json', '{"enabled":false}\n');
   let active = { path: 'one/a.md', extension: 'md' };
   let saves = 0;
   const localLeaves = [];

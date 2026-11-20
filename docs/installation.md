@@ -23,7 +23,7 @@ touch workflow. Compatibility entries for earlier plugin releases are unchanged.
 
 The graph is available on desktop and mobile. HTML export stays inside
 the vault on both platforms. External-file and folder navigation remain
-desktop features. To connect an MCP client, enable the official desktop Obsidian CLI and make Node.js available to the client. Neither is needed to use the graph itself. See [MCP setup](mcp.md) and [mobile export](usage.md#static-html-export).
+desktop features. Desktop MCP is built directly into the plugin (**Sets → MCP**) and writes its local connection URL to `mcp.json` — no Obsidian CLI or separate Node.js installation is needed to use the graph or connect an agent. See [MCP setup](mcp.md) and [mobile export](usage.md#static-html-export).
 
 ## Manual Installation
 

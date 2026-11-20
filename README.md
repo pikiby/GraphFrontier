@@ -23,13 +23,13 @@ Use it to:
 **Get started:** install GraphFrontier from Obsidian's Community plugins, then run
 **Open GraphFrontier**. [Installation and updates](docs/installation.md).
 
-## New in 0.9.4
+## New in 0.9.5
 
 - **Share one view or several layouts.** HTML exports include notes visible in the current graph. Enable **Layouts** to include the notes visible in the other exported layouts too. Files exported with earlier versions do not change; re-export them before sharing.
 - **Distinguish connections at a glance.** Use solid, dashed or dotted links, choose from eight arrow shapes, and adjust their size. Arrows can scale with the nodes or keep a fixed size on screen.
-- **Connect an agent without a port or token.** On desktop, the MCP connector uses the official Obsidian CLI. Switch access on or off in **Sets → MCP**. Existing HTTP clients need the [new connection instructions](docs/mcp.md#connect-a-client).
+- **Connect an agent without manual port or token setup.** On desktop, the built-in localhost MCP server is on by default in **Sets → MCP** and writes its local connection URL to `.obsidian/plugins/graphfrontier/mcp.json` — no Obsidian CLI or separate Node.js install needed. See [connection instructions](docs/mcp.md#connect-a-client).
 
-[Read the 0.9.4 release notes](docs/releases/0.9.4.md).
+[Read the 0.9.5 release notes](docs/releases/0.9.5.md) · [0.9.4 notes](docs/releases/0.9.4.md).
 
 ## Local GraphFrontier
 
@@ -254,13 +254,13 @@ An MCP-capable agent can:
 
 ### Connect A Client
 
-1. Enable the official CLI in desktop Obsidian. GraphFrontier MCP is on by default.
-2. Ask your agent to register the [local stdio connector](docs/mcp.md#connect-a-client) for this vault. No port or token is needed.
+1. Open the target vault in desktop Obsidian (GraphFrontier MCP is on by default in **Sets → MCP**).
+2. Ask your agent to connect using the local URL written to `.obsidian/plugins/graphfrontier/mcp.json` ([connection instructions](docs/mcp.md#connect-a-client)). No Obsidian CLI, separate Node.js install, or manual port/token entry is needed.
 3. Open a graph and ask the agent to identify the vault before making changes.
 
 ### Safety And Current Limits
 
-MCP is desktop-only. The client starts a local subprocess; the plugin opens no port.
+MCP is desktop-only and binds strictly to `127.0.0.1` with a generated per-vault secret URL in `mcp.json`.
 Only connect trusted clients: they can change layouts and export note content,
 and data returned to the client may be sent to its AI provider. GraphFrontier
 includes no built-in model or AI subscription. See the [full tool and API

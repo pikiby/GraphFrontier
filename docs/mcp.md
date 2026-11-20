@@ -2,15 +2,15 @@
 
 ## Connect a client
 
-On desktop, enable the official Obsidian CLI and open the target vault. GraphFrontier MCP is on by default; an existing OFF preference stays off. Toggle it in **Sets → MCP** or the plugin settings. There is no network listener, port, or access token.
+On desktop, GraphFrontier runs a built-in localhost Streamable HTTP MCP server (`127.0.0.1`), enabled by default. Toggle it in **Sets → MCP** or the plugin settings; an existing OFF preference stays off. No separate Node.js installation, Obsidian CLI, or manual port/token setup is required.
 
-Ask your agent to register a local stdio MCP server. It needs Node.js and the `obsidian` executable on PATH. Use the installed plugin in the target vault, not a copy. For Codex:
+While enabled, the plugin writes its ready-to-use local connection URL (`http://127.0.0.1:<port>/mcp/<secret>`) into `<vault>/.obsidian/plugins/graphfrontier/mcp.json` (adjust `.obsidian` if your config folder differs). Ask your agent to connect using `mcp.json`, or register it directly. For Codex:
 
 ```sh
-codex mcp add graphfrontier -- node "/absolute/path/to/vault/.obsidian/plugins/graphfrontier/main.js" --mcp-stdio "vault name or ID"
+codex mcp add graphfrontier --url "<url from .obsidian/plugins/graphfrontier/mcp.json>"
 ```
 
-Adjust the config directory if it differs from .obsidian. Reconnect the client, then ask it to call **list_views**. An empty list means no graph view is open.
+Keep `mcp.json` private; never commit or share it. Reconnect the client, then ask it to call **list_views**. An empty list means no graph view is open.
 
 ## Tools and Internal API
 
