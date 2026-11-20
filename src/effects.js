@@ -8,11 +8,18 @@ import { beginPositionAction, finishPositionAction } from './position-history.js
 // places; every other node starts its life again next to an already born neighbor. Nodes without a creation
 // time (gravity nodes, subgraphs, missing files) are born first.
 function startGrow(view) {
-  if (view.growEffect) return;
+  if (view.growEffect) return false;
+  if (view.pulseEffect) togglePulse(view);
+  const baseVisible = view.getRuleAndSearchVisibleNodeIds?.() ?? null;
+  const candidates =
+    baseVisible instanceof Set
+      ? view.nodes.filter((node) => baseVisible.has(node.id))
+      : [...view.nodes];
+  if (!candidates.length) return false;
   const seconds = view.plugin.clampNumber(view.plugin.getSettings().grow_duration, 1, 60, 8);
   const durationMs = seconds * 1000;
   const created = (node) => view.app.vault.getAbstractFileByPath(node.id)?.stat?.ctime ?? -Infinity;
-  const order = [...view.nodes].sort((a, b) => created(a) - created(b));
+  const order = [...candidates].sort((a, b) => created(a) - created(b));
   const step = order.length > 1 ? durationMs / (order.length - 1) : 0;
   view.growEffect = {
     startMs: Date.now(),
@@ -23,11 +30,29 @@ function startGrow(view) {
     visible: null,
     history: beginPositionAction(
       view,
-      view.nodes.map((node) => node.id),
+      order.map((node) => node.id),
       true
     ),
   };
+  view.syncGrowButton?.();
+  view.syncHistoryButtons?.();
   stepGrow(view);
+  view.requestFrame?.();
+  return true;
+}
+
+function stopGrow(view, { cancel = false } = {}) {
+  const grow = view.growEffect;
+  if (!grow) return false;
+  view.growEffect = null;
+  finishPositionAction(view, grow.history, cancel);
+  view.syncGrowButton?.();
+  view.syncHistoryButtons?.();
+  if (!cancel) {
+    view.markNodeSpatialIndexDirty?.();
+    view.kickLayoutSearch?.();
+  }
+  return true;
 }
 
 function isGrowActive(view) {
@@ -56,7 +81,7 @@ function stepGrow(view, nowMs = Date.now()) {
   for (const node of view.nodes) {
     if (grow.born.has(node.id)) continue;
     const at = grow.revealAtMs.get(node.id);
-    if (at !== undefined && at > elapsed) continue;
+    if (at === undefined || at > elapsed) continue;
     // Gravity nodes stand outside physics, so like pinned nodes they keep their place.
     const keepsPlace =
       node.meta?.darkEnergy ||
@@ -72,23 +97,25 @@ function stepGrow(view, nowMs = Date.now()) {
     view.kickLayoutSearch();
   }
   if (elapsed < grow.durationMs) return;
-  view.growEffect = null;
-  finishPositionAction(view, grow.history);
-  view.kickLayoutSearch();
+  stopGrow(view);
 }
 
 // Nodes not born yet are outside drawing and physics, like filtered nodes.
 function growVisibleNodeIds(view, visible) {
   const grow = view.growEffect;
   if (!grow) return visible;
-  if (grow.visible?.revision !== grow.revision || grow.visible.source !== visible)
+  if (grow.visible?.revision !== grow.revision || grow.visible.source !== visible) {
+    const allow = (id) => !grow.revealAtMs.has(id) || grow.born.has(id);
     grow.visible = {
       revision: grow.revision,
       source: visible,
       ids: new Set(
-        visible instanceof Set ? [...visible].filter((id) => grow.born.has(id)) : [...grow.born]
+        visible instanceof Set
+          ? [...visible].filter(allow)
+          : view.nodes.map((node) => node.id).filter(allow)
       ),
     };
+  }
   return grow.visible.ids;
 }
 
@@ -164,8 +191,11 @@ function togglePulse(view) {
   if (view.pulseEffect) {
     finishPositionAction(view, view.pulseEffect.history);
     view.pulseEffect = null;
+    view.syncPulseButton?.();
+    view.syncHistoryButtons?.();
     return false;
   }
+  if (view.growEffect) stopGrow(view);
   view.pulseEffect = {
     history: beginPositionAction(
       view,
@@ -174,6 +204,8 @@ function togglePulse(view) {
     ),
     waves: [],
   };
+  view.syncPulseButton?.();
+  view.syncHistoryButtons?.();
   return true;
 }
 
@@ -244,6 +276,7 @@ export {
   pulseFront,
   pulseForce,
   startGrow,
+  stopGrow,
   stepGrow,
   isGrowActive,
   growVisibleNodeIds,

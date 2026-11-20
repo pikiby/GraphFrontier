@@ -27,11 +27,13 @@ import { NodeListsTab } from './node-lists-tab.js';
 import { LayoutList } from './layout-list.js';
 import {
   startGrow,
+  stopGrow,
   stepGrow,
   isGrowActive,
   growVisibleNodeIds,
   startWave,
   isWaveActive,
+  togglePulse,
   firePulse,
   activePulseWaves,
 } from './effects.js';
@@ -381,6 +383,8 @@ class GraphFrontierView extends ItemView {
     this.cancelScheduledWork();
     finishPositionAction(this, this.positionDragAction);
     this.positionDragAction = null;
+    stopGrow(this);
+    if (this.pulseEffect) togglePulse(this);
     if (
       this.plugin.isLocalGraphFrontier ||
       this.subgraphScope ||
@@ -808,11 +812,13 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(growGroup, 'Grow duration', 'grow_duration', 1, 60, 1, 'render', {
       hint: 'Seconds Grow takes to give birth to every node',
     });
-    const growButton = growGroup
+    this.growButtonEl = growGroup
       .createDiv({ cls: 'graphfrontier-sidepanel-actions-row' })
       .createEl('button', { cls: 'graphfrontier-sidepanel-save', text: 'Grow' });
-    growButton.setAttr('title', 'Replay the graph being built, in note creation order');
-    this.registerDomEvent(growButton, 'click', () => startGrow(this));
+    this.registerDomEvent(this.growButtonEl, 'click', () =>
+      isGrowActive(this) ? stopGrow(this) : startGrow(this)
+    );
+    this.syncGrowButton();
 
     const waveGroup = effectSection('effect-wave', 'Wave');
     this.addSideSlider(waveGroup, 'Wave depth', 'wave_depth', 1, 10, 1, 'render', {
@@ -6708,6 +6714,19 @@ class GraphFrontierView extends ItemView {
     this.waveHintEl.style.display = armed ? '' : 'none';
   }
 
+  syncGrowButton() {
+    if (!this.growButtonEl) return;
+    const on = isGrowActive(this);
+    this.growButtonEl.setText(on ? 'Stop' : 'Grow');
+    this.growButtonEl.toggleClass('is-armed', on);
+    this.growButtonEl.setAttr(
+      'title',
+      on
+        ? 'Stop replaying and show every visible node'
+        : 'Replay the graph being built, in note creation order'
+    );
+  }
+
   syncPulseButton() {
     if (!this.pulseButtonEl) return;
     const on = !!this.pulseEffect;
@@ -6753,6 +6772,18 @@ class GraphFrontierView extends ItemView {
 
   // The same history as Ctrl+Z / Ctrl+Y: node moves and pins.
   replayHistory(redo = false) {
+    if (!redo && isGrowActive(this)) {
+      const beforeDepth = historyFor(this).undo.length;
+      stopGrow(this);
+      if (historyFor(this).undo.length > beforeDepth) {
+        const result = replayPositionAction(this, false);
+        this.syncHistoryButtons();
+        return result;
+      }
+      this.render();
+      this.syncHistoryButtons();
+      return 'applied';
+    }
     const result = replayPositionAction(this, redo);
     if (result === 'conflict')
       new Notice('Graph changed outside this action. Undo history cleared.');
@@ -6769,7 +6800,8 @@ class GraphFrontierView extends ItemView {
       [this.historyButtons[0], history.undo, 'Undo move or pin', key + '+Z'],
       [this.historyButtons[1], history.redo, 'Redo move or pin', key + '+Y'],
     ]) {
-      button.disabled = steps.length === 0;
+      button.disabled =
+        steps.length === 0 && !(button === this.historyButtons[0] && isGrowActive(this));
       button.setAttribute('aria-label', label);
       button.setAttribute('title', label + ' (' + shortcut + ')');
     }
@@ -7098,6 +7130,12 @@ class GraphFrontierView extends ItemView {
     const views = this.getScopeLeaves().map((leaf) => leaf.view);
     if (!views.includes(this)) views.push(this);
     for (const view of views) {
+      stopGrow(view, { cancel: true });
+      if (view.pulseEffect) {
+        finishPositionAction(view, view.pulseEffect.history, true);
+        view.pulseEffect = null;
+        view.syncPulseButton?.();
+      }
       if (options.resetRuntime) {
         // A backup replaces the live state, including nodes without saved positions.
         view.nodeById = new Map();

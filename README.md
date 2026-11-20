@@ -23,13 +23,14 @@ Use it to:
 **Get started:** install GraphFrontier from Obsidian's Community plugins, then run
 **Open GraphFrontier**. [Installation and updates](docs/installation.md).
 
-## New in 0.9.5
+## New in 0.9.6
 
 - **Share one view or several layouts.** HTML exports include notes visible in the current graph. Enable **Layouts** to include the notes visible in the other exported layouts too. Files exported with earlier versions do not change; re-export them before sharing.
 - **Distinguish connections at a glance.** Use solid, dashed or dotted links, choose from eight arrow shapes, and adjust their size. Arrows can scale with the nodes or keep a fixed size on screen.
 - **Connect an agent without manual port or token setup.** On desktop, the built-in localhost MCP server is on by default in **Sets → MCP** and writes its local connection URL to `.obsidian/plugins/graphfrontier/mcp.json` — no Obsidian CLI or separate Node.js install needed. See [connection instructions](docs/mcp.md#connect-a-client).
+- **Reliable Grow on filtered graphs (0.9.6).** **Grow** now schedules only visible notes, skips hidden ones cleanly, and lets you click **Stop** or **Undo** mid-run.
 
-[Read the 0.9.5 release notes](docs/releases/0.9.5.md) · [0.9.4 notes](docs/releases/0.9.4.md).
+[Read the 0.9.6 release notes](docs/releases/0.9.6.md) · [0.9.5](docs/releases/0.9.5.md) · [0.9.4](docs/releases/0.9.4.md).
 
 ## Local GraphFrontier
 

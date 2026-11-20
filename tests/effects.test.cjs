@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { fixture, loadSource } = require('./helpers/obsidian.cjs');
-const { startGrow, stepGrow, isGrowActive } = loadSource('effects.js');
+const { startGrow, stopGrow, stepGrow, isGrowActive } = loadSource('effects.js');
 const { historyFor, replayPositionAction } = loadSource('position-history.js');
 
 test('Grow gives birth to nodes in creation order with physics and is one undo step', (t) => {
@@ -232,4 +232,121 @@ test('Pulse sends a shockwave from a tap on empty space that pushes nodes out or
   onNode.getNodeAtScreen = () => node(onNode, 'hit');
   onNode.onMouseDown({ button: 0, clientX: 650, clientY: 500 });
   assert.equal(activePulseWaves(onNode).length, 0, 'a press on a node does not send a wave');
+});
+
+test('Grow schedules only visible nodes when filters hide notes and leaves hidden coordinates untouched', (t) => {
+  const { view, plugin, app } = fixture(t, {
+    settings: { grow_duration: 3 },
+    whitelist: [{ id: 'keep', query: 'tag:keep', enabled: true }],
+  });
+  const created = {
+    'v1.md': 100,
+    'v2.md': 200,
+    'h1.md': 300,
+    'h2.md': 400,
+    'h3.md': 500,
+    'v3.md': 600,
+  };
+  view.nodes = Object.keys(created).map((id, index) => ({
+    id,
+    x: 400 + index * 50,
+    y: 250 + index * 10,
+    vx: 0,
+    vy: 0,
+    meta: id.startsWith('v') ? { tags: ['keep'] } : { tags: ['other'] },
+  }));
+  view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
+  view.neighborsById = new Map(view.nodes.map((node) => [node.id, new Set()]));
+  app.vault.getAbstractFileByPath = (path) =>
+    created[path] ? { path, stat: { ctime: created[path] } } : null;
+  view.markQueryRuleVisibilityDirty();
+
+  assert.equal(startGrow(view), true);
+  assert.equal(view.growEffect.revealAtMs.size, 3);
+  assert.equal(view.growEffect.revealAtMs.get('v1.md'), 0);
+  assert.equal(view.growEffect.revealAtMs.get('v2.md'), 1500);
+  assert.equal(view.growEffect.revealAtMs.get('v3.md'), 3000);
+
+  const start = view.growEffect.startMs;
+  stepGrow(view, start + 1500);
+  assert.deepEqual([...view.getFilterVisibleNodeIds()].sort(), ['v1.md', 'v2.md']);
+
+  // Relaxing the filter mid-Grow still shows newly revealed unscheduled nodes immediately.
+  plugin.data.whitelist = [];
+  view.markQueryRuleVisibilityDirty();
+  assert.deepEqual([...view.getFilterVisibleNodeIds()].sort(), [
+    'h1.md',
+    'h2.md',
+    'h3.md',
+    'v1.md',
+    'v2.md',
+  ]);
+
+  stepGrow(view, start + 3000);
+  assert.equal(isGrowActive(view), false);
+  for (const [id, x, y] of [
+    ['h1.md', 500, 270],
+    ['h2.md', 550, 280],
+    ['h3.md', 600, 290],
+  ]) {
+    const hidden = view.nodeById.get(id);
+    assert.deepEqual([hidden.x, hidden.y], [x, y]);
+  }
+});
+
+test('Grow can be stopped, restarted, undone mid-run, and cleared by loading a layout', async (t) => {
+  const { element } = require('./helpers/obsidian.cjs');
+  const { view, app, putLayout } = fixture(t, { settings: { grow_duration: 4 } });
+  const created = { 'a.md': 100, 'b.md': 200, 'c.md': 300 };
+  view.nodes = [
+    { id: 'a.md', x: 300, y: 100, vx: 0, vy: 0, meta: {} },
+    { id: 'b.md', x: 400, y: 100, vx: 0, vy: 0, meta: {} },
+    { id: 'c.md', x: 500, y: 100, vx: 0, vy: 0, meta: {} },
+  ];
+  view.nodeById = new Map(view.nodes.map((node) => [node.id, node]));
+  view.neighborsById = new Map(view.nodes.map((node) => [node.id, new Set()]));
+  app.vault.getAbstractFileByPath = (path) =>
+    created[path] ? { path, stat: { ctime: created[path] } } : null;
+  view.growButtonEl = element();
+  view.historyButtons = [element(), element()];
+  view.syncGrowButton();
+  view.syncHistoryButtons();
+  assert.equal(view.growButtonEl.text, 'Grow');
+  assert.equal(view.historyButtons[0].disabled, true);
+
+  const before = view.nodes.map((node) => [node.id, node.x, node.y]);
+  assert.equal(startGrow(view), true);
+  assert.equal(view.growButtonEl.text, 'Stop');
+  assert.equal(view.historyButtons[0].disabled, false);
+
+  // Stop mid-run -> all nodes reappear and Grow can be restarted right away.
+  assert.equal(stopGrow(view), true);
+  assert.equal(isGrowActive(view), false);
+  assert.equal(view.growButtonEl.text, 'Grow');
+  assert.equal(view.getFilterVisibleNodeIds(), null);
+  assert.equal(view.replayHistory(false), 'applied');
+  assert.deepEqual(
+    view.nodes.map((node) => [node.id, node.x, node.y]),
+    before
+  );
+
+  // Undo while Grow is still active stops Grow and restores pre-Grow coordinates in one step.
+  assert.equal(startGrow(view), true);
+  stepGrow(view, view.growEffect.startMs + 2000);
+  assert.equal(isGrowActive(view), true);
+  assert.equal(view.replayHistory(false), 'applied');
+  assert.equal(isGrowActive(view), false);
+  assert.equal(view.growButtonEl.text, 'Grow');
+  assert.deepEqual(
+    view.nodes.map((node) => [node.id, node.x, node.y]),
+    before
+  );
+
+  // Loading a saved layout cancels active Grow cleanly.
+  putLayout({ saved_positions: {} });
+  assert.equal(startGrow(view), true);
+  assert.equal(isGrowActive(view), true);
+  await view.loadSavedLayout({ silent: true });
+  assert.equal(isGrowActive(view), false);
+  assert.equal(view.growButtonEl.text, 'Grow');
 });

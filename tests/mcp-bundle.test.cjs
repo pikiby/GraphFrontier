@@ -142,7 +142,7 @@ test('bundled mobile plugin opens without requiring any Node or MCP module', asy
 test('bundled desktop plugin serves all MCP tools over localhost HTTP without codegen', async (t) => {
   const f = fixture(t);
   const { Plugin } = loadBundle(true);
-  const plugin = new Plugin(f.app, { id: 'graphfrontier', version: '0.9.5' });
+  const plugin = new Plugin(f.app, { id: 'graphfrontier', version: '0.9.6' });
   plugin.loadData = f.plugin.loadData;
   plugin.saveData = f.plugin.saveData;
   t.after(() => plugin.mcp?.stop());
