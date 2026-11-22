@@ -350,7 +350,9 @@ test('resizeCanvas enforces fractional-DPR floor >= 1 while keeping physical edg
 });
 
 test('node_border_width draws auto-contrast inset node borders scaled cleanly by radius', (t) => {
-  assert.equal(loadSource('constants.js').DEFAULT_DATA.settings.node_border_width, 0);
+  const { DEFAULT_DATA } = loadSource('constants.js');
+  assert.equal(DEFAULT_DATA.settings.node_border_width, 0.2);
+  assert.equal(DEFAULT_DATA.settings.edge_width_scale, 0.43);
   const { getNodeBorderColor } = loadSource('render-metrics.js');
   const darkBlueBorder = getNodeBorderColor('#4c78d8', {
     colorScheme: 'dark',

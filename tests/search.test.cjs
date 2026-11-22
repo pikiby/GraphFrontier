@@ -174,8 +174,8 @@ test('Find selects only matches; hover highlights neighbors and links in both mo
     render.drawEdges(view, ctx);
     const hovered = links.at(-1);
     assert.equal(hovered.alpha, 1, `${mode}: hovered node's link`);
-    // Highlight grows relative to the base width: 0.34 + 2 physical pixels.
-    assert.equal(hovered.width, 1.34);
+    // Highlight grows relative to the base width: 0.43 + 2 physical pixels.
+    assert.equal(hovered.width, 1.43);
     assert(links.slice(0, -1).every((link) => link.alpha < 1));
   }
 });
