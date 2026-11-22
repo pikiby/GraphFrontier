@@ -103,7 +103,7 @@ test('Find selects only matches; hover highlights neighbors and links in both mo
         alphas.push(this.globalAlpha);
       },
       stroke() {
-        links.push({ alpha: this.globalAlpha, width: this.lineWidth });
+        links.push({ alpha: this.globalAlpha, width: this.lineWidth, color: this.strokeStyle });
       },
       measureText() {
         return { width: 0 };
@@ -124,7 +124,11 @@ test('Find selects only matches; hover highlights neighbors and links in both mo
   assert(alphas[3] < 1);
   assert(alphas[4] < 1);
   assert(alphas[5] < 1);
-  assert.equal(links.length, 2, 'only found files have selection outlines');
+  assert.equal(
+    links.filter((s) => s.color === view.canvasTheme.selection).length,
+    2,
+    'only found files have selection outlines'
+  );
   links.length = 0;
   render.drawEdges(view, ctx);
   assert(
@@ -139,7 +143,11 @@ test('Find selects only matches; hover highlights neighbors and links in both mo
   assert.equal(alphas[4], 1, 'toggle highlights second match neighbor');
   assert(alphas[2] < 1, 'hidden match does not highlight its neighbor');
   assert(alphas[5] < 1, 'connections do not extend beyond direct neighbors');
-  assert.equal(links.length, 2, 'only matching files retain selection outlines');
+  assert.equal(
+    links.filter((s) => s.color === view.canvasTheme.selection).length,
+    2,
+    'only matching files retain selection outlines'
+  );
   links.length = 0;
   render.drawEdges(view, ctx);
   // Edges are stroked once per appearance, highlighted ones last.

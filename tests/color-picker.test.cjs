@@ -235,11 +235,13 @@ function attachmentPopoverFixture() {
     },
   });
   GraphFrontierView.prototype.buildAttachmentFileTypesControl.call(view, parent);
-  const row = parent.children[0];
+  const header = parent.children[0];
+  const row = parent.children[1];
   const wrap = row.children[0];
   const [trigger, clear] = wrap.children;
   return {
     view,
+    header,
     row,
     wrap,
     trigger,
@@ -272,18 +274,20 @@ function attachmentPopoverFixture() {
 
 test('attachment types reuse the shared full-width search and keep selection open', () => {
   const f = attachmentPopoverFixture();
+  assert.equal(f.header.cls, 'graphfrontier-file-types-header');
+  assert.equal(f.header.children[0].text, 'Filter by file type');
   assert.equal(f.row.cls, 'graphfrontier-find-row');
-  assert.equal(f.row.children.length, 1, 'no separate label');
+  assert.equal(f.row.children.length, 1, 'label sits above the input row');
   assert.match(f.wrap.cls, /graphfrontier-search-input-wrap graphfrontier-input-anchor/);
   assert.equal(f.trigger.tag, 'input');
   assert.equal(f.trigger.type, 'text');
-  assert.equal(f.trigger.placeholder, 'File types');
+  assert.equal(f.trigger.placeholder, 'Filter file types...');
   assert.equal(f.trigger.cls, 'graphfrontier-find-input');
-  assert.equal(f.trigger.value, 'File type: All file types');
+  assert.equal(f.trigger.value, 'All file types');
   assert.equal(f.clear.cls, 'graphfrontier-search-inline-clear');
   assert.equal(f.enumerations, 1);
   const popup = f.open();
-  assert.equal(f.trigger.value, 'File type: ');
+  assert.equal(f.trigger.value, '');
   assert.equal(popup.className, 'graphfrontier-input-menu');
   const item = popup.children[1].children[0];
   assert.equal(item.className, 'graphfrontier-input-menu-item');
@@ -300,13 +304,13 @@ test('attachment types reuse the shared full-width search and keep selection ope
   assert.deepEqual(f.view.plugin.data.settings.excluded_attachment_extensions, ['png']);
   assert.equal(checkbox.checked, false);
   assert.equal(f.refreshes, 1);
-  assert.equal(f.trigger.value, 'File type: .pdf, No extension');
+  assert.equal(f.trigger.value, '.pdf, No extension');
   assert.equal(popup.isConnected, true);
   assert.equal(popup.children[1].children[0].children[0], checkbox, 'keep menu DOM intact');
   assert.equal(f.trigger.attributes['aria-expanded'], 'true');
   assert.equal(f.trigger.focused, undefined, 'no graph or trigger autofocus on construction/open');
   f.trigger.fire('beforeinput', { inputType: 'insertText', data: 'p', preventDefault() {} });
-  assert.equal(f.trigger.value, 'File type: ', 'next typing replaces the summary, not the prefix');
+  assert.equal(f.trigger.value, '', 'next typing replaces the summary cleanly');
   f.trigger.value += 'p';
   f.trigger.fire('input');
   assert.equal(f.view.inputSuggestMenu.selectableEntries.length, 4);
@@ -327,7 +331,7 @@ test('attachment search narrows All/None inventory, clear preserves selections, 
   assert.deepEqual(f.view.plugin.data.settings.excluded_attachment_extensions, ['absent']);
   f.select('none');
   f.clear.fire('click', { preventDefault() {}, stopPropagation() {} });
-  assert.equal(search.value, 'File type: ');
+  assert.equal(search.value, '');
   assert.deepEqual(f.view.plugin.data.settings.excluded_attachment_extensions, ['absent', 'png']);
   f.select('none');
   assert.deepEqual(f.view.plugin.data.settings.excluded_attachment_extensions, [
@@ -370,7 +374,7 @@ test('shared attachment menu closes outside/on Escape/blur and removes listeners
     else f.trigger.fire('blur');
     assert.equal(popup.isConnected, false);
     assert.equal(f.trigger.attributes['aria-expanded'], 'false');
-    assert.equal(f.trigger.value, 'File type: All file types');
+    assert.equal(f.trigger.value, 'All file types');
     assert.equal(f.doc.body.children.length, 0, 'closing never reopens');
     for (const target of [f.doc, f.win, f.win.visualViewport]) {
       for (const handlers of target.events.values()) assert.equal(handlers.size, 0);
@@ -402,7 +406,7 @@ test('attachment lifecycle and compact dimensions use opt-in shared styles', () 
   );
   assert.match(
     source,
-    /if \(!this\.plugin\.data\.settings\.hide_attachments\) \{\s*this\.buildAttachmentFileTypesControl/
+    /const detailsEl = otherGroup\.createDiv\(\{ cls: 'graphfrontier-other-files-details' \}\);[\s\S]*?this\.buildAttachmentFileTypesControl\(detailsEl\);/
   );
   assert.doesNotMatch(source, /graphfrontier-attachment-types-hint/);
   assert.match(css, /\.graphfrontier-input-menu\s*\{[^}]*overflow-y: auto;/);
@@ -427,33 +431,32 @@ test('attachment lifecycle and compact dimensions use opt-in shared styles', () 
   assert.match(css, /\.graphfrontier-input-menu-controls\s*\{[^}]*flex: 0 0 auto;/);
 });
 
-test('file type prefix protects deletion and replacement without blocking suffix editing', () => {
+test('file type input clears summary on deletion without blocking free text editing', () => {
   const f = attachmentPopoverFixture();
   f.open();
-  const prefix = 'File type: ';
-  for (const [start, end, inputType, blocked] of [
-    [0, 0, 'deleteContentForward', true],
-    [0, prefix.length, 'deleteContentBackward', true],
-    [prefix.length, prefix.length, 'deleteContentBackward', true],
-    [prefix.length, prefix.length, 'deleteContentForward', false],
-    [0, prefix.length + 3, 'deleteByCut', false],
-    [0, prefix.length + 3, 'insertFromPaste', false],
-  ]) {
-    f.trigger.value = prefix + 'png';
-    f.trigger.setSelectionRange(start, end);
-    let prevented = false;
-    f.trigger.fire('beforeinput', {
-      inputType,
-      preventDefault() {
-        prevented = true;
-      },
-    });
-    assert.equal(prevented, blocked, inputType);
-    if (!blocked && start < prefix.length) {
-      assert.equal(f.trigger.selectionStart, prefix.length);
-      assert.equal(f.trigger.selectionEnd, end);
-    }
-  }
+  const checkbox = f.doc.body.children.at(-1).children[1].children[0].children[0];
+  checkbox.checked = false;
+  checkbox.fire('change');
+  assert.equal(f.trigger.value, '.pdf, No extension');
+  let prevented = false;
+  f.trigger.fire('beforeinput', {
+    inputType: 'deleteContentBackward',
+    preventDefault() {
+      prevented = true;
+    },
+  });
+  assert.equal(prevented, true, 'first deletion clears summary rather than eating query');
+  assert.equal(f.trigger.value, '');
+  let editPrevented = false;
+  f.trigger.value = 'png';
+  f.trigger.setSelectionRange(3, 3);
+  f.trigger.fire('beforeinput', {
+    inputType: 'deleteContentBackward',
+    preventDefault() {
+      editPrevented = true;
+    },
+  });
+  assert.equal(editPrevented, false);
 });
 
 test('multi menu fits available space on either side without crossing the input', () => {
@@ -520,7 +523,7 @@ test('attachment inline focus/click/input open one menu and typing retains focus
       labels
     );
     assert.equal(f.doc.activeElement, f.trigger);
-    assert.equal(f.trigger.value, 'File type: ' + query);
+    assert.equal(f.trigger.value, query);
     assert.equal(f.enumerations, 2, 'typing does not enumerate the vault again');
   }
   f.view.closeInputSuggestMenu();
@@ -540,7 +543,7 @@ test('attachment keyboard selection stays open and Escape shows selected summary
   assert.equal(f.trigger.attributes['aria-expanded'], 'false');
   assert.equal(popup.isConnected, false);
   assert.equal(f.doc.body.children.length, 0, 'closing does not reopen');
-  assert.equal(f.trigger.value, 'File type: .pdf, No extension');
+  assert.equal(f.trigger.value, '.pdf, No extension');
   f.trigger.value = 'pdf';
   f.trigger.fire('input');
   const reopened = f.doc.body.children.at(-1);
@@ -558,12 +561,12 @@ test('attachment inline Escape replaces query with summary and click starts an e
   f.trigger.fire('input');
   f.trigger.fire('keydown', { key: 'Escape', preventDefault() {}, stopPropagation() {} });
   assert.equal(f.trigger.attributes['aria-expanded'], 'false');
-  assert.equal(f.trigger.value, 'File type: All file types');
+  assert.equal(f.trigger.value, 'All file types');
   assert.equal(f.enumerations, 2);
   const popup = f.open();
   assert.equal(popup.children[0].children.length, 2, 'pinned bulk buttons');
   assert.equal(popup.children[1].children.length, 3, 'separate format list');
-  assert.equal(f.trigger.value, 'File type: ');
+  assert.equal(f.trigger.value, '');
   assert.equal(f.enumerations, 3);
   f.view.closeInputSuggestMenu();
 });

@@ -1,6 +1,6 @@
 import { TWO_PI, DEFAULT_DATA } from './constants.js';
 import { getDarkEnergyTargets, applyDarkEnergyForce } from './dark-energy.js';
-import { pulseForce, activePulseWaves } from './effects.js';
+import { pulseForce, activePulseWaves, pulseFront } from './effects.js';
 
 const layoutAutosaveStates = new WeakMap();
 const layoutSleepStates = new WeakMap();
@@ -296,7 +296,7 @@ const STATIC = 64;
 const SEED = 1;
 const RECV = 2;
 
-const MIN_REPEL_DISTANCE = 28;
+const MIN_REPEL_DISTANCE = 12;
 const MAX_REPEL_FORCE = 16;
 const MAX_SPRING_FORCE = 20;
 const DEGREE_MASS_FACTOR = 0.25;
@@ -603,7 +603,584 @@ function accumulateForces(step, role, ax, ay) {
 }
 
 const physicsCaches = new WeakMap();
+const FIELD_REPEL_NODE_THRESHOLD = 1200;
+const FIELD_GRID_SIZE = 128;
+const FIELD_GRID_BITS = 7;
+const FIELD_GRID_MASK = FIELD_GRID_SIZE - 1;
+const FIELD_GRID_CELLS = FIELD_GRID_SIZE * FIELD_GRID_SIZE;
+const FIELD_SHORT_BUCKETS = 16384;
+const FIELD_SHORT_BUCKET_MASK = FIELD_SHORT_BUCKETS - 1;
+const FIELD_SHORT_MAX_CHECKS = 64;
+const FIELD_SHORT_MAX_VISITS = 160;
+const FIELD_SHORT_CROWDED_CHECKS = 20;
+const FIELD_SHORT_CROWDED_VISITS = 48;
+const FIELD_SHORT_CROWDED_BUCKET = 80;
+const FIELD_LUT_SIZE = 512;
+const FIELD_OVERSHOOT_DAMP = 0.55;
+const FIELD_FIRE_STEER = 0.12;
+const FIELD_HALF_OX = [0, 1, -1, 0, 1];
+const FIELD_HALF_OY = [0, 0, 1, 1, 1];
 let sleepForceProbe = null;
+
+const FFT_BIT_REV = new Int32Array(FIELD_GRID_SIZE);
+const FFT_TW_COS = new Float32Array(FIELD_GRID_SIZE / 2);
+const FFT_TW_SIN = new Float32Array(FIELD_GRID_SIZE / 2);
+for (let i = 0; i < FIELD_GRID_SIZE; i++) {
+  let x = i;
+  let r = 0;
+  for (let b = 0; b < FIELD_GRID_BITS; b++) {
+    r = (r << 1) | (x & 1);
+    x >>= 1;
+  }
+  FFT_BIT_REV[i] = r;
+}
+for (let k = 0; k < FIELD_GRID_SIZE / 2; k++) {
+  const angle = (-TWO_PI * k) / FIELD_GRID_SIZE;
+  FFT_TW_COS[k] = Math.cos(angle);
+  FFT_TW_SIN[k] = Math.sin(angle);
+}
+
+function fft1d(re, im, inv) {
+  for (let i = 0; i < FIELD_GRID_SIZE; i++) {
+    const j = FFT_BIT_REV[i];
+    if (i < j) {
+      let t = re[i];
+      re[i] = re[j];
+      re[j] = t;
+      t = im[i];
+      im[i] = im[j];
+      im[j] = t;
+    }
+  }
+  const sign = inv ? -1 : 1;
+  for (let half = 1, step = FIELD_GRID_SIZE >> 1; half < FIELD_GRID_SIZE; half <<= 1, step >>= 1) {
+    const len = half << 1;
+    for (let i = 0; i < FIELD_GRID_SIZE; i += len) {
+      for (let j = 0, tw = 0; j < half; j++, tw += step) {
+        const wRe = FFT_TW_COS[tw];
+        const wIm = sign * FFT_TW_SIN[tw];
+        const a = i + j;
+        const b = a + half;
+        const vRe = re[b] * wRe - im[b] * wIm;
+        const vIm = re[b] * wIm + im[b] * wRe;
+        re[b] = re[a] - vRe;
+        im[b] = im[a] - vIm;
+        re[a] += vRe;
+        im[a] += vIm;
+      }
+    }
+  }
+  if (inv) {
+    const invG = 1 / FIELD_GRID_SIZE;
+    for (let i = 0; i < FIELD_GRID_SIZE; i++) {
+      re[i] *= invG;
+      im[i] *= invG;
+    }
+  }
+}
+
+function fft2d(re, im, inv, rowR, rowI) {
+  for (let y = 0; y < FIELD_GRID_SIZE; y++) {
+    const off = y * FIELD_GRID_SIZE;
+    for (let x = 0; x < FIELD_GRID_SIZE; x++) {
+      rowR[x] = re[off + x];
+      rowI[x] = im[off + x];
+    }
+    fft1d(rowR, rowI, inv);
+    for (let x = 0; x < FIELD_GRID_SIZE; x++) {
+      re[off + x] = rowR[x];
+      im[off + x] = rowI[x];
+    }
+  }
+  for (let x = 0; x < FIELD_GRID_SIZE; x++) {
+    for (let y = 0; y < FIELD_GRID_SIZE; y++) {
+      rowR[y] = re[y * FIELD_GRID_SIZE + x];
+      rowI[y] = im[y * FIELD_GRID_SIZE + x];
+    }
+    fft1d(rowR, rowI, inv);
+    for (let y = 0; y < FIELD_GRID_SIZE; y++) {
+      re[y * FIELD_GRID_SIZE + x] = rowR[y];
+      im[y * FIELD_GRID_SIZE + x] = rowI[y];
+    }
+  }
+}
+
+// Outer-15% C^1-tapered Coulomb potential 1/r whose -grad reproduces S/r^2 repulsion cleanly.
+function buildCoulombKernelRealFFT(outRe, tmpIm, rowR, rowI, radius, cellSize, eps) {
+  const half = FIELD_GRID_SIZE / 2;
+  const r0 = radius * 0.85;
+  const eps2 = eps * eps;
+  const d0 = Math.sqrt(r0 * r0 + eps2);
+  const v0 = 1 / d0;
+  const f0 = r0 / (d0 * d0 * d0);
+  const tailWidth = Math.max(1e-6, radius - r0);
+  const vTail0 = 0.5 * f0 * tailWidth;
+  const r2Max = radius * radius;
+
+  for (let y = 0; y < FIELD_GRID_SIZE; y++) {
+    const dy = (y <= half ? y : y - FIELD_GRID_SIZE) * cellSize;
+    const row = y * FIELD_GRID_SIZE;
+    for (let x = 0; x < FIELD_GRID_SIZE; x++) {
+      const dx = (x <= half ? x : x - FIELD_GRID_SIZE) * cellSize;
+      const r2 = dx * dx + dy * dy;
+      if (r2 >= r2Max) {
+        outRe[row + x] = 0;
+        continue;
+      }
+      const r = Math.sqrt(r2);
+      if (r <= r0) {
+        outRe[row + x] = 1 / Math.sqrt(r2 + eps2) - v0 + vTail0;
+      } else {
+        const rem = radius - r;
+        outRe[row + x] = (0.5 * f0 * rem * rem) / tailWidth;
+      }
+    }
+  }
+  tmpIm.fill(0);
+  fft2d(outRe, tmpIm, false, rowR, rowI);
+}
+
+function buildUnitResidualLUT(lut, shortR, epsSub) {
+  lut[0] = 0;
+  const shortR2 = shortR * shortR;
+  const eps2 = epsSub * epsSub;
+  for (let k = 1; k <= FIELD_LUT_SIZE; k++) {
+    const d2 = (k / FIELD_LUT_SIZE) * shortR2;
+    const d = Math.sqrt(d2);
+    const sd = d < MIN_REPEL_DISTANCE ? MIN_REPEL_DISTANCE : d;
+    const fExactUnit = 1 / (sd * sd);
+    const denom = d2 + eps2;
+    const fMeshUnit = d / (denom * Math.sqrt(denom));
+    let taper = 1;
+    const u = d / shortR;
+    if (u > 0.72) {
+      const s = Math.max(0, (1 - u) / 0.28);
+      taper = s * s * (3 - 2 * s);
+    }
+    lut[k] = (Math.max(0, fExactUnit - fMeshUnit) * taper) / d;
+  }
+}
+
+function createP3MFieldState(nodeCap) {
+  const cap = Math.max(64, nodeCap);
+  return {
+    cap,
+    fftRe: new Float32Array(FIELD_GRID_CELLS),
+    fftIm: new Float32Array(FIELD_GRID_CELLS),
+    outRe: new Float32Array(FIELD_GRID_CELLS),
+    outIm: new Float32Array(FIELD_GRID_CELLS),
+    kMainRe: new Float32Array(FIELD_GRID_CELLS),
+    kOrphRe: new Float32Array(FIELD_GRID_CELLS),
+    tmpIm: new Float32Array(FIELD_GRID_CELLS),
+    rowR: new Float32Array(FIELD_GRID_SIZE),
+    rowI: new Float32Array(FIELD_GRID_SIZE),
+    unitResLUT: new Float32Array(FIELD_LUT_SIZE + 1),
+    bucketHead: new Int32Array(FIELD_SHORT_BUCKETS),
+    bucketCount: new Int32Array(FIELD_SHORT_BUCKETS),
+    bucketNext: new Int32Array(cap),
+    cellX: new Int32Array(cap),
+    cellY: new Int32Array(cap),
+    sampleX: new Float64Array(65),
+    sampleY: new Float64Array(65),
+    sampleDev: new Float64Array(65),
+    boxInit: false,
+    boxMinX: 0,
+    boxMinY: 0,
+    boxSpan: 4000,
+    kernelBoxSpan: -1,
+    kernelRepelRadius: -1,
+    kernelOrphanRadius: -1,
+    shortR: 0,
+  };
+}
+
+function ensureP3MFieldCapacity(field, nodeCount) {
+  if (!field) return createP3MFieldState(nodeCount);
+  if (nodeCount <= field.cap) return field;
+  const cap = Math.max(nodeCount, field.cap * 2);
+  field.cap = cap;
+  field.bucketNext = new Int32Array(cap);
+  field.cellX = new Int32Array(cap);
+  field.cellY = new Int32Array(cap);
+  return field;
+}
+
+// Compute outlier-trimmed bounding square with enough padding to eliminate periodic wrap-around.
+function computeFieldBounds(field, xs, ys, nodeCount, orphanRadius) {
+  const { sampleX, sampleY, sampleDev } = field;
+  const maxSamples = Math.min(nodeCount, sampleX.length);
+  const stride = Math.max(1, Math.floor(nodeCount / maxSamples));
+  let sc = 0;
+  for (let i = 0; i < nodeCount && sc < maxSamples; i += stride) {
+    const x = xs[i];
+    const y = ys[i];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    sampleX[sc] = x;
+    sampleY[sc] = y;
+    sc += 1;
+  }
+  let medX = 0;
+  let medY = 0;
+  let mad = 0;
+  if (sc > 0) {
+    sampleX.subarray(0, sc).sort();
+    sampleY.subarray(0, sc).sort();
+    const mid = sc >> 1;
+    medX = sampleX[mid];
+    medY = sampleY[mid];
+    let dc = 0;
+    for (let i = 0; i < nodeCount && dc < maxSamples; i += stride) {
+      const x = xs[i];
+      const y = ys[i];
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      sampleDev[dc++] = Math.hypot(x - medX, y - medY);
+    }
+    if (dc > 0) {
+      sampleDev.subarray(0, dc).sort();
+      mad = sampleDev[dc >> 1];
+    }
+  }
+  const clip = Math.max(Number.isFinite(mad) ? mad * 8 : 0, orphanRadius * 6, 3000);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < nodeCount; i++) {
+    const x = xs[i];
+    const y = ys[i];
+    if (!(Math.abs(x - medX) <= clip && Math.abs(y - medY) <= clip)) continue;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX)) {
+    minX = medX - 500;
+    maxX = medX + 500;
+    minY = medY - 500;
+    maxY = medY + 500;
+  }
+  const pad = Math.max(orphanRadius * 1.15, 200);
+  const needSpan = Math.max(maxX - minX, maxY - minY, 400) + pad * 2;
+  const cxBox = (minX + maxX) * 0.5;
+  const cyBox = (minY + maxY) * 0.5;
+
+  if (!field.boxInit) {
+    field.boxSpan = needSpan * 1.15;
+    field.boxMinX = cxBox - field.boxSpan * 0.5;
+    field.boxMinY = cyBox - field.boxSpan * 0.5;
+    field.boxInit = true;
+  } else if (
+    minX - pad * 0.55 < field.boxMinX ||
+    maxX + pad * 0.55 > field.boxMinX + field.boxSpan ||
+    minY - pad * 0.55 < field.boxMinY ||
+    maxY + pad * 0.55 > field.boxMinY + field.boxSpan
+  ) {
+    field.boxSpan = Math.max(field.boxSpan * 1.25, needSpan * 1.1);
+    field.boxMinX = cxBox - field.boxSpan * 0.5;
+    field.boxMinY = cyBox - field.boxSpan * 0.5;
+  } else if (needSpan < field.boxSpan * 0.42) {
+    field.boxSpan = needSpan * 1.15;
+    field.boxMinX = cxBox - field.boxSpan * 0.5;
+    field.boxMinY = cyBox - field.boxSpan * 0.5;
+  }
+}
+
+function ensureP3MKernels(field, cellSize, repelRadius, orphanRadius) {
+  if (
+    field.kernelBoxSpan === field.boxSpan &&
+    field.kernelRepelRadius === repelRadius &&
+    field.kernelOrphanRadius === orphanRadius
+  ) {
+    return;
+  }
+  const epsMesh = Math.max(20, cellSize * 0.85);
+  const epsSub = Math.max(28, cellSize * 1.45);
+  const shortR = Math.min(repelRadius, Math.max(70, cellSize * 1.45));
+
+  buildCoulombKernelRealFFT(
+    field.kMainRe,
+    field.tmpIm,
+    field.rowR,
+    field.rowI,
+    repelRadius,
+    cellSize,
+    epsMesh
+  );
+  buildCoulombKernelRealFFT(
+    field.kOrphRe,
+    field.tmpIm,
+    field.rowR,
+    field.rowI,
+    orphanRadius,
+    cellSize,
+    epsMesh
+  );
+  buildUnitResidualLUT(field.unitResLUT, shortR, epsSub);
+
+  field.kernelBoxSpan = field.boxSpan;
+  field.kernelRepelRadius = repelRadius;
+  field.kernelOrphanRadius = orphanRadius;
+  field.shortR = shortR;
+}
+
+function accumulateP3MShortRangeResidual(field, flags, xs, ys, nodeCount, repelStrength, ax, ay) {
+  const shortR = field.shortR;
+  if (shortR <= 0 || repelStrength <= 0) return;
+
+  const shortR2 = shortR * shortR;
+  const invSC = 1 / shortR;
+  const lut = field.unitResLUT;
+  const lutScale = FIELD_LUT_SIZE / shortR2;
+  const maxForceSq = MAX_REPEL_FORCE * MAX_REPEL_FORCE;
+  const orphanToMainBack = ORPHAN_TO_MAIN_REPEL_SCALE * REGULAR_BACK_REACTION_SCALE;
+  const fixedMask = FIXED | DRAGGED;
+  const { bucketHead, bucketCount, bucketNext, cellX, cellY } = field;
+
+  bucketHead.fill(-1);
+  bucketCount.fill(0);
+  for (let i = 0; i < nodeCount; i++) {
+    const x = xs[i];
+    const y = ys[i];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      cellX[i] = 0x7fffffff;
+      continue;
+    }
+    const cx = Math.floor(x * invSC) | 0;
+    const cy = Math.floor(y * invSC) | 0;
+    cellX[i] = cx;
+    cellY[i] = cy;
+    const h = (Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663)) & FIELD_SHORT_BUCKET_MASK;
+    bucketNext[i] = bucketHead[h];
+    bucketHead[h] = i;
+    bucketCount[h] += 1;
+  }
+
+  const coincidentBase = repelStrength / (MIN_REPEL_DISTANCE * MIN_REPEL_DISTANCE);
+  for (let i = 0; i < nodeCount; i++) {
+    const cx = cellX[i];
+    if (cx === 0x7fffffff) continue;
+    const xi = xs[i];
+    const yi = ys[i];
+    const cy = cellY[i];
+    const fixedI = (flags[i] & fixedMask) !== 0;
+    const orphanI = (flags[i] & ORPHAN) !== 0;
+    const hSelf = (Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663)) & FIELD_SHORT_BUCKET_MASK;
+    const selfCrowded = bucketCount[hSelf] > FIELD_SHORT_CROWDED_BUCKET;
+    const baseChecks = selfCrowded ? FIELD_SHORT_CROWDED_CHECKS : FIELD_SHORT_MAX_CHECKS;
+    const baseVisits = selfCrowded ? FIELD_SHORT_CROWDED_VISITS : FIELD_SHORT_MAX_VISITS;
+    let checks = 0;
+    let visits = 0;
+
+    for (let o = 0; o < 5 && checks < baseChecks && visits < baseVisits; o++) {
+      const nx = (cx + FIELD_HALF_OX[o]) | 0;
+      const ny = (cy + FIELD_HALF_OY[o]) | 0;
+      const h = (Math.imul(nx, 73856093) ^ Math.imul(ny, 19349663)) & FIELD_SHORT_BUCKET_MASK;
+      const cellCrowded = selfCrowded || bucketCount[h] > FIELD_SHORT_CROWDED_BUCKET;
+      const maxChecks = cellCrowded ? FIELD_SHORT_CROWDED_CHECKS : baseChecks;
+      const maxVisits = cellCrowded ? FIELD_SHORT_CROWDED_VISITS : baseVisits;
+      for (
+        let j = bucketHead[h];
+        j !== -1 && checks < maxChecks && visits < maxVisits;
+        j = bucketNext[j]
+      ) {
+        if (o === 0 && j <= i) break;
+        if (cellX[j] !== nx || cellY[j] !== ny) continue;
+        const fixedJ = (flags[j] & fixedMask) !== 0;
+        if (fixedI && fixedJ) continue;
+        visits += 1;
+        const dx = xi - xs[j];
+        const dy = yi - ys[j];
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= shortR2) continue;
+
+        checks += 1;
+        const orphanJ = (flags[j] & ORPHAN) !== 0;
+        const scaleI = orphanI
+          ? orphanJ
+            ? ORPHAN_REPEL_SCALE
+            : ORPHAN_TO_MAIN_REPEL_SCALE
+          : orphanJ
+            ? orphanToMainBack
+            : 1;
+        const scaleJ = orphanJ
+          ? orphanI
+            ? ORPHAN_REPEL_SCALE
+            : ORPHAN_TO_MAIN_REPEL_SCALE
+          : orphanI
+            ? orphanToMainBack
+            : 1;
+
+        if (d2 < 1e-8) {
+          const ang =
+            (((Math.imul(i, 2654435761) ^ Math.imul(j, 2246822519)) >>> 0) * TWO_PI) / 4294967296;
+          const ux = Math.cos(ang);
+          const uy = Math.sin(ang);
+          if (!fixedI) {
+            const magI = Math.min(MAX_REPEL_FORCE, coincidentBase * scaleI);
+            ax[i] += ux * magI;
+            ay[i] += uy * magI;
+          }
+          if (!fixedJ) {
+            const magJ = Math.min(MAX_REPEL_FORCE, coincidentBase * scaleJ);
+            ax[j] -= ux * magJ;
+            ay[j] -= uy * magJ;
+          }
+          continue;
+        }
+
+        const fOverD = repelStrength * lut[(d2 * lutScale) | 0];
+        if (fOverD <= 0) continue;
+        if (!fixedI) {
+          let magOverD = fOverD * scaleI;
+          if (d2 * magOverD * magOverD > maxForceSq) magOverD = MAX_REPEL_FORCE / Math.sqrt(d2);
+          ax[i] += dx * magOverD;
+          ay[i] += dy * magOverD;
+        }
+        if (!fixedJ) {
+          let magOverD = fOverD * scaleJ;
+          if (d2 * magOverD * magOverD > maxForceSq) magOverD = MAX_REPEL_FORCE / Math.sqrt(d2);
+          ax[j] -= dx * magOverD;
+          ay[j] -= dy * magOverD;
+        }
+      }
+    }
+  }
+}
+
+function accumulateP3MRepulsion(
+  field,
+  flags,
+  xs,
+  ys,
+  nodeCount,
+  hasMains,
+  hasOrphans,
+  repelRadius,
+  orphanRadius,
+  repelStrength,
+  ax,
+  ay
+) {
+  if ((!hasMains && !hasOrphans) || repelStrength <= 0) return;
+  computeFieldBounds(field, xs, ys, nodeCount, orphanRadius);
+
+  const size = FIELD_GRID_SIZE;
+  const mask = FIELD_GRID_MASK;
+  const cellSize = field.boxSpan / (size - 2);
+  const invCell = 1 / cellSize;
+  ensureP3MKernels(field, cellSize, repelRadius, orphanRadius);
+
+  const { fftRe, fftIm, outRe, outIm, kMainRe, kOrphRe, rowR, rowI } = field;
+  const boxMinX = field.boxMinX;
+  const boxMinY = field.boxMinY;
+
+  fftRe.fill(0);
+  fftIm.fill(0);
+  for (let i = 0; i < nodeCount; i++) {
+    const gx = (xs[i] - boxMinX) * invCell;
+    const gy = (ys[i] - boxMinY) * invCell;
+    if (!(gx >= 0 && gy >= 0 && gx < size - 1 && gy < size - 1)) continue;
+    const ix = gx | 0;
+    const iy = gy | 0;
+    const fx = gx - ix;
+    const fy = gy - iy;
+    const idx = iy * size + ix;
+    const grid = flags[i] & ORPHAN ? fftIm : fftRe;
+    grid[idx] += (1 - fx) * (1 - fy);
+    grid[idx + 1] += fx * (1 - fy);
+    grid[idx + size] += (1 - fx) * fy;
+    grid[idx + size + 1] += fx * fy;
+  }
+
+  // Packed dual-real 2D FFT computes both main and orphan Coulomb potentials in one pass pair.
+  fft2d(fftRe, fftIm, false, rowR, rowI);
+  for (let y = 0; y < size; y++) {
+    const ny = (size - y) & mask;
+    const row = y * size;
+    const nrow = ny * size;
+    for (let x = 0; x < size; x++) {
+      const nx = (size - x) & mask;
+      const i = row + x;
+      const j = nrow + nx;
+      const z1r = fftRe[i];
+      const z1i = fftIm[i];
+      const z2r = fftRe[j];
+      const z2i = fftIm[j];
+      const mr = 0.5 * (z1r + z2r);
+      const mi = 0.5 * (z1i - z2i);
+      const or = 0.5 * (z1i + z2i);
+      const oi = 0.5 * (z2r - z1r);
+      const km = hasMains ? kMainRe[i] : 0;
+      const ko = hasOrphans ? kOrphRe[i] : 0;
+      outRe[i] = mr * km - oi * ko;
+      outIm[i] = mi * km + or * ko;
+    }
+  }
+  fft2d(outRe, outIm, true, rowR, rowI);
+
+  const gradScale = repelStrength / (2 * cellSize);
+  const orphanToMainBack = ORPHAN_TO_MAIN_REPEL_SCALE * REGULAR_BACK_REACTION_SCALE;
+  const fixedMask = FIXED | DRAGGED;
+
+  for (let i = 0; i < nodeCount; i++) {
+    if (flags[i] & fixedMask) continue;
+    const gx = (xs[i] - boxMinX) * invCell;
+    const gy = (ys[i] - boxMinY) * invCell;
+    if (!(gx >= 1 && gy >= 1 && gx < size - 2 && gy < size - 2)) continue;
+    const ix = gx | 0;
+    const iy = gy | 0;
+    const fx = gx - ix;
+    const fy = gy - iy;
+    const omx = 1 - fx;
+    const omy = 1 - fy;
+    const idx = iy * size + ix;
+
+    let dmx = 0;
+    let dmy = 0;
+    if (hasMains) {
+      dmx =
+        ((outRe[idx + 1] - outRe[idx - 1]) * omx + (outRe[idx + 2] - outRe[idx]) * fx) * omy +
+        ((outRe[idx + size + 1] - outRe[idx + size - 1]) * omx +
+          (outRe[idx + size + 2] - outRe[idx + size]) * fx) *
+          fy;
+      dmy =
+        ((outRe[idx + size] - outRe[idx - size]) * omx +
+          (outRe[idx + size + 1] - outRe[idx - size + 1]) * fx) *
+          omy +
+        ((outRe[idx + 2 * size] - outRe[idx]) * omx +
+          (outRe[idx + 2 * size + 1] - outRe[idx + 1]) * fx) *
+          fy;
+    }
+
+    let dox = 0;
+    let doy = 0;
+    if (hasOrphans) {
+      dox =
+        ((outIm[idx + 1] - outIm[idx - 1]) * omx + (outIm[idx + 2] - outIm[idx]) * fx) * omy +
+        ((outIm[idx + size + 1] - outIm[idx + size - 1]) * omx +
+          (outIm[idx + size + 2] - outIm[idx + size]) * fx) *
+          fy;
+      doy =
+        ((outIm[idx + size] - outIm[idx - size]) * omx +
+          (outIm[idx + size + 1] - outIm[idx - size + 1]) * fx) *
+          omy +
+        ((outIm[idx + 2 * size] - outIm[idx]) * omx +
+          (outIm[idx + 2 * size + 1] - outIm[idx + 1]) * fx) *
+          fy;
+    }
+
+    if (flags[i] & ORPHAN) {
+      ax[i] -= (dmx * ORPHAN_TO_MAIN_REPEL_SCALE + dox * ORPHAN_REPEL_SCALE) * gradScale;
+      ay[i] -= (dmy * ORPHAN_TO_MAIN_REPEL_SCALE + doy * ORPHAN_REPEL_SCALE) * gradScale;
+    } else {
+      ax[i] -= (dmx + dox * orphanToMainBack) * gradScale;
+      ay[i] -= (dmy + doy * orphanToMainBack) * gradScale;
+    }
+  }
+
+  accumulateP3MShortRangeResidual(field, flags, xs, ys, nodeCount, repelStrength, ax, ay);
+}
 
 // Test hook: receives cached and freshly summed pair/link accelerations of sleeping nodes.
 function setSleepForceProbe(probe) {
@@ -1079,97 +1656,25 @@ function stepSimulation(view) {
     grids: null,
     statics: null,
   };
-  if (hasRepel) {
-    step.grids = {
-      main: buildGrid(
-        xs,
-        ys,
-        structure.allIndices,
-        (index) => !(flags[index] & ORPHAN),
-        repelRadius
-      ),
-      orphan: buildGrid(xs, ys, structure.orphans, null, orphanRepelRadius),
-      cross: buildGrid(xs, ys, structure.mains, null, orphanToMainRepelRadius),
-    };
-  }
-
-  // Any doubt about the cached sources rebuilds the cache from the current state.
-  let statics = cache.statics;
-  let rebuild =
-    !statics ||
-    statics.structure !== structure ||
-    statics.sleepStates !== sleepStates ||
-    statics.hasRepel !== hasRepel ||
-    statics.hasLink !== hasLink ||
-    statics.repelStrength !== repelStrength ||
-    statics.repelRadius !== repelRadius ||
-    statics.baseLinkStrength !== baseLinkStrength ||
-    statics.linkDistance !== linkDistance;
-  const constraintBits = FIXED | ORBIT | PINNED | DRAGGED;
-  for (let i = 0; i < nodeCount && !rebuild; i++) {
-    if ((flags[i] & constraintBits) !== (statics.flags[i] & constraintBits)) rebuild = true;
-    else if (flags[i] & PINNED && (pinX[i] !== statics.pinX[i] || pinY[i] !== statics.pinY[i]))
-      rebuild = true;
-    else if (
-      multiplierRead[i] !== statics.multiplierRead[i] ||
-      multipliers[i] !== statics.multipliers[i]
-    )
-      rebuild = true;
-    else if (statics.inStat[i] && (xs[i] !== statics.x[i] || ys[i] !== statics.y[i]))
-      rebuild = true;
-  }
-  if (rebuild) {
-    statics = {
-      structure,
-      sleepStates,
-      hasRepel,
-      hasLink,
-      repelStrength,
-      repelRadius,
-      baseLinkStrength,
-      linkDistance,
-      inStat: new Uint8Array(nodeCount),
-      staticAx: new Float64Array(nodeCount),
-      staticAy: new Float64Array(nodeCount),
-      x: new Float64Array(nodeCount),
-      y: new Float64Array(nodeCount),
-      sleepers: 0,
-    };
-    cache.statics = statics;
-  }
-  statics.flags = flags;
-  statics.pinX = pinX;
-  statics.pinY = pinY;
-  statics.multipliers = multipliers;
-  statics.multiplierRead = multiplierRead;
-  step.statics = statics;
-  const { inStat, staticAx, staticAy } = statics;
-  if (rebuild) {
-    for (let i = 0; i < nodeCount; i++) {
-      if (flags[i] & STATIC && !(flags[i] & SLEEPER)) updateStaticSource(step, i, 1);
-    }
-  } else {
-    for (let i = 0; i < nodeCount; i++) {
-      if (inStat[i] && !(flags[i] & STATIC)) updateStaticSource(step, i, -1);
-    }
-  }
-  for (let i = 0; i < nodeCount; i++) {
-    if (flags[i] & SLEEPER && !inStat[i]) updateStaticSource(step, i, 1);
-  }
 
   const ax = new Float64Array(nodeCount);
   const ay = new Float64Array(nodeCount);
-  accumulateForces(step, role, ax, ay);
-
   const darkEnergyTargets = getDarkEnergyTargets(view);
+  const hasDarkEnergyTargets = darkEnergyTargets.size > 0;
   const accel = { ax: 0, ay: 0 };
   const pulseNowMs = Date.now();
+  const activeWaves = activePulseWaves(view, pulseNowMs);
+  const preparedPulseWaves = activeWaves.length
+    ? activeWaves.map((wave) => ({ wave, front: pulseFront(wave, pulseNowMs) }))
+    : null;
   const addSelfForces = (node, index) => {
-    applyDarkEnergyForce(view, node, accel, darkEnergyTargets);
-    const pulse = node.id !== view.dragNodeId && pulseForce(view, node, pulseNowMs);
-    if (pulse) {
-      accel.ax += pulse[0];
-      accel.ay += pulse[1];
+    if (hasDarkEnergyTargets) applyDarkEnergyForce(view, node, accel, darkEnergyTargets);
+    if (preparedPulseWaves && node.id !== view.dragNodeId) {
+      const pulse = pulseForce(view, node, pulseNowMs, preparedPulseWaves);
+      if (pulse) {
+        accel.ax += pulse[0];
+        accel.ay += pulse[1];
+      }
     }
     if (hasCenter && node.id !== view.dragNodeId) {
       const nodeCenterScale = structure.degree[index] === 0 ? orphanCenterScale : 1;
@@ -1180,48 +1685,164 @@ function stepSimulation(view) {
     }
   };
 
-  // Sleepers decide with cached + moving contributions; a waking node is recomputed exactly.
+  const useP3M = nodeCount > FIELD_REPEL_NODE_THRESHOLD && !sleepForceProbe;
   const waking = new Uint8Array(nodeCount);
-  const wakers = [];
-  if (statics.sleepers > 0) {
-    if (sleepForceProbe) {
-      const probeRole = new Uint8Array(nodeCount);
-      for (let i = 0; i < nodeCount; i++) if (flags[i] & SLEEPER) probeRole[i] = SEED | RECV;
-      const fullAx = new Float64Array(nodeCount);
-      const fullAy = new Float64Array(nodeCount);
-      accumulateForces(step, probeRole, fullAx, fullAy);
-      const sleepers = [];
-      for (let i = 0; i < nodeCount; i++) {
-        if (!(flags[i] & SLEEPER)) continue;
-        sleepers.push({
-          id: nodes[i].id,
-          cached: [staticAx[i] + ax[i], staticAy[i] + ay[i]],
-          full: [fullAx[i], fullAy[i]],
-        });
+  let wakeAx = ax;
+  let wakeAy = ay;
+
+  if (useP3M) {
+    cache.statics = null;
+    const field = (cache.field = ensureP3MFieldCapacity(cache.field, nodeCount));
+
+    for (let i = 0; i < nodeCount; i++) {
+      if (flags[i] & SLEEPER) {
+        waking[i] = SEED | RECV;
+        role[i] = SEED | RECV;
       }
-      sleepForceProbe({ view, sleepers });
+    }
+
+    if (hasRepel) {
+      accumulateP3MRepulsion(
+        field,
+        flags,
+        xs,
+        ys,
+        nodeCount,
+        structure.mains.length > 0,
+        structure.orphans.length > 0,
+        repelRadius,
+        orphanRepelRadius,
+        repelStrength,
+        ax,
+        ay
+      );
+    }
+    if (hasLink) linkPairs(step, role, ax, ay);
+  } else {
+    if (hasRepel) {
+      step.grids = {
+        main: buildGrid(
+          xs,
+          ys,
+          structure.allIndices,
+          (index) => !(flags[index] & ORPHAN),
+          repelRadius
+        ),
+        orphan: buildGrid(xs, ys, structure.orphans, null, orphanRepelRadius),
+        cross: buildGrid(xs, ys, structure.mains, null, orphanToMainRepelRadius),
+      };
+    }
+
+    // Any doubt about the cached sources rebuilds the cache from the current state.
+    let statics = cache.statics;
+    let rebuild =
+      !statics ||
+      statics.structure !== structure ||
+      statics.sleepStates !== sleepStates ||
+      statics.hasRepel !== hasRepel ||
+      statics.hasLink !== hasLink ||
+      statics.repelStrength !== repelStrength ||
+      statics.repelRadius !== repelRadius ||
+      statics.baseLinkStrength !== baseLinkStrength ||
+      statics.linkDistance !== linkDistance;
+    const constraintBits = FIXED | ORBIT | PINNED | DRAGGED;
+    for (let i = 0; i < nodeCount && !rebuild; i++) {
+      if ((flags[i] & constraintBits) !== (statics.flags[i] & constraintBits)) rebuild = true;
+      else if (flags[i] & PINNED && (pinX[i] !== statics.pinX[i] || pinY[i] !== statics.pinY[i]))
+        rebuild = true;
+      else if (
+        multiplierRead[i] !== statics.multiplierRead[i] ||
+        multipliers[i] !== statics.multipliers[i]
+      )
+        rebuild = true;
+      else if (statics.inStat[i] && (xs[i] !== statics.x[i] || ys[i] !== statics.y[i]))
+        rebuild = true;
+    }
+    if (rebuild) {
+      statics = {
+        structure,
+        sleepStates,
+        hasRepel,
+        hasLink,
+        repelStrength,
+        repelRadius,
+        baseLinkStrength,
+        linkDistance,
+        inStat: new Uint8Array(nodeCount),
+        staticAx: new Float64Array(nodeCount),
+        staticAy: new Float64Array(nodeCount),
+        x: new Float64Array(nodeCount),
+        y: new Float64Array(nodeCount),
+        sleepers: 0,
+      };
+      cache.statics = statics;
+    }
+    statics.flags = flags;
+    statics.pinX = pinX;
+    statics.pinY = pinY;
+    statics.multipliers = multipliers;
+    statics.multiplierRead = multiplierRead;
+    step.statics = statics;
+    const { inStat, staticAx, staticAy } = statics;
+    if (rebuild) {
+      for (let i = 0; i < nodeCount; i++) {
+        if (flags[i] & STATIC && !(flags[i] & SLEEPER)) updateStaticSource(step, i, 1);
+      }
+    } else {
+      for (let i = 0; i < nodeCount; i++) {
+        if (inStat[i] && !(flags[i] & STATIC)) updateStaticSource(step, i, -1);
+      }
     }
     for (let i = 0; i < nodeCount; i++) {
-      if (!(flags[i] & SLEEPER)) continue;
-      const node = nodes[i];
-      accel.ax = staticAx[i] + ax[i];
-      accel.ay = staticAy[i] + ay[i];
-      addSelfForces(node, i);
-      accel.ax /= structure.mass[i];
-      accel.ay /= structure.mass[i];
-      if (
-        Math.hypot(accel.ax, accel.ay) < settleAccelEps * 2 &&
-        Math.hypot(node.vx, node.vy) < settleVelocityEps * 2
-      )
-        continue;
-      waking[i] = SEED | RECV;
-      wakers.push(i);
+      if (flags[i] & SLEEPER && !inStat[i]) updateStaticSource(step, i, 1);
     }
-    for (const index of wakers) updateStaticSource(step, index, -1);
+
+    accumulateForces(step, role, ax, ay);
+
+    // Sleepers decide with cached + moving contributions; a waking node is recomputed exactly.
+    const wakers = [];
+    if (statics.sleepers > 0) {
+      if (sleepForceProbe) {
+        const probeRole = new Uint8Array(nodeCount);
+        for (let i = 0; i < nodeCount; i++) if (flags[i] & SLEEPER) probeRole[i] = SEED | RECV;
+        const fullAx = new Float64Array(nodeCount);
+        const fullAy = new Float64Array(nodeCount);
+        accumulateForces(step, probeRole, fullAx, fullAy);
+        const sleepers = [];
+        for (let i = 0; i < nodeCount; i++) {
+          if (!(flags[i] & SLEEPER)) continue;
+          sleepers.push({
+            id: nodes[i].id,
+            cached: [staticAx[i] + ax[i], staticAy[i] + ay[i]],
+            full: [fullAx[i], fullAy[i]],
+          });
+        }
+        sleepForceProbe({ view, sleepers });
+      }
+      for (let i = 0; i < nodeCount; i++) {
+        if (!(flags[i] & SLEEPER)) continue;
+        const node = nodes[i];
+        accel.ax = staticAx[i] + ax[i];
+        accel.ay = staticAy[i] + ay[i];
+        addSelfForces(node, i);
+        accel.ax /= structure.mass[i];
+        accel.ay /= structure.mass[i];
+        if (
+          Math.hypot(accel.ax, accel.ay) < settleAccelEps * 2 &&
+          Math.hypot(node.vx, node.vy) < settleVelocityEps * 2
+        )
+          continue;
+        waking[i] = SEED | RECV;
+        wakers.push(i);
+      }
+      for (const index of wakers) updateStaticSource(step, index, -1);
+    }
+    if (wakers.length) {
+      wakeAx = new Float64Array(nodeCount);
+      wakeAy = new Float64Array(nodeCount);
+      accumulateForces(step, waking, wakeAx, wakeAy);
+    }
   }
-  const wakeAx = wakers.length ? new Float64Array(nodeCount) : ax;
-  const wakeAy = wakers.length ? new Float64Array(nodeCount) : ay;
-  if (wakers.length) accumulateForces(step, waking, wakeAx, wakeAy);
 
   let movingNodeCount = 0;
   let awakeNodeCount = 0;
@@ -1292,10 +1913,23 @@ function stepSimulation(view) {
         accelX *= accelScale;
         accelY *= accelScale;
       }
+      const prevDot = useP3M ? node.vx * accelX + node.vy * accelY : 0;
+      if (useP3M && prevDot > 0) {
+        const vMag = Math.hypot(node.vx, node.vy);
+        const aMag = Math.hypot(accelX, accelY);
+        if (vMag > 1e-6 && aMag > 1e-6) {
+          // FIRE steering aligns tangential orbital velocity toward the force without slowing straight motion.
+          const steerScale = (FIELD_FIRE_STEER * vMag) / aMag;
+          node.vx = node.vx * (1 - FIELD_FIRE_STEER) + accelX * steerScale;
+          node.vy = node.vy * (1 - FIELD_FIRE_STEER) + accelY * steerScale;
+        }
+      }
       node.vx += accelX * impulseGain;
       node.vy += accelY * impulseGain;
-      node.vx *= velocityRetention;
-      node.vy *= velocityRetention;
+      const stepRetention =
+        useP3M && prevDot < 0 ? velocityRetention * FIELD_OVERSHOOT_DAMP : velocityRetention;
+      node.vx *= stepRetention;
+      node.vy *= stepRetention;
     }
     const speedNow = Math.sqrt(node.vx * node.vx + node.vy * node.vy);
     if (speedNow > maxSpeed) {

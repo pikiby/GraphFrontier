@@ -1,0 +1,8 @@
+src/**
+scripts/**
+tests/**
+dist/workspace-controller.cjs
+dist/*.vsix
+*.vsix
+node_modules/**
+.DS_Store

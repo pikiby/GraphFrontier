@@ -64,6 +64,7 @@ test('node menu follows requested sections and puts Delete last', (t) => {
     '---',
     'Select linked nodes',
     'Combine linked',
+    'Link to node...',
     '---',
     'Add to list',
     'Other',

@@ -61,7 +61,7 @@ test('sidebar order is Search, Settings tabs, Layout and each existing builder i
   const tabs = [...view.settingsTabs];
   assert.deepEqual(
     tabs.map(([id]) => id),
-    ['groups', 'display', 'physics', 'sets']
+    ['groups', 'display', 'physics', 'files']
   );
   const settings = sections[1].children[1];
   assert.equal(settings.children[0].attributes.role, 'tablist');
@@ -71,11 +71,12 @@ test('sidebar order is Search, Settings tabs, Layout and each existing builder i
   );
   const groups = view.settingsTabs.get('groups').panel;
   const display = view.settingsTabs.get('display').panel;
+  const filesPanel = view.settingsTabs.get('files').panel;
   const groupList = groups.children.find((child) => child.children[0]?.text === 'Groups')
     .children[1];
   assert.equal(builders.buildGroupEditorSection.mock.calls[0].arguments[0], groupList);
   assert.equal(builders.buildGroupEditorSection.mock.callCount(), 1);
-  // One Filters editor (Exclude/Include only) sits in the Filters subgroup of the Groups tab.
+  // One Filters editor (Exclude/Include only) + Show only groups sit in the Filters subgroup of Groups.
   const filters = groups.children.find((child) => child.children[0]?.text === 'Filters')
     .children[1];
   assert.deepEqual(
@@ -90,6 +91,7 @@ test('sidebar order is Search, Settings tabs, Layout and each existing builder i
   const descendants = (node) => [node, ...node.children.flatMap(descendants)];
   const controls = descendants(display);
   for (const key of [
+    'node_border_width',
     'dim_low_degree_nodes',
     'show_arrows',
     'reverse_arrows',
@@ -100,50 +102,101 @@ test('sidebar order is Search, Settings tabs, Layout and each existing builder i
     'grid_line_width',
   ])
     assert(controls.includes(view.sideControls.get(key).input), `${key} stays in Display`);
-  // Groups holds the group editor and the Filters subgroup; file filters follow the rules.
   const effects = view.settingsTabs.get('physics').panel.children.at(-1);
   assert.equal(effects.children[0].text, 'Effects', 'Effects closes the Physics tab');
+  assert.equal(
+    effects.children[0].cls,
+    'graphfrontier-sidepanel-section-toggle',
+    'Effects parent section remains collapsible'
+  );
   assert.deepEqual(
     effects.children[1].children.map((child) => child.children[0].text),
     ['Grow', 'Wave'],
-    'each effect is its own collapsible subsection'
+    'Grow and Wave sit inside Effects as non-collapsible groups'
+  );
+  assert.equal(
+    descendants(effects.children[1]).some(
+      (el) => el.cls === 'graphfrontier-sidepanel-section-toggle'
+    ),
+    false,
+    'Grow and Wave inside Effects are not collapsible'
   );
   assert.deepEqual(
-    view.settingsTabs.get('sets').panel.children.map((child) => child.children[0].text),
-    ['Selection', 'Simulation', 'Custom lists'],
-    'Sets subgroups collapse like those of Groups'
+    descendants(effects.children[1])
+      .filter((el) => el.cls === 'graphfrontier-groups-title')
+      .map((el) => el.text),
+    ['Grow', 'Wave']
   );
-  // Groups and Filters are collapsible subgroups; there is no separate Attachments subgroup.
+  assert(
+    descendants(view.settingsTabs.get('physics').panel).includes(
+      view.sideControls.get('physics_steps_per_frame').input
+    ),
+    'Physics speed lives in Physics tab'
+  );
+  // Groups holds Groups and Filters (Exclude/Include only rules).
   const [groupSection, filtersSection] = groups.children;
   assert.equal(groups.children.length, 2);
   assert.equal(groupSection.children[0].text, 'Groups');
   assert.equal(filtersSection.children[0].text, 'Filters');
-  const [rulesGroup, fileFilters] = filters.children;
+  assert.equal(filters.children.length, 1);
+  const [rulesGroup] = filters.children;
   assert.equal(rulesGroup.cls, 'graphfrontier-sidepanel-group', 'divider as in Display');
-  assert.equal(fileFilters.cls, 'graphfrontier-sidepanel-group');
   assert.equal(rulesGroup.children[0].text, 'buildQueryRuleEditorSection');
-  for (const key of [
-    'show_only_groups',
-    'existing_files_only',
-    'hide_orphans',
-    'hide_attachments',
-    'include_unlinked_attachments',
-    'attachment_node_color',
-  ])
+  // Files tab holds general toggles (including Show only groups), collapsible Other files, and Custom lists.
+  const [notesGroup, otherFilesSection, customListsSection] = filesPanel.children;
+  assert.equal(notesGroup.cls, 'graphfrontier-sidepanel-group');
+  assert.equal(otherFilesSection.children[0].text, 'Other files');
+  assert.equal(customListsSection.children[0].text, 'Custom lists');
+  for (const key of ['existing_files_only', 'hide_orphans', 'show_only_groups'])
+    assert(descendants(notesGroup).includes(view.sideControls.get(key).input), `${key} in Files`);
+  const otherContent = otherFilesSection.children[1];
+  for (const key of ['hide_attachments', 'include_unlinked_attachments', 'attachment_node_color'])
     assert(
-      descendants(fileFilters).includes(view.sideControls.get(key).input),
-      `${key} in Filters`
+      descendants(otherContent).includes(view.sideControls.get(key).input),
+      `${key} in Other files`
     );
-  assert.equal(builders.buildAttachmentFileTypesControl.mock.calls[0].arguments[0], fileFilters);
+  assert.equal(builders.buildAttachmentFileTypesControl.mock.calls.length, 1);
+  const detailsEl = builders.buildAttachmentFileTypesControl.mock.calls[0].arguments[0];
+  assert.equal(detailsEl.cls, 'graphfrontier-other-files-details');
+  assert(
+    descendants(detailsEl.children[0]).includes(
+      view.sideControls.get('attachment_node_color').input
+    ),
+    'Other files color sits above File types'
+  );
   assert(
     descendants(view.settingsTabs.get('physics').panel).includes(
       view.sideControls.get('repel_strength').input
     )
   );
+  assert.equal(view.sideControls.get('repel_strength').input.min, '3');
+
+  const plugin = view.plugin;
+  const clampedRepel = Object.getPrototypeOf(plugin).normalizeData.call(plugin, {
+    settings: { repel_strength: 0 },
+    saved_layout_settings: { repel_strength: 0 },
+  });
+  assert.equal(clampedRepel.settings.repel_strength, 3);
+  assert.equal(clampedRepel.saved_layout_settings.repel_strength, 3);
+  // Selection modifiers (and MCP on desktop) live in the header gear Preferences popover with plain headings (no collapsible accordions).
+  assert(view.gearPopoverEl, 'gear popover exists');
+  assert.equal(view.gearPopoverEl.hidden, true, 'gear popover closed by default');
+  assert.equal(
+    descendants(view.gearPopoverEl).some(
+      (el) => el.cls === 'graphfrontier-sidepanel-section-toggle'
+    ),
+    false,
+    'Preferences popover uses plain headings without collapsible toggles'
+  );
   assert(
-    descendants(view.settingsTabs.get('sets').panel).includes(
-      view.sideControls.get('selection_box_modifier').input
-    )
+    descendants(view.gearPopoverEl).some(
+      (el) => el.cls === 'graphfrontier-groups-title' && el.text === 'Selection'
+    ),
+    'Selection heading in Preferences popover'
+  );
+  assert(
+    descendants(view.gearPopoverEl).includes(view.sideControls.get('selection_box_modifier').input),
+    'Selection lives inside header gear popover'
   );
   view.selectSettingsTab('display');
   assert.equal(display.hidden, false, 'legacy collapsed Display does not hide tab content');
@@ -169,12 +222,12 @@ test('Settings tabs are accessible, compact, persist through rebuild and never w
   assert.equal(groups.panel.hidden, true);
   assert.equal(persist.mock.callCount(), 1);
   view.settingsTabs.get('display').button.events.keydown(key('End'));
-  assert.equal(plugin.getSettingsTab(), 'sets');
-  view.settingsTabs.get('sets').button.events.keydown(key('ArrowRight'));
+  assert.equal(plugin.getSettingsTab(), 'files');
+  view.settingsTabs.get('files').button.events.keydown(key('ArrowRight'));
   assert.equal(plugin.getSettingsTab(), 'groups');
   view.settingsTabs.get('groups').button.events.keydown(key('ArrowLeft'));
-  assert.equal(plugin.getSettingsTab(), 'sets');
-  view.settingsTabs.get('sets').button.events.keydown(key('Home'));
+  assert.equal(plugin.getSettingsTab(), 'files');
+  view.settingsTabs.get('files').button.events.keydown(key('Home'));
   assert.equal(plugin.getSettingsTab(), 'groups');
   view.settingsTabs.get('physics').button.events.click();
   const calls = persist.mock.callCount();
@@ -686,6 +739,9 @@ test('attachment extensions filter linked and unlinked files exactly, without da
   plugin.data.settings.excluded_attachment_extensions = [];
   assert(collect().nodes.some((n) => n.id === 'LICENSE' && n.meta.isAttachment));
   plugin.data.settings.hide_orphans = true;
+  // Other files: All (hide_attachments: false, include_unlinked_attachments: true) keeps unlinked non-md files visible.
+  assert(collect().nodes.some((n) => n.id === 'free.PDF'));
+  plugin.data.settings.include_unlinked_attachments = false;
   assert(!collect().nodes.some((n) => n.id === 'free.PDF'));
 });
 
@@ -763,7 +819,7 @@ test('file type control searches cached inventory, refreshes on reopen and bulk 
   const persist = t.mock.method(plugin, 'schedulePersist', () => {});
   plugin.data.settings.excluded_attachment_extensions = ['missing'];
   view.buildAttachmentFileTypesControl(parent);
-  const trigger = parent.children[0].children[0].children[0];
+  const trigger = parent.children[1].children[0].children[0];
   assert.equal(trigger.tag, 'input');
   assert.equal(enumerate.mock.callCount(), 1, 'initial summary uses current inventory');
   trigger.events.click();
@@ -796,9 +852,9 @@ test('file type control searches cached inventory, refreshes on reopen and bulk 
   assert.deepEqual(plugin.data.settings.excluded_attachment_extensions, ['missing', 'png']);
   files = [{ extension: 'webp' }];
   view.closeInputSuggestMenu();
-  assert.equal(trigger.value, 'File type: No extension, .pdf');
+  assert.equal(trigger.value, 'No extension, .pdf');
   trigger.events.click();
-  assert.equal(trigger.value, 'File type: ');
+  assert.equal(trigger.value, '');
   assert.equal(formats()[0].suggestion.title, '.webp');
   assert.equal(formats()[0].checkbox.checked, true);
   select('all');
@@ -1679,7 +1735,7 @@ test('unlinked attachments require both flags and remain subject to orphan filte
         if (!hide_attachments) {
           if (hide_orphans) expected.push('alpha.md');
           expected.push('linked.png');
-          if (includeAll && !hide_orphans) expected.push('assets/unused.PDF', 'LICENSE');
+          if (includeAll) expected.push('assets/unused.PDF', 'LICENSE');
         }
         assert.deepEqual(graph.nodes.map((node) => node.id).sort(), expected.sort());
         assert.deepEqual(
@@ -1753,7 +1809,7 @@ test('include unlinked attachments defaults off, normalizes and round-trips per 
   assert.equal(plugin.data.settings.include_unlinked_attachments, false);
 });
 
-test('unlinked attachment UI toggle follows Show attachments and uses normal data refresh', (t) => {
+test('Other files toggles (Show other files / Include unlinked), always-visible File types, and header gear popover work cleanly', (t) => {
   const { plugin, view } = fixture(t);
   const fileTypes = t.mock.method(view, 'buildAttachmentFileTypesControl', () => {});
   view.sidePanelEl = element();
@@ -1769,44 +1825,67 @@ test('unlinked attachment UI toggle follows Show attachments and uses normal dat
     'syncSidePanelControls',
   ])
     t.mock.method(view, method, () => {});
-  const toggles = [];
-  const original = view.addSideToggle.bind(view);
-  t.mock.method(view, 'addSideToggle', (...args) => {
-    toggles.push(args);
-    return original(...args);
-  });
   const refresh = t.mock.method(view, 'applyRefreshMode', () => {});
   const persist = t.mock.method(plugin, 'schedulePersist', () => {});
-  plugin.data.settings.hide_attachments = false;
+
+  plugin.data.settings.hide_attachments = true;
+  plugin.data.settings.include_unlinked_attachments = false;
   Object.getPrototypeOf(view).buildSidePanel.call(view);
-  const index = toggles.findIndex((args) => args[2] === 'hide_attachments');
-  assert.equal(toggles[index + 1][0], toggles[index][0]);
-  assert.equal(toggles[index + 1][1], 'Show unlinked attachments');
-  assert.equal(toggles[index + 1][2], 'include_unlinked_attachments');
-  assert.equal(fileTypes.mock.callCount(), 1);
-  view.sideControls.get('include_unlinked_attachments').input.events.click();
+
+  assert.equal(
+    fileTypes.mock.callCount(),
+    1,
+    'File types remains visible even when Show other files is off'
+  );
+  const showOther = view.sideControls.get('hide_attachments');
+  const includeUnlinked = view.sideControls.get('include_unlinked_attachments');
+  assert.ok(
+    showOther?.input && includeUnlinked?.input,
+    'both Other files toggles are always rendered'
+  );
+  const showOtherSetAttr = t.mock.method(showOther.input, 'setAttr');
+  const includeUnlinkedSetAttr = t.mock.method(includeUnlinked.input, 'setAttr');
+  assert.equal(showOther.toUiValue(plugin.data.settings.hide_attachments), false);
+  assert.equal(includeUnlinked.toUiValue(plugin.data.settings.include_unlinked_attachments), false);
+
+  includeUnlinked.input.events.click();
   assert.equal(plugin.data.settings.include_unlinked_attachments, true);
+  assert.equal(plugin.data.settings.hide_attachments, false);
+  assert.deepEqual(showOtherSetAttr.mock.calls.at(-1).arguments, [
+    'aria-label',
+    'Show other files: on',
+  ]);
+  assert.deepEqual(includeUnlinkedSetAttr.mock.calls.at(-1).arguments, [
+    'aria-label',
+    'Include unlinked: on',
+  ]);
   assert.deepEqual(refresh.mock.calls[0].arguments, ['data']);
   assert.equal(persist.mock.callCount(), 1);
-  assert.equal(toggles[index][4].rebuildPanelOnChange, true);
-  plugin.data.settings.hide_attachments = true;
-  toggles.length = 0;
-  Object.getPrototypeOf(view).buildSidePanel.call(view);
-  assert.equal(view.sideControls.has('include_unlinked_attachments'), false);
-  assert.equal(fileTypes.mock.callCount(), 1, 'file types hidden with attachments off');
-  assert.equal(
-    toggles.some((args) => args[2] === 'include_unlinked_attachments'),
-    false
-  );
+
+  showOther.input.events.click();
+  assert.equal(plugin.data.settings.hide_attachments, true);
   assert.equal(
     plugin.data.settings.include_unlinked_attachments,
     true,
-    'hiding preserves the setting'
+    'turning Show other files off preserves include_unlinked_attachments preference'
   );
-  plugin.data.settings.hide_attachments = false;
-  Object.getPrototypeOf(view).buildSidePanel.call(view);
-  assert.equal(view.sideControls.has('include_unlinked_attachments'), true);
-  assert.equal(fileTypes.mock.callCount(), 2);
+  assert.deepEqual(showOtherSetAttr.mock.calls.at(-1).arguments, [
+    'aria-label',
+    'Show other files: off',
+  ]);
+  assert.equal(includeUnlinked.toUiValue(plugin.data.settings.include_unlinked_attachments), true);
+
+  assert.equal(view.gearMenuOpen, false);
+  assert.equal(view.gearPopoverEl.hidden, true);
+  view.gearButtonEl.events.click({});
+  assert.equal(view.gearMenuOpen, true);
+  assert.equal(view.gearPopoverEl.hidden, false);
+  assert.equal(view.gearButtonEl.attributes['aria-expanded'], 'true');
+  view.gearButtonEl.events.click({});
+  assert.equal(view.gearMenuOpen, false);
+  assert.equal(view.gearPopoverEl.hidden, true);
+  assert.equal(view.gearButtonEl.attributes['aria-expanded'], 'false');
+
   assert.equal(view.reverseArrowsRowEl.style.display, 'none');
   assert.equal(view.backgroundColorRowEl.style.display, 'none');
   assert.equal(
@@ -1971,11 +2050,13 @@ test('two saved layouts restore independent attachment visibility and exclusions
   }
 });
 
-test('a stored Selection tab opens as Sets', (t) => {
-  const { plugin } = fixture(t, { view_state: { settings_tab: 'selection' } });
-  assert.equal(plugin.data.view_state.settings_tab, 'sets');
-  plugin.data.view_state.settings_tab = 'selection';
-  assert.equal(plugin.getSettingsTab(), 'sets');
+test('stored Selection and Sets tabs open as Files', (t) => {
+  for (const legacyTab of ['selection', 'sets']) {
+    const { plugin } = fixture(t, { view_state: { settings_tab: legacyTab } });
+    assert.equal(plugin.data.view_state.settings_tab, 'files');
+    plugin.data.view_state.settings_tab = legacyTab;
+    assert.equal(plugin.getSettingsTab(), 'files');
+  }
 });
 
 test('group and rule editors never keep more than one empty row', (t) => {
@@ -2164,4 +2245,195 @@ test('Filters edit blacklist and whitelist as one list with modes and a hidden t
     plugin.data.whitelist.map((rule) => rule.query),
     ['name:alpha']
   );
+});
+
+test('annotations hitTest handles plain text labels without frames, normalizes legacy border fields off, and omits Frame toggle in editor', (t) => {
+  const {
+    hitTestAnnotation,
+    normalizeAnnotations,
+    getAnnotationMetrics,
+    drawAnnotationFrames,
+    drawAnnotationLabels,
+  } = loadSource('annotations.js');
+  const legacyFramed = normalizeAnnotations([
+    {
+      id: 't0',
+      text: 'Hi',
+      x: 0,
+      y: 0,
+      size: 20,
+      border: true,
+      width: 240,
+      height: 160,
+    },
+  ]);
+  assert.equal(legacyFramed[0].border, false);
+  assert.equal(legacyFramed[0].width, null);
+  assert.equal(legacyFramed[0].height, null);
+  const plainM = getAnnotationMetrics(legacyFramed[0]);
+  assert.equal(plainM.width, plainM.textWidth);
+  assert.equal(plainM.height, plainM.textHeight);
+
+  const normalized = normalizeAnnotations([
+    {
+      id: 't1',
+      text: 'Zone A',
+      x: 100,
+      y: 50,
+      size: 24,
+      color: '#AABBCC',
+      border: true,
+      width: 200,
+      height: 120,
+    },
+    { id: '', text: 'ignored' },
+    { id: 't1', text: 'dup' },
+  ]);
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].color, '#aabbcc');
+  assert.equal(normalized[0].border, false);
+  assert.equal(normalized[0].width, null);
+  assert.equal(normalized[0].height, null);
+
+  assert.equal(hitTestAnnotation(normalized, 100, 50, 1)?.part, 'move');
+  assert.equal(hitTestAnnotation(normalized, 200, 110, 1), null);
+  assert.equal(hitTestAnnotation(normalized, 200, 50, 1), null);
+
+  const { view, plugin } = fixture(t);
+  view.viewWidth = 800;
+  view.viewHeight = 600;
+  plugin.data.annotations = normalized;
+  view.hoverAnnotationId = 't1';
+  const calls = [];
+  const ctx = new Proxy(
+    {
+      globalAlpha: 1,
+      fill() {
+        calls.push({ kind: 'fill', style: this.fillStyle, alpha: this.globalAlpha });
+      },
+      stroke() {
+        calls.push({ kind: 'stroke', style: this.strokeStyle, alpha: this.globalAlpha });
+      },
+      fillText(text) {
+        calls.push({ kind: 'text', text, style: this.fillStyle, alpha: this.globalAlpha });
+      },
+      measureText: () => ({ width: 60 }),
+    },
+    {
+      get: (target, key) => (key in target ? target[key] : () => {}),
+    }
+  );
+  drawAnnotationFrames(view, ctx);
+  assert.equal(
+    calls.some((c) => c.kind === 'stroke' || c.kind === 'fill'),
+    false,
+    'frames are disabled'
+  );
+  drawAnnotationLabels(view, ctx);
+  assert(calls.some((c) => c.kind === 'text' && c.text === 'Zone A'));
+
+  view.wrapEl = element();
+  view.camera = { x: 0, y: 0, zoom: 1 };
+  Object.getPrototypeOf(view).editAnnotation.call(view, null, { x: 20, y: 30 });
+  assert.equal(plugin.data.annotations.length, 2, 'newly created label renders immediately');
+  assert.ok(view.editingAnnotationId, 'inline editing hides duplicate canvas text');
+  assert.ok(view.floatingEditorEl, 'inline annotation overlay mounts inside wrapEl');
+  const all = (el) => [el, ...el.children.flatMap(all)];
+  const editorEls = all(view.floatingEditorEl);
+  assert.equal(
+    editorEls.some(
+      (el) =>
+        el.text === 'Frame' || String(el.attributes?.['aria-label'] || '').startsWith('Frame:')
+    ),
+    false,
+    'Frame toggle removed from text editor'
+  );
+  const slider = editorEls.find((el) => el.type === 'range');
+  const textarea = editorEls.find((el) => el.tag === 'textarea');
+  const toolbar = editorEls.find((el) => String(el.cls || '').includes('annotation-toolbar'));
+  assert.ok(toolbar, 'compact style toolbar mounts separately from textarea');
+  assert.ok(
+    parseFloat(toolbar.style.top) + 32 <= parseFloat(textarea.style.top) ||
+      parseFloat(toolbar.style.top) >=
+        parseFloat(textarea.style.top) + parseFloat(textarea.style.height),
+    'toolbar never overlaps inline annotation text'
+  );
+  textarea.value = 'Updated live';
+  textarea.events.input();
+  slider.value = '42';
+  slider.events.input();
+  const created = plugin.data.annotations.find((a) => a.x === 20 && a.y === 30);
+  assert.equal(created.text, 'Updated live');
+  assert.equal(created.size, 42);
+  assert.equal(created.border, false);
+  assert.equal(
+    editorEls.some((el) => el.text === 'Theme'),
+    false,
+    'Theme button removed'
+  );
+  const resetBtn = editorEls.find((el) => el.attributes?.['aria-label'] === 'Reset style');
+  assert.ok(resetBtn, 'circular reset button exists');
+  resetBtn.events.click();
+  const afterReset = plugin.data.annotations.find((a) => a.x === 20 && a.y === 30);
+  assert.equal(afterReset.size, 24);
+  assert.equal(afterReset.color, null);
+  assert.equal(afterReset.border, false);
+  Object.getPrototypeOf(view).closeFloatingEditor.call(view);
+  assert.equal(view.floatingEditorEl, null);
+  assert.equal(view.editingAnnotationId, null);
+});
+
+test('selection context menu adds Link selected / Unlink selected and node linking connects two nodes on click', (t) => {
+  const { plugin, view } = fixture(t);
+  const vaultFiles = [
+    { path: 'alpha.md', basename: 'alpha', extension: 'md' },
+    { path: 'src/app.py', basename: 'app.py', extension: 'py' },
+  ];
+  view.app.vault.getMarkdownFiles = () => [vaultFiles[0]];
+  view.app.vault.getFiles = () => vaultFiles;
+  view.app.vault.getAbstractFileByPath = (p) => vaultFiles.find((f) => f.path === p) || null;
+  plugin.collectGraphData = Object.getPrototypeOf(plugin).collectGraphData.bind(plugin);
+  plugin.data.settings.hide_attachments = false;
+  plugin.data.settings.hide_orphans = false;
+  view.nodes = [
+    { id: 'alpha.md', x: 0, y: 0, degree: 0 },
+    { id: 'src/app.py', x: 40, y: 0, degree: 0, meta: { isAttachment: true } },
+  ];
+  view.nodeById = new Map(view.nodes.map((n) => [n.id, n]));
+  view.setNodeSelection(['alpha.md', 'src/app.py']);
+
+  const { obsidian } = require('./helpers/obsidian.cjs');
+  const menu = new obsidian.Menu();
+  const snapshot = view.captureNodeActionTargets();
+  Object.getPrototypeOf(view).addSelectionActionsToMenu.call(view, menu, snapshot, 0, 0);
+  const linkItem = menu.items.find((i) => i.title === 'Link selected');
+  assert.ok(linkItem);
+  linkItem.callback();
+  assert.deepEqual(plugin.data.custom_links, [{ source: 'alpha.md', target: 'src/app.py' }]);
+
+  const menu2 = new obsidian.Menu();
+  const snapshot2 = view.captureNodeActionTargets();
+  Object.getPrototypeOf(view).addSelectionActionsToMenu.call(view, menu2, snapshot2, 0, 0);
+  const unlinkItem = menu2.items.find((i) => i.title === 'Unlink selected');
+  assert.ok(unlinkItem);
+  unlinkItem.callback();
+  assert.deepEqual(plugin.data.custom_links, []);
+
+  plugin.data.settings.include_unlinked_attachments = true;
+  view.refreshFromVault({ keepCamera: true });
+  view.canvasEl = Object.assign(element(), {
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 400 }),
+  });
+  Object.getPrototypeOf(view).startLinkingFromNode.call(view, 'alpha.md');
+  assert.equal(view.linkSourceNodeId, 'alpha.md');
+  view.getNodeAtScreen = () => view.nodeById.get('src/app.py');
+  Object.getPrototypeOf(view).onMouseDown.call(view, {
+    button: 0,
+    clientX: 40,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.equal(view.linkSourceNodeId, null);
+  assert.deepEqual(plugin.data.custom_links, [{ source: 'alpha.md', target: 'src/app.py' }]);
 });

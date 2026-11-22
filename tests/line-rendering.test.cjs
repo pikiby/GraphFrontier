@@ -314,6 +314,123 @@ test('grid and edges use device-pixel backing and physical edge widths', (t) => 
   assert.equal(edges.strokes[0].width, 2);
 });
 
+test('resizeCanvas enforces fractional-DPR floor >= 1 while keeping physical edge width constant', (t) => {
+  const { view } = edgeView(t, { edge_width_scale: 1 });
+  const { element } = require('./helpers/obsidian.cjs');
+  view.wrapEl = Object.assign(element(), {
+    getBoundingClientRect: () => ({ width: 500.6, height: 300.4 }),
+  });
+  view.canvasEl = Object.assign(element(), { width: 1, height: 1 });
+  const transforms = [];
+  view.ctx = {
+    imageSmoothingQuality: 'low',
+    setTransform: (...args) => transforms.push(args),
+  };
+  view.contentEl.win = { devicePixelRatio: 0.8333333 };
+  Object.getPrototypeOf(view).resizeCanvas.call(view);
+
+  assert.equal(view.viewWidth, 500);
+  assert.equal(view.viewHeight, 300);
+  assert.equal(view.canvasEl.style.width, '500px');
+  assert.equal(view.canvasEl.style.height, '300px');
+  // rawDpr < 1 floors to 1 instead of dropping canvas backing resolution.
+  assert.equal(view.backingScale, 1);
+  assert.equal(render.getBackingScale(view), 1);
+  assert.equal(view.canvasEl.width, 500);
+  assert.equal(view.canvasEl.height, 300);
+  assert.deepEqual(transforms.at(-1), [1, 0, 0, 1, 0, 0]);
+  assert.equal(view.ctx.imageSmoothingQuality, 'high');
+  assert.equal(getEdgeCssWidth(2, view.devicePixelRatio), 2 / 0.8333333);
+
+  view.contentEl.win.devicePixelRatio = 2;
+  Object.getPrototypeOf(view).resizeCanvas.call(view);
+  assert.equal(view.backingScale, 2);
+  assert.equal(view.canvasEl.width, 1000);
+  assert.equal(view.canvasEl.height, 600);
+});
+
+test('node_border_width draws auto-contrast inset node borders scaled cleanly by radius', (t) => {
+  assert.equal(loadSource('constants.js').DEFAULT_DATA.settings.node_border_width, 0);
+  const { getNodeBorderColor } = loadSource('render-metrics.js');
+  const darkBlueBorder = getNodeBorderColor('#4c78d8', {
+    colorScheme: 'dark',
+    background: '#111418',
+  });
+  const lightBlueBorder = getNodeBorderColor('#4c78d8', {
+    colorScheme: 'light',
+    background: '#ffffff',
+  });
+  assert.notEqual(darkBlueBorder, '#4c78d8');
+  assert.notEqual(lightBlueBorder, '#4c78d8');
+  // Dark theme brightens saturated blue; light theme darkens it.
+  assert(parseInt(darkBlueBorder.slice(1, 3), 16) > 0x4c);
+  assert(parseInt(lightBlueBorder.slice(1, 3), 16) < 0x4c);
+
+  const { view, plugin } = edgeView(t, { node_border_width: 0.8 });
+  view.camera.zoom = 4;
+  const rec = strokeRecorder();
+  render.drawNodes(view, rec.ctx);
+  assert.equal(rec.strokes.length, 2, 'draws auto-contrast border on both filled nodes');
+  // Sub-1px backing width is mapped via setCrispStroke to 1px with proportional opacity.
+  assert.equal(rec.strokes[0].width, 1);
+  assert(Math.abs(rec.strokes[0].alpha - 0.85 * 0.8) < 1e-12);
+
+  view.camera.zoom = 0.25;
+  rec.strokes.length = 0;
+  render.drawNodes(view, rec.ctx);
+  assert(rec.strokes[0].alpha < 0.85 * 0.8, 'scales border softly when zoomed far out');
+
+  view.camera.zoom = 4;
+  plugin.data.settings.node_border_width = 1.5;
+  rec.strokes.length = 0;
+  render.drawNodes(view, rec.ctx);
+  assert.equal(rec.strokes[0].width, 1.5);
+
+  plugin.data.settings.node_border_width = 0;
+  rec.strokes.length = 0;
+  render.drawNodes(view, rec.ctx);
+  assert.equal(rec.strokes.length, 0, 'node_border_width: 0 disables node borders');
+
+  // Verify prepared appearance skips borderColor calculation when disabled and invalidates cleanly on toggle.
+  const noBorderApp = render.getPreparedAppearance(view);
+  assert.equal(noBorderApp.hasBorders, false);
+  assert.equal(noBorderApp.nodeStyleList[0].borderColor, null);
+
+  plugin.data.settings.node_border_width = 1;
+  const restoredBorderApp = render.getPreparedAppearance(view);
+  assert.equal(restoredBorderApp.hasBorders, true);
+  assert.ok(restoredBorderApp.nodeStyleList[0].borderColor);
+
+  plugin.data.settings.node_border_width = 0;
+  const clearedBorderApp = render.getPreparedAppearance(view);
+  assert.equal(clearedBorderApp.hasBorders, false);
+  assert.equal(clearedBorderApp.nodeStyleList[0].borderColor, null);
+
+  // Also test batched path (>= 200 nodes) at node_border_width: 0.
+  const batched = edgeView(t, { node_border_width: 0 });
+  batched.view.nodes = Array.from({ length: 220 }, (_, i) => ({
+    id: `n${i}.md`,
+    x: (i % 20) * 15,
+    y: Math.floor(i / 20) * 15,
+    degree: 1,
+  }));
+  batched.view.nodeById = new Map(batched.view.nodes.map((n) => [n.id, n]));
+  batched.view.camera.zoom = 2;
+  batched.view.viewWidth = 1000;
+  batched.view.viewHeight = 1000;
+  const batchedApp = render.getPreparedAppearance(batched.view);
+  assert.equal(batchedApp.hasBorders, false);
+  assert.equal(batchedApp.nodeStyleList[0].borderColor, null);
+  const recBatched = strokeRecorder();
+  recBatched.ctx.moveTo = () => {};
+  render.drawNodes(batched.view, recBatched.ctx, batchedApp);
+  assert.equal(
+    recBatched.strokes.length,
+    0,
+    'batched nodes emit 0 border strokes when border width is 0'
+  );
+});
+
 test('translucent edges of one appearance share a single stroke', (t) => {
   const { view, plugin } = edgeView(t, { edge_width_scale: 1, edge_opacity: 0.4 });
   view.nodes.push({ id: 'c', x: 25, y: -25, degree: 2 }, { id: 'd', x: 25, y: 25, degree: 2 });
@@ -691,4 +808,148 @@ test('hidden holder label follows the global Text size like node labels', (t) =>
   assert.equal(normal.size, 10, 'default Text size matches the default node label size');
   assert(large.rect.h > normal.rect.h, 'the backdrop grows with the text');
   assert(fontPx(9, 10).size > normal.size, 'zooming in enlarges the label like node labels');
+});
+
+test('large graphs batch node fills and borders by style while preserving special rings and labels', (t) => {
+  const { view, plugin } = edgeView(t, {
+    node_border_width: 1,
+    node_color: '#7aa2f7',
+    label_zoom_steps: 40,
+  });
+  plugin.data.groups = [
+    { id: 'hex', query: 'tag:hex', color: '#22aa88', settings: { node_shape: 6 } },
+  ];
+  view.viewWidth = 800;
+  view.viewHeight = 800;
+  view.camera = { x: 0, y: 0, zoom: 1 };
+  const nodes = [];
+  for (let i = 0; i < 201; i++) {
+    nodes.push({
+      id: `n-${i}`,
+      label: `n-${i}`,
+      x: (i % 20) * 10 - 95,
+      y: Math.floor(i / 20) * 10 - 100,
+      degree: i % 5,
+    });
+  }
+  for (let i = 0; i < 50; i++) {
+    nodes.push({
+      id: `hex-${i}`,
+      label: `hex-${i}`,
+      x: (i % 10) * 10 - 45,
+      y: 30 + Math.floor(i / 10) * 10,
+      degree: 1,
+      meta: { tags: ['hex'] },
+    });
+  }
+  nodes.push({
+    id: 'sub-0',
+    label: 'sub-0',
+    x: -150,
+    y: 0,
+    degree: 2,
+    meta: { subgraph: true },
+  });
+  for (let i = 0; i < 8; i++) {
+    nodes.push({
+      id: `de-${i}`,
+      label: `de-${i}`,
+      x: -120 + i * 20,
+      y: 120,
+      degree: 3,
+      meta: { darkEnergy: true },
+    });
+  }
+  view.nodes = nodes;
+  view.nodeById = new Map(nodes.map((node) => [node.id, node]));
+  view.edges = [];
+  view.hoverNodeId = 'n-0';
+  view.hoverFocusNodeId = 'n-0';
+  view.hoverFocusProgress = 1;
+
+  const drawPass = () => {
+    let fills = 0;
+    let texts = 0;
+    const strokes = [];
+    let batchedChordErrors = 0;
+    let ops = [];
+    let moveTosInPath = 0;
+    let arcsInPath = 0;
+    const ctx = {
+      lineWidth: 1,
+      globalAlpha: 1,
+      strokeStyle: '',
+      fillStyle: '',
+      font: '',
+      textAlign: '',
+      textBaseline: '',
+      beginPath() {
+        ops = [];
+        moveTosInPath = 0;
+        arcsInPath = 0;
+      },
+      moveTo() {
+        ops.push('moveTo');
+        moveTosInPath++;
+      },
+      lineTo() {
+        ops.push('lineTo');
+      },
+      closePath() {
+        ops.push('closePath');
+      },
+      arc() {
+        if (arcsInPath > 0 && ops.at(-1) !== 'moveTo') batchedChordErrors++;
+        ops.push('arc');
+        arcsInPath++;
+      },
+      fill() {
+        fills++;
+      },
+      stroke() {
+        strokes.push({
+          width: this.lineWidth,
+          alpha: this.globalAlpha,
+          style: this.strokeStyle,
+          arcs: arcsInPath,
+          moveTos: moveTosInPath,
+        });
+      },
+      fillText() {
+        texts++;
+      },
+    };
+    render.drawNodes(view, ctx);
+    return { fills, strokes, texts, batchedChordErrors };
+  };
+
+  const withBorders = drawPass();
+  assert.equal(withBorders.batchedChordErrors, 0, 'batched circles must moveTo before every arc');
+  assert(
+    withBorders.fills < 20,
+    `expected batched fills (< 20), got ${withBorders.fills} for 260 nodes`
+  );
+  assert(
+    withBorders.strokes.length < 40,
+    `expected batched strokes (< 40), got ${withBorders.strokes.length} for 260 nodes`
+  );
+  assert(
+    withBorders.strokes.some((stroke) => stroke.style === view.canvasTheme.selection),
+    'hover ring still draws'
+  );
+  assert(
+    withBorders.strokes.some((stroke) => stroke.width === 3),
+    'subgraph outline still draws'
+  );
+  assert(
+    withBorders.strokes.filter((stroke) => stroke.width === 1.5).length >= 8,
+    'darkEnergy halos still draw'
+  );
+  assert.equal(withBorders.texts, 260, 'labels still draw for all visible nodes');
+
+  plugin.data.settings.node_border_width = 0;
+  const withoutBorders = drawPass();
+  assert.equal(withoutBorders.batchedChordErrors, 0);
+  // Only special strokes remain when borders are off: 1 hover + 1 subgraph + 8 darkEnergy.
+  assert.equal(withoutBorders.strokes.length, 10);
 });

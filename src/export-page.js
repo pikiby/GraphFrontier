@@ -96,6 +96,10 @@ function keepNodes(layout, keep) {
   result.orbit_pins = orbits(layout.orbit_pins);
   result.saved_layout_orbit_pins = orbits(layout.saved_layout_orbit_pins);
   result.dark_energy = layout.dark_energy.filter((item) => keep(item.id));
+  result.custom_links = (layout.custom_links || []).filter(
+    (link) => keep(link.source) && keep(link.target)
+  );
+  result.annotations = [...(layout.annotations || [])];
   result.subgraphs = layout.subgraphs
     .filter((item) => keep(item.id))
     .map((item) => ({

@@ -1,6 +1,6 @@
 {
   "name": "graphfrontier",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "private": true,
   "description": "GraphFrontier Obsidian plugin",
   "license": "MIT",
@@ -8,6 +8,12 @@
   "scripts": {
     "build": "node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs dev",
+    "build:standalone": "npm --prefix packages/standalone run build",
+    "test:standalone": "npm --prefix packages/standalone test",
+    "build:vscode": "npm --prefix packages/vscode run build",
+    "package:vscode": "npm --prefix packages/vscode run package",
+    "test:vscode": "npm --prefix packages/vscode test",
+    "check:release:vscode": "node packages/vscode/scripts/check-vscode-release.cjs",
     "lint": "eslint .",
     "test": "node --test tests/*.test.cjs",
     "check:release": "node scripts/check-release.cjs",

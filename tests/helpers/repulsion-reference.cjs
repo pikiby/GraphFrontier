@@ -58,7 +58,7 @@ function applyReferenceRepulsion({
     const squared = dx * dx + dy * dy;
     if (squared > radius * radius) return;
     const distance = Math.sqrt(squared) || 0.0001;
-    const safe = Math.max(28, distance);
+    const safe = Math.max(12, distance);
     const force = Math.min(16, strength / (safe * safe));
     const fx = (dx / distance) * force;
     const fy = (dy / distance) * force;

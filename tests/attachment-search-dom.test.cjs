@@ -77,7 +77,7 @@ test(
       });
       const input = page.locator('.graphfrontier-file-types-search input');
       await input.focus();
-      assert.equal(await input.inputValue(), 'File type: ');
+      assert.equal(await input.inputValue(), '');
       const bulkStyles = await page.evaluate(() => {
         const reference = document.createElement('button');
         reference.className =
@@ -134,7 +134,7 @@ test(
       let state = await checkboxState();
       assert.equal(state.checked[0], false);
       assert.deepEqual(state.excluded, ['png']);
-      assert.equal(await input.inputValue(), 'File type: .pdf, No extension');
+      assert.equal(await input.inputValue(), '.pdf, No extension');
       assert.equal(await page.locator('input[type=checkbox]').count(), 3);
       await page.locator('input[type=checkbox]').first().click();
       state = await checkboxState();
@@ -156,7 +156,7 @@ test(
       await input.pressSequentially('.PnG');
       assert.equal(
         await input.inputValue(),
-        'File type: .PnG',
+        '.PnG',
         'same-input replacement must not restore summary'
       );
       await page.waitForTimeout(50);
@@ -184,49 +184,47 @@ test(
       assert.equal(dimensions.height, 28);
       assert.equal(dimensions.font, '12px');
       await input.press('Escape');
-      assert.equal(await input.inputValue(), 'File type: .png');
+      assert.equal(await input.inputValue(), '.png');
       assert.equal(await page.locator('.graphfrontier-input-menu').count(), 0);
       await input.click();
-      assert.equal(await input.inputValue(), 'File type: ');
+      assert.equal(await input.inputValue(), '');
       await input.evaluate((el) => el.blur());
-      assert.equal(await input.inputValue(), 'File type: .png');
+      assert.equal(await input.inputValue(), '.png');
       assert.equal(await page.locator('.graphfrontier-input-menu').count(), 0);
 
       await input.focus();
       await input.press('Home');
       await input.press('Delete');
-      assert.equal(await input.inputValue(), 'File type: ');
+      assert.equal(await input.inputValue(), '');
       await input.press('End');
       await input.press('Backspace');
-      assert.equal(await input.inputValue(), 'File type: ');
+      assert.equal(await input.inputValue(), '');
       await input.press('Control+a');
       await input.press('Backspace');
-      assert.equal(await input.inputValue(), 'File type: ');
+      assert.equal(await input.inputValue(), '');
       await input.press('Control+a');
       await input.pressSequentially('pdf');
-      assert.equal(await input.inputValue(), 'File type: pdf');
+      assert.equal(await input.inputValue(), 'pdf');
       assert.equal(await page.locator('input[type=checkbox]').count(), 1);
       await page.getByRole('button', { name: 'All', exact: true }).click();
       assert.deepEqual((await checkboxState()).excluded, ['']);
-      assert.equal(await input.inputValue(), 'File type: .png, .pdf');
+      assert.equal(await input.inputValue(), '.png, .pdf');
       assert.equal(await page.locator('input[type=checkbox]').count(), 1);
       await page.getByRole('button', { name: 'Clear file type search' }).click();
-      assert.equal(await input.inputValue(), 'File type: ');
+      assert.equal(await input.inputValue(), '');
       assert.deepEqual((await checkboxState()).excluded, ['']);
 
       await input.pressSequentially('pdf');
-      await input.evaluate((el) =>
-        el.setSelectionRange('File type: '.length, 'File type: '.length)
-      );
+      await input.evaluate((el) => el.setSelectionRange(0, 0));
       await input.press('Delete');
-      assert.equal(await input.inputValue(), 'File type: df', 'forward delete edits suffix');
+      assert.equal(await input.inputValue(), 'df', 'forward delete edits suffix');
       await input.press('End');
       await input.press('Control+Backspace');
-      assert.equal(await input.inputValue(), 'File type: ');
+      assert.equal(await input.inputValue(), '');
       await input.pressSequentially('pdf');
       await input.press('Control+a');
       await input.press('Delete');
-      assert.equal(await input.inputValue(), 'File type: ');
+      assert.equal(await input.inputValue(), '');
 
       await input.press('Escape');
       await page.setViewportSize({ width: 390, height: 800 });

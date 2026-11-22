@@ -76,25 +76,18 @@ function getFocusEdgeWidth(physicalWidth, progress) {
   return base + (target - base) * quantizeFocusProgress(progress);
 }
 
-// Highlighted edges keep their own color and move it towards the contrast color
-// (the theme text) by up to 45%, so emphasis follows edge_color without a jump.
-// A custom hover color replaces that contrast blend and is reached fully.
-function getFocusEdgeColor(color, contrastColor, progress, hoverColor) {
-  const parse = (value) => {
-    const text = String(value || '').trim();
-    let match = /^#([0-9a-f]{3})$/i.exec(text);
-    if (match) return match[1].split('').map((digit) => Number.parseInt(digit + digit, 16));
-    match = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(text);
-    if (match) return [0, 2, 4].map((at) => Number.parseInt(match[1].slice(at, at + 2), 16));
-    match = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(text);
-    if (match) return [1, 2, 3].map((at) => Math.max(0, Math.min(255, Number(match[at]))));
-    return null;
-  };
-  const custom = /^#[0-9a-f]{6}$/i.test(String(hoverColor || '')) ? hoverColor : null;
-  const amount = quantizeFocusProgress(progress) * (custom ? 1 : 0.45);
-  const from = parse(color);
-  const to = parse(custom || contrastColor);
-  if (!from || !to || amount <= 0) return color;
+function parseColorChannels(value) {
+  const text = String(value || '').trim();
+  let match = /^#([0-9a-f]{3})$/i.exec(text);
+  if (match) return match[1].split('').map((digit) => Number.parseInt(digit + digit, 16));
+  match = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(text);
+  if (match) return [0, 2, 4].map((at) => Number.parseInt(match[1].slice(at, at + 2), 16));
+  match = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(text);
+  if (match) return [1, 2, 3].map((at) => Math.max(0, Math.min(255, Number(match[at]))));
+  return null;
+}
+
+function blendColorChannels(from, to, amount) {
   return (
     '#' +
     from
@@ -105,6 +98,48 @@ function getFocusEdgeColor(color, contrastColor, progress, hoverColor) {
       )
       .join('')
   );
+}
+
+const NODE_BORDER_COLOR_CACHE = new Map();
+
+// Auto-contrast outline color for filled nodes: subtly lightens dark/saturated colors on dark
+// themes and darkens light/medium colors on light themes so adjacent/low-contrast nodes stay crisp.
+function getNodeBorderColor(fillColor, theme) {
+  const isLight = theme?.colorScheme === 'light';
+  const cacheKey = `${fillColor}|${isLight ? 'L' : 'D'}`;
+  const cached = NODE_BORDER_COLOR_CACHE.get(cacheKey);
+  if (cached) return cached;
+  const channels = parseColorChannels(fillColor);
+  if (!channels) return theme?.text || '#e6e8ed';
+  const [r, g, b] = channels;
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  let result;
+  if (isLight) {
+    result =
+      luminance > 0.22
+        ? blendColorChannels(channels, [0, 0, 0], 0.36)
+        : blendColorChannels(channels, [255, 255, 255], 0.36);
+  } else {
+    result =
+      luminance < 0.78
+        ? blendColorChannels(channels, [255, 255, 255], 0.4)
+        : blendColorChannels(channels, parseColorChannels(theme?.background) || [17, 20, 24], 0.32);
+  }
+  if (NODE_BORDER_COLOR_CACHE.size > 512) NODE_BORDER_COLOR_CACHE.clear();
+  NODE_BORDER_COLOR_CACHE.set(cacheKey, result);
+  return result;
+}
+
+// Highlighted edges keep their own color and move it towards the contrast color
+// (the theme text) by up to 45%, so emphasis follows edge_color without a jump.
+// A custom hover color replaces that contrast blend and is reached fully.
+function getFocusEdgeColor(color, contrastColor, progress, hoverColor) {
+  const custom = /^#[0-9a-f]{6}$/i.test(String(hoverColor || '')) ? hoverColor : null;
+  const amount = quantizeFocusProgress(progress) * (custom ? 1 : 0.45);
+  const from = parseColorChannels(color);
+  const to = parseColorChannels(custom || contrastColor);
+  if (!from || !to || amount <= 0) return color;
+  return blendColorChannels(from, to, amount);
 }
 
 // Highlighted edges lose their translucency: opacity rises with progress to fully opaque.
@@ -120,6 +155,7 @@ export {
   getFocusEdgeWidth,
   getFocusEdgeColor,
   getFocusEdgeAlpha,
+  getNodeBorderColor,
   getNodeScreenRadius,
   getNodeWorldRadius,
   getEdgeCssWidth,

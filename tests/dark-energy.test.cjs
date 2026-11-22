@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { fixture, loadSource, element, notices } = require('./helpers/obsidian.cjs');
-const { PREFIX, darkEnergyNodes, getDarkEnergyTargets, applyDarkEnergyForce } =
+const { PREFIX, GRAVITY_CORE_RADIUS, darkEnergyNodes, getDarkEnergyTargets, applyDarkEnergyForce } =
   loadSource('dark-energy.js');
 const { DarkEnergyModal } = loadSource('dark-energy-modal.js');
 const { buildNodeContextMenu } = loadSource('node-context-menu.js');
@@ -238,9 +238,9 @@ test('editor starts with typed query and rejects incomplete rules before saving'
   modal.onOpen();
   const descendants = (el) => [el, ...el.children.flatMap(descendants)];
   const els = descendants(modal.contentEl);
-  const query = els.find((el) => el.cls === 'graphfrontier-group-query' && el.value === 'name:');
+  const query = els.find((el) => el.cls === 'graphfrontier-group-query' && el.value === 'tag:');
   const save = els.find((el) => el.text === 'Save');
-  assert.equal(query.value, 'name:');
+  assert.equal(query.value, 'tag:');
   save.events.click();
   assert.equal(saved.length, 0);
   assert.match(notices.at(-1), /complete every query/);
@@ -249,13 +249,34 @@ test('editor starts with typed query and rejects incomplete rules before saving'
   assert.deepEqual(saved[0].queries, ['path:Folder/']);
 });
 
-test('gravity attraction is halved, including its cap', (t) => {
+test('gravity well attracts outside core radius, balances at rim, and pushes outward inside', (t) => {
   const { view, node } = setup(t);
-  for (const distance of [10, 200, 100000]) {
-    view.nodeById.get(center().id).x = distance;
+  const centerNode = view.nodeById.get(center().id);
+
+  centerNode.x = 0;
+  const zeroA = { ax: 0, ay: 0 };
+  applyDarkEnergyForce(view, node, zeroA, getDarkEnergyTargets(view));
+  const zeroB = { ax: 0, ay: 0 };
+  applyDarkEnergyForce(view, node, zeroB, getDarkEnergyTargets(view));
+  assert(Math.hypot(zeroA.ax, zeroA.ay) > 0, 'coincident node gets deterministic outward push');
+  assert.deepEqual(zeroA, zeroB);
+
+  centerNode.x = 10;
+  const inside = { ax: 0, ay: 0 };
+  applyDarkEnergyForce(view, node, inside, getDarkEnergyTargets(view));
+  assert(inside.ax < 0 && inside.ay === 0, 'inside core radius force pushes away from center');
+
+  centerNode.x = GRAVITY_CORE_RADIUS;
+  const rim = { ax: 0, ay: 0 };
+  applyDarkEnergyForce(view, node, rim, getDarkEnergyTargets(view));
+  assert.equal(rim.ax, 0);
+  assert.equal(rim.ay, 0);
+
+  for (const distance of [200, 100000]) {
+    centerNode.x = distance;
     const accel = { ax: 0, ay: 0 };
     applyDarkEnergyForce(view, node, accel, getDarkEnergyTargets(view));
-    const previousForce = Math.min(1.6, distance * 10 * 0.00015);
+    const previousForce = Math.min(1.6, (distance - GRAVITY_CORE_RADIUS) * 10 * 0.00015);
     assert.equal(accel.ax, previousForce / 2);
     assert.equal(accel.ay, 0);
   }
@@ -361,7 +382,7 @@ test('repulsion affects only nonmatching nodes, fades with distance and reuses m
     applyDarkEnergyForce(view, target, accel, getDarkEnergyTargets(view));
     return accel;
   };
-  assert.equal(acceleration(node).ax, 0.15);
+  assert.equal(acceleration(node).ax, ((200 - GRAVITY_CORE_RADIUS) * 10 * 0.00015) / 2);
   const near = acceleration(other).ax;
   assert.ok(near < 0);
   assert.equal(near, (-0.004 * 50 * (1 - 400 / 1000) ** 2) / 2);
@@ -434,4 +455,100 @@ test('legacy field shapes load as ordinary point attractors', (t) => {
     });
     assert.deepEqual(data.dark_energy, [item]);
   }
+});
+
+test('creating a gravity node renders it immediately before rules are configured and stays after closing editor', (t) => {
+  const { view, plugin } = setup(t, []);
+  plugin.collectGraphData = Object.getPrototypeOf(plugin).collectGraphData.bind(plugin);
+  view.wrapEl = element();
+  view.camera = { x: 0, y: 0, zoom: 1 };
+  view.editDarkEnergy(null, { x: 75, y: -40 });
+  assert.equal(plugin.data.dark_energy.length, 1);
+  const created = plugin.data.dark_energy[0];
+  assert.equal(created.x, 75);
+  assert.equal(created.y, -40);
+  assert.deepEqual(created.queries, []);
+  assert.ok(view.nodeById.has(created.id), 'gravity node is immediately visible in view');
+  assert.ok(view.floatingEditorEl, 'floating editor opens beside the visible gravity node');
+  const all = (el) => [el, ...el.children.flatMap(all)];
+  const els = all(view.floatingEditorEl);
+  const nameInput = els.find((el) => el.attributes?.['aria-label'] === 'Gravity node name');
+  nameInput.value = 'Cluster Hub';
+  nameInput.events.input();
+  assert.equal(plugin.data.dark_energy[0].name, 'Cluster Hub');
+  const queryInput = els.find((el) => el.attributes?.['aria-label'] === 'Gravity node query');
+  assert.equal(queryInput.value, 'tag:');
+  queryInput.value = 'tag:database';
+  queryInput.events.input();
+  assert.deepEqual(plugin.data.dark_energy[0].queries, ['tag:database']);
+  view.closeFloatingEditor();
+  assert.equal(plugin.data.dark_energy.length, 1);
+  assert.ok(view.nodeById.has(created.id));
+});
+
+test('gravity well holds single and clustered nodes in an open halo without overlapping the center or each other', (t) => {
+  const single = setup(t, [center({ strength: 30, repulsion: 0 })]);
+  for (let i = 0; i < 300 && !single.view.layoutPaused; i++) single.view.stepSimulation();
+  const singleDist = Math.hypot(single.node.x - 200, single.node.y);
+  assert(
+    singleDist > 35 && singleDist < 55,
+    `expected single node halo near GRAVITY_CORE_RADIUS=45, got ${singleDist.toFixed(1)}`
+  );
+
+  const cluster = fixture(t, {
+    dark_energy: [center({ strength: 100, repulsion: 0 })],
+    settings: {
+      repel_strength: 116,
+      repel_radius: 535,
+      center_strength: 0,
+      base_link_strength: 0,
+      damping: 0.1,
+      layout_autosave: false,
+    },
+  });
+  Object.assign(cluster.plugin.data.settings, {
+    repel_strength: 116,
+    repel_radius: 535,
+    center_strength: 0,
+    base_link_strength: 0,
+    damping: 0.1,
+  });
+  cluster.graph.nodes = [
+    ...Array.from({ length: 30 }, (_, i) => ({
+      id: `m${i}.md`,
+      label: `M${i}`,
+      meta: { path: `m${i}.md`, fileName: `M${i}`, tags: ['database'], properties: new Map() },
+    })),
+    ...darkEnergyNodes(cluster.plugin.data.dark_energy),
+  ];
+  cluster.view.refreshFromVault({ keepCamera: true });
+  const members = Array.from({ length: 30 }, (_, i) => {
+    const n = cluster.view.nodeById.get(`m${i}.md`);
+    n.x = 180 + (i % 6) * 8;
+    n.y = -20 + Math.floor(i / 6) * 8;
+    n.vx = 0;
+    n.vy = 0;
+    return n;
+  });
+  for (let i = 0; i < 400; i++) cluster.view.stepSimulation();
+
+  let minDistToGravity = Infinity;
+  let minPairDist = Infinity;
+  for (let i = 0; i < members.length; i++) {
+    minDistToGravity = Math.min(minDistToGravity, Math.hypot(members[i].x - 200, members[i].y));
+    for (let j = i + 1; j < members.length; j++) {
+      minPairDist = Math.min(
+        minPairDist,
+        Math.hypot(members[i].x - members[j].x, members[i].y - members[j].y)
+      );
+    }
+  }
+  assert(
+    minDistToGravity > 20,
+    `expected clustered nodes to stay outside gravity core (min=${minDistToGravity.toFixed(1)})`
+  );
+  assert(
+    minPairDist > 12,
+    `expected clustered nodes not to collapse on each other (minPair=${minPairDist.toFixed(1)})`
+  );
 });

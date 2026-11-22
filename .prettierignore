@@ -2,6 +2,9 @@ node_modules
 /main.js
 .obsidian/
 /dist/
+packages/*/dist/
+packages/*/node_modules/
+packages/*/*.vsix
 /.pcw/
 /skills/
 /.playwright-mcp/

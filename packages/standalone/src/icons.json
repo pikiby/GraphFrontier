@@ -1,0 +1,2467 @@
+{
+  "archive": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-archive"]
+    ],
+    "children": [
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "2"],
+          ["y", "3"],
+          ["width", "20"],
+          ["height", "5"],
+          ["rx", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M10 12h4"]],
+        "children": []
+      }
+    ]
+  },
+  "arrow-left": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-arrow-left"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "m12 19-7-7 7-7"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M19 12H5"]],
+        "children": []
+      }
+    ]
+  },
+  "bookmark": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-bookmark"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"
+          ]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "check-circle": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-check-circle"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M21.801 10A10 10 0 1 1 17 3.335"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m9 11 3 3L22 4"]],
+        "children": []
+      }
+    ]
+  },
+  "check-square": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-check-square"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 10.656V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12.344"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m9 11 3 3L22 4"]],
+        "children": []
+      }
+    ]
+  },
+  "chevron-right": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-chevron-right"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "m9 18 6-6-6-6"]],
+        "children": []
+      }
+    ]
+  },
+  "code": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-code"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "m16 18 6-6-6-6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m8 6-6 6 6 6"]],
+        "children": []
+      }
+    ]
+  },
+  "command": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-command"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"]],
+        "children": []
+      }
+    ]
+  },
+  "copy": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-copy"]
+    ],
+    "children": [
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "8"],
+          ["y", "8"],
+          ["width", "14"],
+          ["height", "14"],
+          ["rx", "2"],
+          ["ry", "2"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"]],
+        "children": []
+      }
+    ]
+  },
+  "delete": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-delete"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M10 5a2 2 0 0 0-1.344.519l-6.328 5.74a1 1 0 0 0 0 1.481l6.328 5.741A2 2 0 0 0 10 19h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m12 9 6 6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m18 9-6 6"]],
+        "children": []
+      }
+    ]
+  },
+  "dot-network": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-git-fork"]
+    ],
+    "children": [
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "12"],
+          ["cy", "18"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "6"],
+          ["cy", "6"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "18"],
+          ["cy", "6"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M12 12v3"]],
+        "children": []
+      }
+    ]
+  },
+  "ellipsis": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-ellipsis"]
+    ],
+    "children": [
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "12"],
+          ["cy", "12"],
+          ["r", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "19"],
+          ["cy", "12"],
+          ["r", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "5"],
+          ["cy", "12"],
+          ["r", "1"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "external-link": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-external-link"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M15 3h6v6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M10 14 21 3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"]],
+        "children": []
+      }
+    ]
+  },
+  "eye": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-eye"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "12"],
+          ["cy", "12"],
+          ["r", "3"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "eye-off": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-eye-off"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M14.084 14.158a3 3 0 0 1-4.242-4.242"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m2 2 20 20"]],
+        "children": []
+      }
+    ]
+  },
+  "file": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-file"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M14 2v5a1 1 0 0 0 1 1h5"]],
+        "children": []
+      }
+    ]
+  },
+  "filter": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-filter"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z"
+          ]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "focus": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-focus"]
+    ],
+    "children": [
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "12"],
+          ["cy", "12"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 7V5a2 2 0 0 1 2-2h2"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M17 3h2a2 2 0 0 1 2 2v2"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 17v2a2 2 0 0 1-2 2h-2"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M7 21H5a2 2 0 0 1-2-2v-2"]],
+        "children": []
+      }
+    ]
+  },
+  "folder-input": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-folder-input"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M2 13h10"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m9 16 3-3-3-3"]],
+        "children": []
+      }
+    ]
+  },
+  "folder-open": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-folder-open"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"
+          ]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "folder-search": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-folder-search"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M10.7 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v4.1"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m21 21-1.9-1.9"]],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "17"],
+          ["cy", "17"],
+          ["r", "3"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "form": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-form"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M4 14h6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M4 2h10"]],
+        "children": []
+      },
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "4"],
+          ["y", "18"],
+          ["width", "16"],
+          ["height", "4"],
+          ["rx", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "4"],
+          ["y", "6"],
+          ["width", "16"],
+          ["height", "4"],
+          ["rx", "1"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "git-branch": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-git-branch"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M15 6a9 9 0 0 0-9 9V3"]],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "18"],
+          ["cy", "6"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "6"],
+          ["cy", "18"],
+          ["r", "3"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "git-merge": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-git-merge"]
+    ],
+    "children": [
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "18"],
+          ["cy", "18"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "6"],
+          ["cy", "6"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M6 21V9a9 9 0 0 0 9 9"]],
+        "children": []
+      }
+    ]
+  },
+  "grid": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-grid"]
+    ],
+    "children": [
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "3"],
+          ["y", "3"],
+          ["width", "18"],
+          ["height", "18"],
+          ["rx", "2"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 9h18"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 15h18"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M9 3v18"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M15 3v18"]],
+        "children": []
+      }
+    ]
+  },
+  "group": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-group"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 7V5c0-1.1.9-2 2-2h2"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M17 3h2c1.1 0 2 .9 2 2v2"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 17v2c0 1.1-.9 2-2 2h-2"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M7 21H5c-1.1 0-2-.9-2-2v-2"]],
+        "children": []
+      },
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "7"],
+          ["y", "7"],
+          ["width", "7"],
+          ["height", "5"],
+          ["rx", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "10"],
+          ["y", "12"],
+          ["width", "7"],
+          ["height", "5"],
+          ["rx", "1"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "hard-drive": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-hard-drive"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M10 16h.01"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21.946 12.013H2.054"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M6 16h.01"]],
+        "children": []
+      }
+    ]
+  },
+  "layout": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-layout"]
+    ],
+    "children": [
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "3"],
+          ["y", "3"],
+          ["width", "18"],
+          ["height", "18"],
+          ["rx", "2"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 9h18"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M9 21V9"]],
+        "children": []
+      }
+    ]
+  },
+  "link": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M13.1404 10C13.6728 10.3955 14.1134 10.9001 14.4322 11.4796C14.7511 12.0591 14.9407 12.6999 14.9882 13.3586C15.0357 14.0172 14.94 14.6783 14.7076 15.297C14.4751 15.9157 14.1115 16.4775 13.6412 16.9443L10.8588 19.7073C9.98423 20.5462 8.81284 21.0103 7.59697 20.9998C6.38109 20.9893 5.21801 20.505 4.35822 19.6512C3.49844 18.7974 3.01074 17.6424 3.00018 16.435C2.98961 15.2276 3.45702 14.0644 4.30173 13.1959L5.88768 11.6117"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M10.8596 14C10.3272 13.6045 9.88658 13.0999 9.56776 12.5204C9.24894 11.9409 9.05935 11.3001 9.01185 10.6414C8.96435 9.98279 9.06004 9.32171 9.29245 8.70302C9.52486 8.08433 9.88853 7.52251 10.3588 7.05567L13.1412 4.29268C14.0158 3.45384 15.1872 2.98968 16.403 3.00017C17.6189 3.01067 18.782 3.49497 19.6418 4.34877C20.5016 5.20257 20.9893 6.35756 20.9998 7.56498C21.0104 8.77239 20.543 9.93562 19.6983 10.8041L18.1123 12.379"
+          ]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "list": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-list"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 5h.01"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 12h.01"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 19h.01"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 5h13"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 12h13"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 19h13"]],
+        "children": []
+      }
+    ]
+  },
+  "list-plus": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-list-plus"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M16 5H3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M11 12H3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M16 19H3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M18 9v6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 12h-6"]],
+        "children": []
+      }
+    ]
+  },
+  "log-out": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-log-out"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "m16 17 5-5-5-5"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 12H9"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"]],
+        "children": []
+      }
+    ]
+  },
+  "minus-circle": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-minus-circle"]
+    ],
+    "children": [
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "12"],
+          ["cy", "12"],
+          ["r", "10"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 12h8"]],
+        "children": []
+      }
+    ]
+  },
+  "more-horizontal": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-more-horizontal"]
+    ],
+    "children": [
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "12"],
+          ["cy", "12"],
+          ["r", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "19"],
+          ["cy", "12"],
+          ["r", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "5"],
+          ["cy", "12"],
+          ["r", "1"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "move": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-move"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M12 2v20"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m15 19-3 3-3-3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m19 9 3 3-3 3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M2 12h20"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m5 9-3 3 3 3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m9 5 3-3 3 3"]],
+        "children": []
+      }
+    ]
+  },
+  "option": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-option"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 3h6l6 18h6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M14 3h7"]],
+        "children": []
+      }
+    ]
+  },
+  "orbit": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-orbit"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M20.341 6.484A10 10 0 0 1 10.266 21.85"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3.659 17.516A10 10 0 0 1 13.74 2.152"]],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "12"],
+          ["cy", "12"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "19"],
+          ["cy", "5"],
+          ["r", "2"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "5"],
+          ["cy", "19"],
+          ["r", "2"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "palette": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-palette"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "13.5"],
+          ["cy", "6.5"],
+          ["r", "0.5"],
+          ["fill", "currentColor"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "17.5"],
+          ["cy", "10.5"],
+          ["r", "0.5"],
+          ["fill", "currentColor"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "6.5"],
+          ["cy", "12.5"],
+          ["r", "0.5"],
+          ["fill", "currentColor"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "8.5"],
+          ["cy", "7.5"],
+          ["r", "0.5"],
+          ["fill", "currentColor"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "panels-top-left": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-panels-top-left"]
+    ],
+    "children": [
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "3"],
+          ["y", "3"],
+          ["width", "18"],
+          ["height", "18"],
+          ["rx", "2"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 9h18"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M9 21V9"]],
+        "children": []
+      }
+    ]
+  },
+  "pause": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-pause"]
+    ],
+    "children": [
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "14"],
+          ["y", "3"],
+          ["width", "5"],
+          ["height", "18"],
+          ["rx", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "5"],
+          ["y", "3"],
+          ["width", "5"],
+          ["height", "18"],
+          ["rx", "1"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "pencil": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-edit-3"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M13 21h8"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
+          ]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "picture-in-picture-2": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-picture-in-picture-2"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"]],
+        "children": []
+      },
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "12"],
+          ["y", "13"],
+          ["width", "10"],
+          ["height", "7"],
+          ["rx", "2"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "pin": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-pin"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M12 17v5"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"
+          ]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "pin-off": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-pin-off"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M12 17v5"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m2 2 20 20"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [
+          ["d", "M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "plus": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-plus"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M5 12h14"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M12 5v14"]],
+        "children": []
+      }
+    ]
+  },
+  "redo": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-redo"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 7v6h-6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"]],
+        "children": []
+      }
+    ]
+  },
+  "redo-2": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-redo-2"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "m15 14 5-5-5-5"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"]],
+        "children": []
+      }
+    ]
+  },
+  "replace": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-replace"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M14 4a1 1 0 0 1 1-1"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M15 10a1 1 0 0 1-1-1"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 4a1 1 0 0 0-1-1"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 9a1 1 0 0 1-1 1"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m3 7 3 3 3-3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M6 10V5a2 2 0 0 1 2-2h2"]],
+        "children": []
+      },
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "3"],
+          ["y", "14"],
+          ["width", "7"],
+          ["height", "7"],
+          ["rx", "1"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "rotate-ccw": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-rotate-ccw"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 3v5h5"]],
+        "children": []
+      }
+    ]
+  },
+  "scroll": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-scroll"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M19 17V5a2 2 0 0 0-2-2H4"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"
+          ]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "search": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-search"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "m21 21-4.34-4.34"]],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "11"],
+          ["cy", "11"],
+          ["r", "8"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "section": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-section"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M16 5a4 3 0 0 0-8 0c0 4 8 3 8 7a4 3 0 0 1-8 0"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 19a4 3 0 0 0 8 0c0-4-8-3-8-7a4 3 0 0 1 8 0"]],
+        "children": []
+      }
+    ]
+  },
+  "settings": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-settings"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "12"],
+          ["cy", "12"],
+          ["r", "3"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "settings-2": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-settings-2"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M14 17H5"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M19 7h-9"]],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "17"],
+          ["cy", "17"],
+          ["r", "3"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "7"],
+          ["cy", "7"],
+          ["r", "3"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "sliders-horizontal": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-sliders-horizontal"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M10 5H3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M12 19H3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M14 3v4"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M16 17v4"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 12h-9"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 19h-5"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 5h-7"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 10v4"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 12H3"]],
+        "children": []
+      }
+    ]
+  },
+  "split": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-git-branch-plus"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M6 3v12"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M15 6a9 9 0 0 0-9 9"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M18 15v6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 18h-6"]],
+        "children": []
+      }
+    ]
+  },
+  "switch": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-repeat"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "m17 2 4 4-4 4"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 11v-1a4 4 0 0 1 4-4h14"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m7 22-4-4 4-4"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 13v1a4 4 0 0 1-4 4H3"]],
+        "children": []
+      }
+    ]
+  },
+  "tag": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-tag"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "circle",
+        "attrs": [
+          ["cx", "7.5"],
+          ["cy", "7.5"],
+          ["r", "0.5"],
+          ["fill", "currentColor"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "text": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-text"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 5H3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M15 12H3"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M17 19H3"]],
+        "children": []
+      }
+    ]
+  },
+  "trash": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-trash-2"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M10 11v6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M14 11v6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 6h18"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"]],
+        "children": []
+      }
+    ]
+  },
+  "trash-2": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-trash-2"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M10 11v6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M14 11v6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 6h18"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"]],
+        "children": []
+      }
+    ]
+  },
+  "type": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-type"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M12 4v16"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M9 20h6"]],
+        "children": []
+      }
+    ]
+  },
+  "undo": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-undo"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M3 7v6h6"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"]],
+        "children": []
+      }
+    ]
+  },
+  "undo-2": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-undo-2"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M9 14 4 9l5-5"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"]],
+        "children": []
+      }
+    ]
+  },
+  "ungroup": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-ungroup"]
+    ],
+    "children": [
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "5"],
+          ["y", "4"],
+          ["width", "8"],
+          ["height", "6"],
+          ["rx", "1"]
+        ],
+        "children": []
+      },
+      {
+        "tag": "rect",
+        "attrs": [
+          ["x", "11"],
+          ["y", "14"],
+          ["width", "8"],
+          ["height", "6"],
+          ["rx", "1"]
+        ],
+        "children": []
+      }
+    ]
+  },
+  "vault": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M21 19.2L21 4.8C21 3.47452 20.6046 3 19.5 3L4.5 3C3.39543 3 3 3.47452 3 4.8L3 19.2C3 20.5255 3.39543 21 4.5 21L19.5 21C20.6046 21 21 20.5255 21 19.2Z"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M14.9675 10.56C15.0601 11.1841 14.9535 11.8216 14.6629 12.3817C14.3722 12.9418 13.9124 13.396 13.3488 13.6797C12.7851 13.9634 12.1464 14.0621 11.5234 13.9619C10.9004 13.8616 10.3249 13.5675 9.87868 13.1213C9.43249 12.6751 9.13835 12.0996 9.0381 11.4766C8.93786 10.8536 9.0366 10.2149 9.3203 9.65123C9.60399 9.08759 10.0582 8.62776 10.6183 8.33713C11.1784 8.04651 11.8159 7.93989 12.4401 8.03245C13.0767 8.12687 13.6662 8.42355 14.1213 8.87868C14.5765 9.33381 14.8731 9.92326 14.9675 10.56Z"
+          ]
+        ],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M12 14L12 17"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 7L22.5 7"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "M21 16L22.5 16"]],
+        "children": []
+      }
+    ]
+  },
+  "x": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-x"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [["d", "M18 6 6 18"]],
+        "children": []
+      },
+      {
+        "tag": "path",
+        "attrs": [["d", "m6 6 12 12"]],
+        "children": []
+      }
+    ]
+  },
+  "zap": {
+    "tag": "svg",
+    "attrs": [
+      ["width", "24"],
+      ["height", "24"],
+      ["viewBox", "0 0 24 24"],
+      ["fill", "none"],
+      ["stroke", "currentColor"],
+      ["stroke-width", "2"],
+      ["stroke-linecap", "round"],
+      ["stroke-linejoin", "round"],
+      ["class", "svg-icon lucide-zap"]
+    ],
+    "children": [
+      {
+        "tag": "path",
+        "attrs": [
+          [
+            "d",
+            "M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"
+          ]
+        ],
+        "children": []
+      }
+    ]
+  }
+}

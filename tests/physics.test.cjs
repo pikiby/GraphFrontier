@@ -1355,3 +1355,298 @@ test('without pins or center the summed momentum of a free cluster stays zero', 
   }
   assert(frame >= 60, `momentum checked over ${frame} frames`);
 });
+
+test('large-graph P3M matches exact 1/r^2 repulsion direction and magnitude', (t) => {
+  let seed = 42;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const nodes = Array.from({ length: 1500 }, (_, i) => {
+    const r = Math.sqrt(random()) * 1400;
+    const a = random() * Math.PI * 2;
+    return { id: `n${i}`, x: Math.cos(a) * r, y: Math.sin(a) * r, vx: 0, vy: 0 };
+  });
+  const edges = [];
+  for (let i = 0; i < 600; i += 2) {
+    edges.push({ source: nodes[i].id, target: nodes[i + 1].id });
+  }
+  const settings = {
+    repel_strength: 116,
+    repel_radius: 535,
+    center_strength: 0,
+    base_link_strength: 0,
+    layout_autosave: false,
+  };
+  const p3mView = fixture(t, { nodes, edges, settings }).view;
+  const exactView = fixture(t, { nodes, edges, settings }).view;
+
+  t.after(() => setSleepForceProbe(null));
+  setSleepForceProbe(null);
+  stepSimulation(p3mView);
+
+  setSleepForceProbe(() => {});
+  stepSimulation(exactView);
+  setSleepForceProbe(null);
+
+  let dot = 0;
+  let normExact = 0;
+  let normP3M = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const ex = exactView.nodes[i].vx;
+    const ey = exactView.nodes[i].vy;
+    const px = p3mView.nodes[i].vx;
+    const py = p3mView.nodes[i].vy;
+    dot += ex * px + ey * py;
+    normExact += ex * ex + ey * ey;
+    normP3M += px * px + py * py;
+  }
+  const cos = dot / Math.sqrt(normExact * normP3M);
+  const magRatio = Math.sqrt(normP3M / normExact);
+  assert(cos > 0.96, `expected P3M cosine similarity > 0.96, got ${cos.toFixed(5)}`);
+  assert(
+    magRatio > 0.85 && magRatio < 1.15,
+    `expected P3M magnitude ratio in (0.85, 1.15), got ${magRatio.toFixed(4)}`
+  );
+});
+
+test('large-graph P3M keeps pins fixed, expands smoothly, stays fast, and naturally calms without artificial freeze', (t) => {
+  const { nodes, edges } = randomGraph(2000, 19);
+  const pinnedId = nodes[0].id;
+  const startPinX = nodes[0].x;
+  const startPinY = nodes[0].y;
+  const pins = { [pinnedId]: { x: startPinX, y: startPinY, mode: 'exact' } };
+  const { view } = fixture(t, {
+    nodes,
+    edges,
+    pins,
+    settings: {
+      repel_strength: 116,
+      repel_radius: 535,
+      base_link_strength: 10,
+      center_strength: 5,
+      damping: 0.25,
+      layout_autosave: false,
+    },
+  });
+  let totalDistBefore = 0;
+  for (const node of view.nodes) totalDistBefore += Math.hypot(node.x, node.y);
+  const t0 = performance.now();
+  for (let i = 0; i < 6; i++) stepSimulation(view);
+  const elapsedMs = performance.now() - t0;
+  assert(
+    elapsedMs < 400,
+    `expected 6 large-graph P3M steps under 400ms, got ${elapsedMs.toFixed(1)}ms`
+  );
+  for (let i = 6; i < 25; i++) stepSimulation(view);
+  let totalDistAfter = 0;
+  let avgSpeed25 = 0;
+  for (const node of view.nodes) {
+    assert(Number.isFinite(node.x) && Number.isFinite(node.y), `${node.id} stays finite`);
+    assert(Number.isFinite(node.vx) && Number.isFinite(node.vy), `${node.id} velocity finite`);
+    totalDistAfter += Math.hypot(node.x, node.y);
+    avgSpeed25 += Math.hypot(node.vx, node.vy);
+  }
+  avgSpeed25 /= view.nodes.length;
+  assert.equal(view.nodeById.get(pinnedId).x, startPinX);
+  assert.equal(view.nodeById.get(pinnedId).y, startPinY);
+  assert(totalDistAfter > totalDistBefore, 'P3M repulsion expands crowded large-graph nodes');
+
+  for (let i = 25; i < 400; i++) stepSimulation(view);
+  let avgSpeed400 = 0;
+  for (const node of view.nodes) avgSpeed400 += Math.hypot(node.vx, node.vy);
+  avgSpeed400 /= view.nodes.length;
+  assert(
+    avgSpeed400 < avgSpeed25 * 0.25,
+    `expected velocity to decay naturally (step25=${avgSpeed25.toFixed(3)}, step400=${avgSpeed400.toFixed(3)})`
+  );
+
+  // Forces are never artificially frozen: dragging a linked node still moves its neighbors.
+  const dragged = view.nodes.find((n) => n.id !== pinnedId && view.neighborsById.get(n.id)?.size);
+  const neighborId = [...view.neighborsById.get(dragged.id)].find((id) => id !== pinnedId);
+  const neighbor = view.nodeById.get(neighborId);
+  const beforeNX = neighbor.x;
+  const beforeNY = neighbor.y;
+  view.dragNodeId = dragged.id;
+  dragged.x += 250;
+  dragged.y -= 180;
+  for (let i = 0; i < 5; i++) stepSimulation(view);
+  view.dragNodeId = null;
+  const movedDist = Math.hypot(neighbor.x - beforeNX, neighbor.y - beforeNY);
+  assert(
+    movedDist > 0.1,
+    `expected dragged neighbor to respond without timer freeze (${movedDist})`
+  );
+});
+
+test('large-graph P3M handles extreme pinned outliers and coincident spawns without NaN', (t) => {
+  const nodes = Array.from({ length: 1500 }, (_, i) => ({
+    id: `n${i}`,
+    x: i === 0 ? 1e9 : 0,
+    y: i === 0 ? -1e9 : 0,
+    vx: 0,
+    vy: 0,
+  }));
+  const edges = Array.from({ length: 300 }, (_, i) => ({
+    source: `n${1 + i}`,
+    target: `n${1 + ((i + 1) % 300)}`,
+  }));
+  const pins = { n0: { x: 1e9, y: -1e9, mode: 'exact' } };
+  const { view } = fixture(t, {
+    nodes,
+    edges,
+    pins,
+    settings: {
+      repel_strength: 250,
+      repel_radius: 300,
+      base_link_strength: 20,
+      link_distance: 15,
+      center_strength: 10,
+      damping: 0.2,
+      layout_autosave: false,
+    },
+  });
+  for (let i = 0; i < 60; i++) stepSimulation(view);
+  const liveNodes = view.nodes;
+  assert.equal(liveNodes[0].x, 1e9);
+  assert.equal(liveNodes[0].y, -1e9);
+  let sumR = 0;
+  for (let i = 1; i < liveNodes.length; i++) {
+    assert(
+      Number.isFinite(liveNodes[i].x) && Number.isFinite(liveNodes[i].y),
+      `n${i} stays finite`
+    );
+    assert(
+      Number.isFinite(liveNodes[i].vx) && Number.isFinite(liveNodes[i].vy),
+      `n${i} velocity finite`
+    );
+    sumR += Math.hypot(liveNodes[i].x, liveNodes[i].y);
+  }
+  const avgR = sumR / (liveNodes.length - 1);
+  assert(avgR > 50, `expected coincident unpinned nodes to separate (avgR=${avgR.toFixed(1)})`);
+});
+
+test('close-range repulsion continues rising inside 28px down to 12px', (t) => {
+  const stepDist = (dist, strength = 116) => {
+    const { view } = fixture(t, {
+      nodes: [
+        { id: 'a', x: 0, y: 0 },
+        { id: 'b', x: dist, y: 0 },
+      ],
+      settings: {
+        repel_strength: strength,
+        repel_radius: 535,
+        center_strength: 0,
+        base_link_strength: 0,
+        layout_autosave: false,
+      },
+    });
+    stepSimulation(view);
+    return Math.abs(view.nodes[0].vx);
+  };
+
+  const speedAt28 = stepDist(28, 116);
+  const speedAt14 = stepDist(14, 116);
+  const ratio = speedAt14 / speedAt28;
+  assert(
+    ratio > 3.9 && ratio < 4.1,
+    `expected 1/r^2 repulsion to scale ~4x from 28px to 14px (got ${ratio.toFixed(3)})`
+  );
+
+  const speedAt12Capped = stepDist(12, 5000);
+  const speedAt5Capped = stepDist(5, 5000);
+  assert.equal(
+    speedAt5Capped,
+    speedAt12Capped,
+    'repulsion inside 12px stays bounded at MIN_REPEL_DISTANCE / MAX_REPEL_FORCE'
+  );
+});
+
+test('large-graph P3M adaptive short-range and FIRE steering calm dense low-damping pockets without pinball bounce', (t) => {
+  const nodes = [];
+  const edges = [];
+  const pins = {};
+
+  // 8 pinned anchor nodes framing a 100x100 core pocket
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const x = Math.cos(angle) * 50;
+    const y = Math.sin(angle) * 50;
+    const id = `pin${i}`;
+    nodes.push({ id, x, y, vx: 0, vy: 0 });
+    pins[id] = { x, y, mode: 'exact' };
+  }
+
+  // 32 connected free nodes inside the dense pocket
+  const freePocketIds = [];
+  for (let i = 0; i < 32; i++) {
+    const x = ((i % 6) - 2.5) * 18;
+    const y = (Math.floor(i / 6) - 2.5) * 18;
+    const id = `p${i}`;
+    nodes.push({ id, x, y, vx: 0, vy: 0 });
+    freePocketIds.push(id);
+    edges.push({ source: id, target: `pin${i % 8}` });
+    if (i > 0) edges.push({ source: id, target: `p${i - 1}` });
+  }
+
+  // 1460 outer ring nodes to activate P3M (> 1200 nodes) with realistic field bounds
+  for (let i = 0; i < 1460; i++) {
+    const angle = i * 2.399963229728653;
+    const r = 900 + ((i * 73) % 900);
+    nodes.push({ id: `out${i}`, x: Math.cos(angle) * r, y: Math.sin(angle) * r, vx: 0, vy: 0 });
+  }
+
+  const { view } = fixture(t, {
+    nodes,
+    edges,
+    pins,
+    settings: {
+      repel_strength: 76,
+      repel_radius: 775,
+      base_link_strength: 2,
+      link_distance: 8,
+      center_strength: 1,
+      damping: 0.01,
+      layout_autosave: false,
+    },
+  });
+
+  t.after(() => setSleepForceProbe(null));
+  setSleepForceProbe(null);
+
+  for (let s = 0; s < 400; s++) stepSimulation(view);
+
+  const freeNodes = freePocketIds.map((id) => view.nodeById.get(id));
+  const flips = new Int32Array(freeNodes.length);
+  const speedSums = new Float64Array(freeNodes.length);
+  const prevVx = freeNodes.map((n) => n.vx);
+  const prevVy = freeNodes.map((n) => n.vy);
+
+  for (let s = 0; s < 60; s++) {
+    stepSimulation(view);
+    for (let i = 0; i < freeNodes.length; i++) {
+      const n = freeNodes[i];
+      assert(Number.isFinite(n.x) && Number.isFinite(n.y), `${n.id} coordinates finite`);
+      assert(Number.isFinite(n.vx) && Number.isFinite(n.vy), `${n.id} velocities finite`);
+      const spd = Math.hypot(n.vx, n.vy);
+      speedSums[i] += spd;
+      if (n.vx * prevVx[i] + n.vy * prevVy[i] < 0) flips[i] += 1;
+      prevVx[i] = n.vx;
+      prevVy[i] = n.vy;
+    }
+  }
+
+  let pinballCount = 0;
+  let totalAvgSpeed = 0;
+  for (let i = 0; i < freeNodes.length; i++) {
+    const avgSpd = speedSums[i] / 60;
+    totalAvgSpeed += avgSpd;
+    if (flips[i] >= 12 && avgSpd > 0.15) pinballCount += 1;
+  }
+  const meanPocketSpeed = totalAvgSpeed / freeNodes.length;
+  assert.equal(pinballCount, 0, `expected 0 pinball bouncing pocket nodes, got ${pinballCount}`);
+  assert(
+    meanPocketSpeed < 0.15,
+    `expected calm pocket mean speed < 0.15 px/step, got ${meanPocketSpeed.toFixed(4)}`
+  );
+});

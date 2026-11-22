@@ -6,9 +6,9 @@ const NODE_MULTIPLIER_MAX = 20;
 const ZOOM_STEP_FACTOR = 1.12;
 const TWO_PI = Math.PI * 2;
 
-const SETTINGS_TABS = ['groups', 'display', 'physics', 'sets'];
-// Earlier releases stored the Sets tab as 'selection'.
-const LEGACY_SETTINGS_TABS = { selection: 'sets' };
+const SETTINGS_TABS = ['groups', 'display', 'physics', 'files'];
+// Earlier releases stored this tab as 'selection' or 'sets'.
+const LEGACY_SETTINGS_TABS = { selection: 'files', sets: 'files' };
 
 const DEFAULT_DATA = {
   active_layout_name: 'data.json',
@@ -26,6 +26,8 @@ const DEFAULT_DATA = {
   groups: [],
   dark_energy: [],
   subgraphs: [],
+  custom_links: [],
+  annotations: [],
   subgraph_coordinates: 'local-v1',
   subgraph_cameras: {},
   subgraph_filters: {},
@@ -54,6 +56,7 @@ const DEFAULT_DATA = {
     selection_box_modifier: 'shift',
     selection_toggle_modifier: 'none',
     node_size_scale: 1,
+    node_border_width: 0,
     node_shape: 1,
     node_color: '#7aa2f7',
     attachment_node_color: null,

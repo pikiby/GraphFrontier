@@ -336,7 +336,9 @@ for (const scheme of ['light', 'dark']) {
     render.drawNodes(view, ctx);
     assert.equal(calls.at(-1).alpha, 1);
     assert.equal(parseFloat(calls.at(-1).font), 10);
-    assert.equal(calls.find((call) => call.kind === 'stroke').color, view.canvasTheme.selection);
+    assert(
+      calls.some((call) => call.kind === 'stroke' && call.color === view.canvasTheme.selection)
+    );
     view.selectedNodeIds.clear();
     view.hoverNodeId = 'alpha.md';
     calls.length = 0;

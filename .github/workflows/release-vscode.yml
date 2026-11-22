@@ -1,0 +1,113 @@
+name: Release VS Code
+
+on:
+  push:
+    tags:
+      - 'vscode-*'
+  workflow_dispatch:
+    inputs:
+      publish_marketplaces:
+        description: 'Publish packaged VSIX to VS Code Marketplace and Open VSX (requires secrets)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release-vscode:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build standalone package
+        run: npm run build:standalone
+
+      - name: Test standalone package
+        run: npm run test:standalone
+
+      - name: Build VS Code extension bundles
+        run: npm run build:vscode
+
+      - name: Resolve extension version and VSIX path
+        id: meta
+        run: |
+          VERSION="$(node -p "require('./packages/vscode/package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "vsix=packages/vscode/dist/graphfrontier-vscode-${VERSION}.vsix" >> "$GITHUB_OUTPUT"
+
+      - name: Package VSIX with vsce
+        working-directory: packages/vscode
+        run: npx --yes @vscode/vsce@3 package --no-dependencies --out "dist/graphfrontier-vscode-${{ steps.meta.outputs.version }}.vsix"
+
+      - name: Test VS Code extension
+        run: npm run test:vscode
+
+      - name: Verify VS Code release tag and VSIX
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            npm run check:release:vscode -- "$GITHUB_REF_NAME"
+          else
+            npm run check:release:vscode
+          fi
+
+      - name: Attest VSIX package
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.meta.outputs.vsix }}
+
+      - name: Upload VSIX workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphfrontier-vscode-${{ steps.meta.outputs.version }}
+          path: ${{ steps.meta.outputs.vsix }}
+
+      - name: Publish VS Code GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.meta.outputs.vsix }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Publish to VS Code Marketplace
+        if: github.ref_type == 'tag' || inputs.publish_marketplaces
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -n "$VSCE_PAT" ]; then
+            npx --yes @vscode/vsce@3 publish --no-dependencies --packagePath "${{ steps.meta.outputs.vsix }}" -p "$VSCE_PAT"
+          else
+            echo "::notice::VSCE_PAT secret is not set; skipping VS Code Marketplace publish."
+          fi
+
+      - name: Publish to Open VSX Registry (Cursor, Windsurf, VSCodium)
+        if: github.ref_type == 'tag' || inputs.publish_marketplaces
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -n "$OVSX_PAT" ]; then
+            npx --yes ovsx publish "${{ steps.meta.outputs.vsix }}" -p "$OVSX_PAT"
+          else
+            echo "::notice::OVSX_PAT secret is not set; skipping Open VSX publish."
+          fi

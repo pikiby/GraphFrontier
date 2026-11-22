@@ -13,6 +13,7 @@ function createLocalFacade(owner, leaf, initial) {
   facade.data = owner.normalizeData(clone(initial || owner.data));
   facade.data.subgraphs = [];
   if (!initial) {
+    facade.data.annotations = [];
     facade.data.blacklist = [];
     facade.data.whitelist = [];
     facade.data.view_state.search_query = '';

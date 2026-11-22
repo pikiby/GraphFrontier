@@ -171,7 +171,7 @@ node's circle. **Reset visual settings** clears a group or node shape.
 - `Link strength`: spring force for link attraction
 - `Link distance`: target length for all graph links
 - `Orbit distance`: spacing used when distributing orbit-pinned nodes
-- `Repel strength`: node-to-node repulsion force, 0-200; default 51
+- `Repel strength`: node-to-node repulsion force, 3-200; default 51
 - `Repel radius`: cutoff distance for repel calculations, 20-1000; default 265 (larger value means wider repel influence)
 - `Center strength`: pull toward layout center
 - `Damping`: per-frame velocity damping

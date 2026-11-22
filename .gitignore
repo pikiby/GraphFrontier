@@ -1,8 +1,11 @@
 # Dependencies
 node_modules/
+packages/*/node_modules/
 
 # Build output
 dist/
+packages/*/dist/
+packages/*/*.vsix
 skills/
 
 # OS/editor junk

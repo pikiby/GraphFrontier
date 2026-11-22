@@ -11,6 +11,8 @@ import {
 import { Plugin, Notice, parseLinktext } from 'obsidian';
 import { normalizeDarkEnergy, darkEnergyNodes } from './dark-energy.js';
 import { normalizeSubgraphs, subgraphNodes, normalizeSubgraphSpaces } from './subgraphs.js';
+import { normalizeCustomLinks, addCustomLinks, removeCustomLinks } from './custom-links.js';
+import { normalizeAnnotations } from './annotations.js';
 import {
   NODE_VISUAL_SETTINGS,
   getNodeGroupVisuals,
@@ -497,6 +499,8 @@ export default class GraphFrontierPlugin extends Plugin {
       groups: [],
       dark_energy: normalizeDarkEnergy(safe.dark_energy, (query) => this.parseGroupQuery(query)),
       subgraphs: normalizeSubgraphs(safe.subgraphs),
+      custom_links: normalizeCustomLinks(safe.custom_links),
+      annotations: normalizeAnnotations(safe.annotations),
       subgraph_cameras: {},
       subgraph_filters: {},
       blacklist: [],
@@ -653,10 +657,18 @@ export default class GraphFrontierPlugin extends Plugin {
     );
     normalized.settings.repel_strength = this.clampNumber(
       normalized.settings.repel_strength,
-      0,
+      3,
       200,
       DEFAULT_DATA.settings.repel_strength
     );
+    if (normalized.saved_layout_settings.repel_strength !== undefined) {
+      normalized.saved_layout_settings.repel_strength = this.clampNumber(
+        normalized.saved_layout_settings.repel_strength,
+        3,
+        200,
+        DEFAULT_DATA.settings.repel_strength
+      );
+    }
     normalized.settings.repel_radius = this.clampNumber(
       normalized.settings.repel_radius,
       20,
@@ -685,6 +697,20 @@ export default class GraphFrontierPlugin extends Plugin {
       2,
       DEFAULT_DATA.settings.node_size_scale
     );
+    normalized.settings.node_border_width = this.clampNumber(
+      normalized.settings.node_border_width,
+      0,
+      2,
+      DEFAULT_DATA.settings.node_border_width
+    );
+    if (normalized.saved_layout_settings.node_border_width !== undefined) {
+      normalized.saved_layout_settings.node_border_width = this.clampNumber(
+        normalized.saved_layout_settings.node_border_width,
+        0,
+        2,
+        DEFAULT_DATA.settings.node_border_width
+      );
+    }
     if (!/^#[0-9a-f]{6}$/i.test(normalized.settings.node_color))
       normalized.settings.node_color = DEFAULT_DATA.settings.node_color;
     for (const settings of [normalized.settings, normalized.saved_layout_settings]) {
@@ -2211,6 +2237,26 @@ export default class GraphFrontierPlugin extends Plugin {
     this.scheduleRefreshAllViews({ passive: true });
   }
 
+  addCustomLinks(pairs) {
+    const next = addCustomLinks(this.data.custom_links, pairs);
+    this.data.custom_links = next.links;
+    if (next.added) {
+      this.schedulePersist();
+      this.refreshAllViews({ passive: true });
+    }
+    return next.added;
+  }
+
+  removeCustomLinks(pairs) {
+    const next = removeCustomLinks(this.data.custom_links, pairs);
+    this.data.custom_links = next.links;
+    if (next.removed) {
+      this.schedulePersist();
+      this.refreshAllViews({ passive: true });
+    }
+    return next.removed;
+  }
+
   // Graph-data builder: assemble nodes/edges from markdown, links, and filter settings.
   collectGraphData() {
     const settings = this.getSettings();
@@ -2333,6 +2379,51 @@ export default class GraphFrontierPlugin extends Plugin {
       }
     }
 
+    const resolveManualEndpoint = (endpointId) => {
+      if (nodeMap.has(endpointId)) return true;
+      const abs = this.app.vault.getAbstractFileByPath(endpointId);
+      const exists = !!abs && typeof abs.path === 'string';
+      const extMatch = /\.([^./]+)$/u.exec(endpointId);
+      const ext =
+        exists && typeof abs.extension === 'string'
+          ? abs.extension.toLowerCase()
+          : extMatch
+            ? extMatch[1].toLowerCase()
+            : '';
+      const isAttachment = exists ? ext !== 'md' : ext !== '' && ext !== 'md';
+      if (isAttachment && (!includeAttachments || excludedExtensions.has(ext))) return false;
+      if (existingFilesOnly && !exists) return false;
+      const label =
+        exists && typeof abs.basename === 'string'
+          ? abs.basename
+          : endpointId.split('/').pop() || endpointId;
+      addNodeIfMissing(endpointId, label, { isAttachment });
+      return true;
+    };
+
+    for (const link of this.data.custom_links || []) {
+      const sourcePath = link?.source;
+      const targetPath = link?.target;
+      if (!sourcePath || !targetPath || sourcePath === targetPath) continue;
+      if (!resolveManualEndpoint(sourcePath) || !resolveManualEndpoint(targetPath)) continue;
+      const pair =
+        sourcePath < targetPath
+          ? `${sourcePath}\u0000${targetPath}`
+          : `${targetPath}\u0000${sourcePath}`;
+      const existing = edgeSet.get(pair);
+      if (existing) {
+        if (existing.source !== sourcePath) existing.bidirectional = true;
+        touchedNodeIds.add(sourcePath);
+        touchedNodeIds.add(targetPath);
+        continue;
+      }
+      const edge = { source: sourcePath, target: targetPath, manual: true };
+      edgeSet.set(pair, edge);
+      edges.push(edge);
+      touchedNodeIds.add(sourcePath);
+      touchedNodeIds.add(targetPath);
+    }
+
     let nodes = Array.from(nodeMap.values());
     let filteredEdges = edges;
 
@@ -2355,15 +2446,24 @@ export default class GraphFrontierPlugin extends Plugin {
             excludedExtensions.has((file?.extension || n.id.split('.').pop()).toLowerCase()))
         )
           continue;
-        if (hideOrphans && !n.linked && !touchedNodeIds.has(n.id)) continue;
+        if (
+          hideOrphans &&
+          !n.linked &&
+          !touchedNodeIds.has(n.id) &&
+          !(n.attachment && includeAttachments && settings.include_unlinked_attachments)
+        )
+          continue;
         visible.add(n.id);
         addNodeIfMissing(n.id, n.label || n.id, { isAttachment: n.attachment });
       }
       nodes = [...nodeMap.values()].filter((n) => visible.has(n.id));
       filteredEdges = exported.edges.filter((e) => visible.has(e.source) && visible.has(e.target));
     } else if (hideOrphans) {
+      const keepUnlinkedOther = includeAttachments && settings.include_unlinked_attachments;
       const keepIds = touchedNodeIds;
-      nodes = nodes.filter((node) => keepIds.has(node.id));
+      nodes = nodes.filter(
+        (node) => keepIds.has(node.id) || (keepUnlinkedOther && node.meta?.isAttachment)
+      );
       const keepSet = new Set(nodes.map((node) => node.id));
       filteredEdges = edges.filter((edge) => keepSet.has(edge.source) && keepSet.has(edge.target));
     }

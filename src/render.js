@@ -1,6 +1,7 @@
 import { markers } from './link-markers.js';
-import { DEFAULT_DATA, MAX_ZOOM, ZOOM_STEP_FACTOR } from './constants.js';
+import { DEFAULT_DATA, MAX_ZOOM, TWO_PI, ZOOM_STEP_FACTOR } from './constants.js';
 import { DARK_THEME, getLabelAppearance } from './theme.js';
+import { drawAnnotationLabels } from './annotations.js';
 import {
   getNodeVisualSetting,
   getNodeVisualOverride,
@@ -9,6 +10,11 @@ import {
   traceNodeShape,
 } from './node-visuals.js';
 const EMPTY_LISTS = [];
+const BATCHED_NODE_THRESHOLD = 200;
+const DEGREE_RADIUS_LUT = Float64Array.from(
+  { length: 128 },
+  (_, degree) => 3 + Math.log2(degree + 2) * 1.4
+);
 const LINK_STYLE_KEYS = NODE_VISUAL_SETTINGS.filter((setting) => setting.edges).map(
   ({ key }) => key
 );
@@ -25,6 +31,7 @@ import {
   getFocusEdgeWidth,
   getFocusEdgeColor,
   getFocusEdgeAlpha,
+  getNodeBorderColor,
   quantizeFocusProgress,
   getNodeScreenRadius,
   getLowDegreeAlpha,
@@ -36,7 +43,11 @@ import {
 
 // Backing-store pixels per CSS pixel.
 function getBackingScale(view) {
-  return Number(view.devicePixelRatio) || 1;
+  const rawDpr = Number(view.devicePixelRatio) || 1;
+  if (Number(view.backingScale) > 0 && view._backingDpr === view.devicePixelRatio) {
+    return Number(view.backingScale);
+  }
+  return Math.max(1, rawDpr);
 }
 
 // Custom hover highlight color, or null for the theme-derived default.
@@ -170,6 +181,7 @@ function renderFrame(view) {
   drawPulse(view, ctx);
   drawNodes(view, ctx, appearance);
   drawHiddenGridMarkers(view, ctx);
+  drawAnnotationLabels(view, ctx);
   drawSelectionBox(view, ctx);
 }
 
@@ -183,65 +195,97 @@ function drawWave(view, ctx) {
   const brightness = view.plugin.clampNumber(settings.wave_brightness, 10, 100, 90) / 100;
   const ringSize = view.plugin.clampNumber(settings.wave_ring_size, 5, 80, 26);
   const zoom = Math.max(view.camera.zoom, 0.0001);
+  const camX = view.camera.x;
+  const camY = view.camera.y;
   const width = view.viewWidth;
   const height = view.viewHeight;
-  const toScreen = (node) => [
-    (node.x - view.camera.x) * zoom + width / 2,
-    (node.y - view.camera.y) * zoom + height / 2,
-  ];
+  const halfW = width * 0.5;
+  const halfH = height * 0.5;
   const margin = ringSize + 20;
-  const offScreen = (x, y) =>
-    x < -margin || y < -margin || x > width + margin || y > height + margin;
+  const minBoundX = -margin;
+  const minBoundY = -margin;
+  const maxBoundX = width + margin;
+  const maxBoundY = height + margin;
   const color = getHoverHighlightColor(view) || (view.canvasTheme || DARK_THEME).selection;
+  const cachedStyles =
+    view.appearanceCache?.nodes === view.nodes ? view.appearanceCache.nodeStyles : null;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
-  for (const ring of view.waveEffect.rings) {
+  ctx.lineWidth = 2;
+  const rings = view.waveEffect.rings;
+  for (let i = 0; i < rings.length; i++) {
+    const ring = rings[i];
     const state = waveRingState(view, ring, nowMs);
     const node = state && view.nodeById.get(ring.id);
     if (!node) continue;
-    const [x, y] = toScreen(node);
-    if (offScreen(x, y)) continue;
-    const radius =
-      getNodeScreenRadius(view.getNodeRadius(node), zoom) + 3 + state.spread * ringSize;
+    const x = (node.x - camX) * zoom + halfW;
+    const y = (node.y - camY) * zoom + halfH;
+    if (x < minBoundX || y < minBoundY || x > maxBoundX || y > maxBoundY) continue;
+    const style = cachedStyles?.get(node.id);
+    const baseR = style ? getBaseRadius(node, style.scale) : view.getNodeRadius(node);
+    const radius = getNodeScreenRadius(baseR, zoom) + 3 + state.spread * ringSize;
     ctx.globalAlpha = state.alpha * brightness;
-    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.stroke();
   }
-  for (const link of view.waveEffect.links) {
+  const glowPts = [];
+  const midPts = [];
+  const headPts = [];
+  const dotPts = [];
+  const links = view.waveEffect.links;
+  for (let i = 0; i < links.length; i++) {
+    const link = links[i];
     const state = waveLinkState(view, link, nowMs);
     const from = state && view.nodeById.get(link.from);
     const to = state && view.nodeById.get(link.to);
     if (!from || !to) continue;
-    const [x1, y1] = toScreen(from);
-    const [x2, y2] = toScreen(to);
-    const at = (t) => [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t];
-    const [hx, hy] = at(state.progress);
-    if (offScreen(hx, hy)) continue;
-    const [tx, ty] = at(Math.max(0, state.progress - 0.3));
-    const [mx, my] = at(Math.max(0, state.progress - 0.12));
-    ctx.lineWidth = 6;
-    ctx.globalAlpha = 0.18 * brightness;
+    const x1 = (from.x - camX) * zoom + halfW;
+    const y1 = (from.y - camY) * zoom + halfH;
+    const x2 = (to.x - camX) * zoom + halfW;
+    const y2 = (to.y - camY) * zoom + halfH;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const p = state.progress;
+    const hx = x1 + dx * p;
+    const hy = y1 + dy * p;
+    if (hx < minBoundX || hy < minBoundY || hx > maxBoundX || hy > maxBoundY) continue;
+    const tTail = Math.max(0, p - 0.3);
+    const tMid = Math.max(0, p - 0.12);
+    const tx = x1 + dx * tTail;
+    const ty = y1 + dy * tTail;
+    const mx = x1 + dx * tMid;
+    const my = y1 + dy * tMid;
+    glowPts.push(tx, ty, hx, hy);
+    midPts.push(tx, ty, mx, my);
+    headPts.push(mx, my, hx, hy);
+    dotPts.push(hx, hy);
+  }
+  const strokeBatch = (pts, lineWidth, alpha) => {
+    if (!pts.length) return;
+    ctx.lineWidth = lineWidth;
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.moveTo(tx, ty);
-    ctx.lineTo(hx, hy);
+    for (let i = 0; i < pts.length; i += 4) {
+      ctx.moveTo(pts[i], pts[i + 1]);
+      ctx.lineTo(pts[i + 2], pts[i + 3]);
+    }
     ctx.stroke();
-    ctx.lineWidth = 2.5;
-    ctx.globalAlpha = 0.35 * brightness;
-    ctx.beginPath();
-    ctx.moveTo(tx, ty);
-    ctx.lineTo(mx, my);
-    ctx.stroke();
+  };
+  strokeBatch(glowPts, 6, 0.18 * brightness);
+  strokeBatch(midPts, 2.5, 0.35 * brightness);
+  strokeBatch(headPts, 2.5, brightness);
+  if (dotPts.length) {
     ctx.globalAlpha = brightness;
     ctx.beginPath();
-    ctx.moveTo(mx, my);
-    ctx.lineTo(hx, hy);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+    for (let i = 0; i < dotPts.length; i += 2) {
+      const hx = dotPts[i];
+      const hy = dotPts[i + 1];
+      ctx.moveTo(hx + 3.5, hy);
+      ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+    }
     ctx.fill();
   }
   ctx.restore();
@@ -305,7 +349,12 @@ function getNodeRadius(view, node, context) {
 }
 
 function getBaseRadius(node, scale) {
-  return Math.max(0.2, (3 + Math.log2(node.degree + 2) * 1.4) * scale * 0.5);
+  const degree = node.degree;
+  const base =
+    degree >= 0 && degree < 128 && (degree | 0) === degree
+      ? DEGREE_RADIUS_LUT[degree]
+      : 3 + Math.log2(degree + 2) * 1.4;
+  return Math.max(0.2, base * scale * 0.5);
 }
 
 // Convert slider steps into zoom threshold for label visibility.
@@ -413,6 +462,10 @@ function getPreparedAppearance(view) {
   const settings = plugin.getSettings();
   const groups = getGroupStyleMap(view);
   const revision = Number(plugin.appearanceVersion || 0);
+  const borderWidth = plugin.clampNumber
+    ? plugin.clampNumber(settings.node_border_width, 0, 2, DEFAULT_DATA.settings.node_border_width)
+    : 0;
+  const hasBorders = borderWidth > 0;
   const cached = view.appearanceCache;
   if (
     cached?.data === data &&
@@ -423,6 +476,7 @@ function getPreparedAppearance(view) {
     cached.graphVersion === view.visibilityGraphVersion &&
     cached.groups === groups &&
     cached.revision === revision &&
+    cached.hasBorders === hasBorders &&
     cached.theme === view.canvasTheme &&
     cached.visuals === data.node_visual_settings &&
     cached.labels === data.node_label_sizes &&
@@ -430,22 +484,26 @@ function getPreparedAppearance(view) {
   )
     return cached;
 
-  const nodeStyles = new Map();
-  const auraNodes = [];
-  for (const node of view.nodes) {
-    const group = groups?.get(node.id);
-    const individual = {};
-    for (const key of APPEARANCE_KEYS)
-      individual[key] = getNodeVisualOverride(plugin, node.id, key);
+  const theme = view.canvasTheme || DARK_THEME;
+  const visuals = data.node_visual_settings;
+  const labels = data.node_label_sizes;
+  const paints = data.painted_edge_colors;
+  const defaultFontScale = DEFAULT_DATA.settings.label_font_size / 5;
+  const buildNodeStyle = (individual, group, isAttachment) => {
     const value = (key) =>
-      individual[key] ?? group?.[key] ?? settings[key] ?? DEFAULT_DATA.settings[key];
+      individual?.[key] ?? group?.[key] ?? settings[key] ?? DEFAULT_DATA.settings[key];
     const fontSize =
       plugin.clampNumber(value('label_font_size'), 5, 20, DEFAULT_DATA.settings.label_font_size) /
       5;
-    const painted = String(
-      data.painted_edge_colors?.[node.id] ?? individual.edge_color ?? group?.edge_color ?? ''
-    ).trim();
-    const style = {
+    const color =
+      individual?.node_color ??
+      group?.node_color ??
+      (isAttachment ? settings.attachment_node_color : null) ??
+      value('node_color');
+    const painted = String(individual?.edge_color ?? group?.edge_color ?? '').trim();
+    const auraRadius = value('aura_radius') / 10;
+    const auraBrightness = value('aura_brightness') / 100;
+    return {
       scale: plugin.clampNumber(
         value('node_size_scale'),
         0.1,
@@ -453,13 +511,10 @@ function getPreparedAppearance(view) {
         DEFAULT_DATA.settings.node_size_scale
       ),
       shape: normalizeNodeShape(value('node_shape')),
-      color:
-        individual.node_color ??
-        group?.node_color ??
-        (node.meta?.isAttachment ? settings.attachment_node_color : null) ??
-        value('node_color'),
-      auraRadius: value('aura_radius') / 10,
-      auraBrightness: value('aura_brightness') / 100,
+      color,
+      borderColor: hasBorders ? getNodeBorderColor(color, theme) : null,
+      auraRadius,
+      auraBrightness,
       dimStrength: plugin.clampNumber(
         value('hover_dim_strength'),
         0,
@@ -467,7 +522,7 @@ function getPreparedAppearance(view) {
         DEFAULT_DATA.settings.hover_dim_strength
       ),
       fontSize,
-      minimumSize: (10 * fontSize) / (DEFAULT_DATA.settings.label_font_size / 5),
+      minimumSize: (10 * fontSize) / defaultFontScale,
       labelThreshold:
         MAX_ZOOM /
         Math.pow(
@@ -482,8 +537,46 @@ function getPreparedAppearance(view) {
       individual,
       group,
       painted: /^#[0-9a-f]{6}$/i.test(painted),
-      customLink: LINK_STYLE_KEYS.some((key) => individual[key] != null || group?.[key] != null),
+      customLink: !!(
+        (individual || group) &&
+        LINK_STYLE_KEYS.some((key) => individual?.[key] != null || group?.[key] != null)
+      ),
     };
+  };
+  const emptyIndividual = {};
+  const defaultNodeStyle = buildNodeStyle(emptyIndividual, null, false);
+  const defaultAttachmentStyle = settings.attachment_node_color
+    ? buildNodeStyle(emptyIndividual, null, true)
+    : defaultNodeStyle;
+
+  const nodeCount = view.nodes.length;
+  const nodeStyles = new Map();
+  const nodeStyleList = new Array(nodeCount);
+  const auraNodes = [];
+  for (let i = 0; i < nodeCount; i++) {
+    const node = view.nodes[i];
+    const group = groups?.get(node.id);
+    const hasIndVisual = !!(visuals && visuals[node.id]);
+    const hasIndLabel = labels?.[node.id] != null;
+    const hasPaint = !!(paints && paints[node.id]);
+    let style;
+    if (!group && !hasIndVisual && !hasIndLabel && !hasPaint) {
+      style = node.meta?.isAttachment ? defaultAttachmentStyle : defaultNodeStyle;
+    } else {
+      const individual = {};
+      if (hasIndVisual || hasIndLabel || hasPaint) {
+        for (const key of APPEARANCE_KEYS)
+          individual[key] = getNodeVisualOverride(plugin, node.id, key);
+      }
+      style = buildNodeStyle(individual, group, !!node.meta?.isAttachment);
+      if (hasPaint) {
+        const painted = String(
+          paints[node.id] ?? individual.edge_color ?? group?.edge_color ?? ''
+        ).trim();
+        style.painted = /^#[0-9a-f]{6}$/i.test(painted);
+      }
+    }
+    nodeStyleList[i] = style;
     nodeStyles.set(node.id, style);
     if (style.auraRadius > 0 && style.auraBrightness > 0) auraNodes.push(node);
   }
@@ -522,11 +615,13 @@ function getPreparedAppearance(view) {
     graphVersion: view.visibilityGraphVersion,
     groups,
     revision,
+    hasBorders,
     theme: view.canvasTheme,
     visuals: data.node_visual_settings,
     labels: data.node_label_sizes,
     paint: data.painted_edge_colors,
     nodeStyles,
+    nodeStyleList,
     auraNodes,
     edgeStyles,
     defaultLink,
@@ -803,6 +898,7 @@ function drawEdges(view, ctx, appearance) {
     bucket.points.push(x1, y1, x2, y2);
   };
 
+  const showSearchConnections = !!view.plugin.getSettings().show_search_connections;
   for (let edgeIndex = 0; edgeIndex < view.edges.length; edgeIndex++) {
     const edge = view.edges[edgeIndex];
     if (hasFilter) {
@@ -843,7 +939,7 @@ function drawEdges(view, ctx, appearance) {
     const hoverFadeEdgeProgress = isHoverFadeEdge ? hoverFadeProgress : 0;
     const searchEdgeProgress =
       hasSearchHighlight &&
-      view.plugin.getSettings().show_search_connections &&
+      showSearchConnections &&
       (searchHighlightNodeIds.has(edge.source) || searchHighlightNodeIds.has(edge.target))
         ? 1
         : 0;
@@ -1005,6 +1101,112 @@ function drawNodeAuras(view, ctx, appearance) {
   }
 }
 
+function traceBatchedShapes(ctx, pts, shape) {
+  if (!(shape >= 3)) {
+    for (let j = 0, len = pts.length; j < len; j += 3) {
+      const x = pts[j];
+      const y = pts[j + 1];
+      const r = pts[j + 2];
+      // Move to circle start before each arc so separate circles are never connected.
+      ctx.moveTo(x + r, y);
+      ctx.arc(x, y, r, 0, TWO_PI);
+    }
+    return;
+  }
+  for (let j = 0, len = pts.length; j < len; j += 3) {
+    traceNodeShape(ctx, pts[j], pts[j + 1], pts[j + 2], shape);
+  }
+}
+
+function drawIndividualNodeBody(ctx, item, env) {
+  const {
+    node,
+    style,
+    pointX,
+    pointY,
+    radius,
+    fillColor,
+    nodeAlpha,
+    isHover,
+    isSelectedNode,
+    isClickFlash,
+    hoverVisualProgress,
+  } = item;
+  const { backingScale, borderWidth, isLargeGraph, theme, hoverRingColor, state } = env;
+
+  if (state.lastGlobalAlpha !== nodeAlpha) {
+    ctx.globalAlpha = nodeAlpha;
+    state.lastGlobalAlpha = nodeAlpha;
+  }
+  if (state.lastFillStyle !== fillColor) {
+    ctx.fillStyle = fillColor;
+    state.lastFillStyle = fillColor;
+  }
+  ctx.beginPath();
+  traceNodeShape(ctx, pointX, pointY, radius + (node.meta?.subgraph ? 2 : 0), style.shape);
+  if (node.meta?.subgraph) {
+    if (state.lastStrokeStyle !== fillColor) {
+      ctx.strokeStyle = fillColor;
+      state.lastStrokeStyle = fillColor;
+    }
+    setCrispStroke(ctx, 3, nodeAlpha, backingScale);
+    state.lastGlobalAlpha = NaN;
+    ctx.stroke();
+  } else {
+    ctx.fill();
+    const drawBorder = borderWidth > 0 && (isLargeGraph ? radius >= 1.5 : radius > 0.6);
+    if (drawBorder) {
+      const effectiveWidth = radius >= 3 ? borderWidth : borderWidth * Math.max(0.25, radius / 3);
+      const insetRadius = Math.max(0.3, radius - effectiveWidth * 0.5);
+      const borderCol = isClickFlash
+        ? getNodeBorderColor(fillColor, theme)
+        : style.borderColor || getNodeBorderColor(fillColor, theme);
+      if (state.lastStrokeStyle !== borderCol) {
+        ctx.strokeStyle = borderCol;
+        state.lastStrokeStyle = borderCol;
+      }
+      setCrispStroke(ctx, effectiveWidth, nodeAlpha * 0.85, backingScale);
+      state.lastGlobalAlpha = NaN;
+      ctx.beginPath();
+      traceNodeShape(ctx, pointX, pointY, insetRadius, style.shape);
+      ctx.stroke();
+    }
+  }
+
+  if (node.meta?.darkEnergy) {
+    if (state.lastStrokeStyle !== fillColor) {
+      ctx.strokeStyle = fillColor;
+      state.lastStrokeStyle = fillColor;
+    }
+    setCrispStroke(ctx, 1.5, nodeAlpha, backingScale);
+    state.lastGlobalAlpha = NaN;
+    ctx.beginPath();
+    traceNodeShape(ctx, pointX, pointY, radius + 4, style.shape);
+    ctx.stroke();
+  }
+  if (isHover || isSelectedNode) {
+    const hoverStrokeAlpha = Math.max(0.12, hoverVisualProgress);
+    const selectedStrokeAlpha = isSelectedNode ? 0.95 : 0;
+    const hoverLineWidth = 1 + hoverVisualProgress;
+    const selectedLineWidth = isSelectedNode ? 1.4 : 0;
+    const selCol = isHover && hoverRingColor ? hoverRingColor : theme.selection;
+    if (state.lastStrokeStyle !== selCol) {
+      ctx.strokeStyle = selCol;
+      state.lastStrokeStyle = selCol;
+    }
+    setCrispStroke(
+      ctx,
+      Math.max(hoverLineWidth, selectedLineWidth),
+      Math.max(hoverStrokeAlpha, selectedStrokeAlpha),
+      backingScale
+    );
+    state.lastGlobalAlpha = NaN;
+    ctx.beginPath();
+    traceNodeShape(ctx, pointX, pointY, radius + (node.meta?.subgraph ? 4 : 2), style.shape);
+    ctx.stroke();
+  }
+}
+
 function drawNodes(view, ctx, appearance) {
   const zoom = Math.max(view.camera.zoom, 0.0001);
   const halfWidthWorld = view.viewWidth / (2 * zoom);
@@ -1044,8 +1246,11 @@ function drawNodes(view, ctx, appearance) {
     searchHighlightNodeIds instanceof Set &&
     searchHighlightNodeIds.size > 0;
   appearance ||= getPreparedAppearance(view);
+  const settingsNow = view.plugin.getSettings?.() || {};
+  const dimLowDegree = !!settingsNow.dim_low_degree_nodes;
+  const showSearchConnections = !!settingsNow.show_search_connections;
   const searchNeighbors = new Set();
-  if (hasSearchHighlight && view.plugin.getSettings().show_search_connections) {
+  if (hasSearchHighlight && showSearchConnections) {
     for (const id of searchHighlightNodeIds) {
       if (hasFilter && !visibleNodeIds.has(id)) continue;
       for (const neighbor of view.neighborsById.get(id) || []) searchNeighbors.add(neighbor);
@@ -1053,17 +1258,59 @@ function drawNodes(view, ctx, appearance) {
   }
   const selectedNodeIds = view.selectedNodeIds instanceof Set ? view.selectedNodeIds : null;
   const backingScale = getBackingScale(view);
+  const borderWidth = view.plugin?.clampNumber
+    ? view.plugin.clampNumber(
+        settingsNow.node_border_width,
+        0,
+        2,
+        DEFAULT_DATA.settings.node_border_width
+      )
+    : 0;
+  const hasNodeBorders = borderWidth > 0;
+  const sqrtZoom = Math.sqrt(Math.max(zoom, 0.0001));
+  const nodeCount = view.nodes.length;
+  const isLargeGraph = nodeCount > 1500;
+  const styleList = appearance.nodeStyleList;
+  const camX = view.camera.x;
+  const camY = view.camera.y;
+  const useBatchedNodes = nodeCount >= BATCHED_NODE_THRESHOLD && typeof ctx.moveTo === 'function';
+  const fillBuckets = useBatchedNodes ? new Map() : null;
+  const borderBuckets = useBatchedNodes && hasNodeBorders ? new Map() : null;
+  const specialNodes = useBatchedNodes ? [] : null;
+  const labelQueue = useBatchedNodes ? [] : null;
+  let lastFillStyleObj = null;
+  let lastFillBucket = null;
+  let lastBorderStyleObj = null;
+  let lastBorderLw = NaN;
+  let lastBorderAlpha = NaN;
+  let lastBorderBucket = null;
+  const env = {
+    backingScale,
+    borderWidth,
+    isLargeGraph,
+    theme,
+    hoverRingColor,
+    state: {
+      lastFillStyle: null,
+      lastStrokeStyle: null,
+      lastGlobalAlpha: NaN,
+    },
+  };
+  const scratchItem = useBatchedNodes ? null : {};
+  let labelSetupDone = false;
+  let lastSingleLabelFontSize = NaN;
 
-  for (const node of view.nodes) {
+  for (let i = 0; i < nodeCount; i++) {
+    const node = view.nodes[i];
     if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;
     if (node.x < minWorldX || node.x > maxWorldX || node.y < minWorldY || node.y > maxWorldY) {
       continue;
     }
-    const pointX = (node.x - view.camera.x) * zoom + screenCenterX;
-    const pointY = (node.y - view.camera.y) * zoom + screenCenterY;
+    const pointX = (node.x - camX) * zoom + screenCenterX;
+    const pointY = (node.y - camY) * zoom + screenCenterY;
 
-    const style = appearance.nodeStyles.get(node.id);
-    const radius = getNodeScreenRadius(getBaseRadius(node, style.scale), zoom);
+    const style = styleList ? styleList[i] : appearance.nodeStyles.get(node.id);
+    const radius = Math.max(0.6, getBaseRadius(node, style.scale) * sqrtZoom);
 
     const isFocusNode = hasFocus && node.id === focusNodeId;
     const isHoverFocusNode = hasHoverFocus && node.id === hoverFocusNodeId;
@@ -1122,7 +1369,7 @@ function drawNodes(view, ctx, appearance) {
     const nodeAlpha =
       (isClickFlash || isSelectedNode || isHoverNodeRaw ? 1 : focusAlpha) *
       getLowDegreeAlpha(
-        view.plugin.getSettings().dim_low_degree_nodes,
+        dimLowDegree,
         node.degree,
         isClickFlash ||
           isSelectedNode ||
@@ -1134,55 +1381,191 @@ function drawNodes(view, ctx, appearance) {
     let fillColor = style.color;
     if (isClickFlash) fillColor = '#ffffff';
 
-    ctx.globalAlpha = nodeAlpha;
-    ctx.fillStyle = fillColor;
-    ctx.beginPath();
-    traceNodeShape(ctx, pointX, pointY, radius + (node.meta?.subgraph ? 2 : 0), style.shape);
-    if (node.meta?.subgraph) {
-      ctx.strokeStyle = fillColor;
-      setCrispStroke(ctx, 3, nodeAlpha, backingScale);
-      ctx.stroke();
-    } else ctx.fill();
+    if (useBatchedNodes) {
+      if (
+        node.meta?.subgraph ||
+        node.meta?.darkEnergy ||
+        isHover ||
+        isSelectedNode ||
+        isClickFlash
+      ) {
+        specialNodes.push({
+          node,
+          style,
+          pointX,
+          pointY,
+          radius,
+          fillColor,
+          nodeAlpha,
+          isHover,
+          isSelectedNode,
+          isClickFlash,
+          hoverVisualProgress,
+        });
+      } else {
+        const alphaQ = nodeAlpha >= 0.999 ? 1 : Math.round(nodeAlpha * 32) / 32;
+        if (alphaQ > 0) {
+          let fb;
+          if (alphaQ === 1 && style === lastFillStyleObj) {
+            fb = lastFillBucket;
+          } else {
+            const fk =
+              alphaQ === 1 && style.shape === 1
+                ? fillColor
+                : `${fillColor}|${alphaQ}|${style.shape}`;
+            fb = fillBuckets.get(fk);
+            if (!fb) {
+              fb = { color: fillColor, alpha: alphaQ, shape: style.shape, pts: [] };
+              fillBuckets.set(fk, fb);
+            }
+            if (alphaQ === 1) {
+              lastFillStyleObj = style;
+              lastFillBucket = fb;
+            }
+          }
+          fb.pts.push(pointX, pointY, radius);
+        }
 
-    if (node.meta?.darkEnergy) {
-      ctx.strokeStyle = fillColor;
-      setCrispStroke(ctx, 1.5, nodeAlpha, backingScale);
-      ctx.beginPath();
-      traceNodeShape(ctx, pointX, pointY, radius + 4, style.shape);
-      ctx.stroke();
+        const drawBorder = hasNodeBorders && (isLargeGraph ? radius >= 1.5 : radius > 0.6);
+        if (drawBorder) {
+          const effectiveWidth =
+            radius >= 3 ? borderWidth : borderWidth * Math.max(0.25, radius / 3);
+          const insetRadius = Math.max(0.3, radius - effectiveWidth * 0.5);
+          const backingWidth = Math.max(0, effectiveWidth) * backingScale;
+          const lw = backingWidth >= 1 ? Math.round(effectiveWidth * 16) / 16 : 1 / backingScale;
+          const rawBorderAlpha =
+            backingWidth >= 1 ? nodeAlpha * 0.85 : nodeAlpha * 0.85 * backingWidth;
+          const bAlpha = Math.round(rawBorderAlpha * 32) / 32;
+          if (bAlpha > 0) {
+            let bb;
+            if (style === lastBorderStyleObj && lw === lastBorderLw && bAlpha === lastBorderAlpha) {
+              bb = lastBorderBucket;
+            } else {
+              const borderCol = style.borderColor || getNodeBorderColor(fillColor, theme);
+              const bk = `${borderCol}|${lw}|${bAlpha}|${style.shape}`;
+              bb = borderBuckets.get(bk);
+              if (!bb) {
+                bb = { color: borderCol, lw, alpha: bAlpha, shape: style.shape, pts: [] };
+                borderBuckets.set(bk, bb);
+              }
+              lastBorderStyleObj = style;
+              lastBorderLw = lw;
+              lastBorderAlpha = bAlpha;
+              lastBorderBucket = bb;
+            }
+            bb.pts.push(pointX, pointY, insetRadius);
+          }
+        }
+      }
+    } else {
+      scratchItem.node = node;
+      scratchItem.style = style;
+      scratchItem.pointX = pointX;
+      scratchItem.pointY = pointY;
+      scratchItem.radius = radius;
+      scratchItem.fillColor = fillColor;
+      scratchItem.nodeAlpha = nodeAlpha;
+      scratchItem.isHover = isHover;
+      scratchItem.isSelectedNode = isSelectedNode;
+      scratchItem.isClickFlash = isClickFlash;
+      scratchItem.hoverVisualProgress = hoverVisualProgress;
+      drawIndividualNodeBody(ctx, scratchItem, env);
     }
-    if (isHover || isSelectedNode) {
-      const hoverStrokeAlpha = Math.max(0.12, hoverVisualProgress);
-      const selectedStrokeAlpha = isSelectedNode ? 0.95 : 0;
-      const hoverLineWidth = 1 + hoverVisualProgress;
-      const selectedLineWidth = isSelectedNode ? 1.4 : 0;
-      ctx.strokeStyle = isHover && hoverRingColor ? hoverRingColor : theme.selection;
-      setCrispStroke(
-        ctx,
-        Math.max(hoverLineWidth, selectedLineWidth),
-        Math.max(hoverStrokeAlpha, selectedStrokeAlpha),
-        backingScale
+
+    const emphasized = isSelectedNode || isHover || isFocusNode;
+    if (emphasized || zoom >= style.labelThreshold) {
+      const label = getLabelAppearance(
+        zoom,
+        style.labelThreshold,
+        style.fontSize,
+        nodeAlpha,
+        emphasized,
+        style.minimumSize
       );
+      if (label.alpha > 0) {
+        if (useBatchedNodes) {
+          labelQueue.push({
+            node,
+            pointX,
+            pointY,
+            radius,
+            alpha: label.alpha,
+            fontSize: label.fontSize,
+          });
+        } else {
+          ctx.globalAlpha = label.alpha;
+          env.state.lastGlobalAlpha = NaN;
+          if (env.state.lastFillStyle !== theme.text) {
+            ctx.fillStyle = theme.text;
+            env.state.lastFillStyle = theme.text;
+          }
+          if (!labelSetupDone) {
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            labelSetupDone = true;
+          }
+          if (lastSingleLabelFontSize !== label.fontSize) {
+            ctx.font = `${label.fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+            lastSingleLabelFontSize = label.fontSize;
+          }
+          ctx.fillText(getNodeLabelText(node), pointX, pointY + radius + 8);
+        }
+      }
+    }
+  }
+
+  if (useBatchedNodes) {
+    const needAlphaOrder = hasAnyFocus || hasSearchHighlight || dimLowDegree;
+    const fillList = needAlphaOrder
+      ? [...fillBuckets.values()].sort((a, b) => a.alpha - b.alpha)
+      : fillBuckets.values();
+    for (const bucket of fillList) {
+      ctx.globalAlpha = bucket.alpha;
+      ctx.fillStyle = bucket.color;
       ctx.beginPath();
-      traceNodeShape(ctx, pointX, pointY, radius + (node.meta?.subgraph ? 4 : 2), style.shape);
-      ctx.stroke();
+      traceBatchedShapes(ctx, bucket.pts, bucket.shape);
+      ctx.fill();
     }
 
-    const label = getLabelAppearance(
-      zoom,
-      style.labelThreshold,
-      style.fontSize,
-      nodeAlpha,
-      isSelectedNode || isHover || isFocusNode,
-      style.minimumSize
-    );
-    if (label.alpha > 0) {
-      ctx.globalAlpha = label.alpha;
+    if (hasNodeBorders && borderBuckets.size > 0) {
+      const borderList = needAlphaOrder
+        ? [...borderBuckets.values()].sort((a, b) => a.alpha - b.alpha)
+        : borderBuckets.values();
+      for (const bucket of borderList) {
+        ctx.strokeStyle = bucket.color;
+        ctx.lineWidth = bucket.lw;
+        ctx.globalAlpha = bucket.alpha;
+        ctx.beginPath();
+        traceBatchedShapes(ctx, bucket.pts, bucket.shape);
+        ctx.stroke();
+      }
+    }
+
+    env.state.lastFillStyle = null;
+    env.state.lastStrokeStyle = null;
+    env.state.lastGlobalAlpha = NaN;
+    for (let i = 0; i < specialNodes.length; i++) {
+      drawIndividualNodeBody(ctx, specialNodes[i], env);
+    }
+
+    if (labelQueue.length > 0) {
       ctx.fillStyle = theme.text;
-      ctx.font = `${label.fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(getNodeLabelText(node), pointX, pointY + radius + 8);
+      let lastLabelAlpha = NaN;
+      let lastLabelFontSize = NaN;
+      for (let i = 0; i < labelQueue.length; i++) {
+        const entry = labelQueue[i];
+        if (lastLabelAlpha !== entry.alpha) {
+          ctx.globalAlpha = entry.alpha;
+          lastLabelAlpha = entry.alpha;
+        }
+        if (lastLabelFontSize !== entry.fontSize) {
+          ctx.font = `${entry.fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+          lastLabelFontSize = entry.fontSize;
+        }
+        ctx.fillText(getNodeLabelText(entry.node), entry.pointX, entry.pointY + entry.radius + 8);
+      }
     }
   }
   ctx.globalAlpha = 1;
@@ -1194,6 +1577,24 @@ function drawNodes(view, ctx, appearance) {
 }
 
 function drawSelectionBox(view, ctx) {
+  if (view.linkSourceNodeId && view.lastCursorScreen) {
+    const sourceNode = view.nodeById?.get(view.linkSourceNodeId);
+    if (sourceNode) {
+      const zoom = Math.max(view.camera.zoom, 0.0001);
+      const sx = (sourceNode.x - view.camera.x) * zoom + view.viewWidth / 2;
+      const sy = (sourceNode.y - view.camera.y) * zoom + view.viewHeight / 2;
+      ctx.save();
+      ctx.strokeStyle = (view.canvasTheme || DARK_THEME).selection;
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.4;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(view.lastCursorScreen.x, view.lastCursorScreen.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
   const boxSelect = view.boxSelectDrag;
   if (!boxSelect) return;
   const left = Math.min(boxSelect.startX, boxSelect.currentX);

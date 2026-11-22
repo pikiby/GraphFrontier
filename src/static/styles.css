@@ -199,14 +199,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 6px;
   margin-bottom: 6px;
 }
 
 .graphfrontier-sidepanel-title {
   font-size: 12px;
   color: var(--text-normal);
-  padding-right: 8px;
+  padding-right: 2px;
+  white-space: nowrap;
 }
 
 .graphfrontier-sidepanel-header-actions {
@@ -252,7 +253,7 @@
   font-size: 11px;
   line-height: 1;
   padding: 0 6px;
-  margin-left: 10px;
+  margin-left: 4px;
 }
 
 .graphfrontier-sidepanel-inline-toggle {
@@ -1706,4 +1707,191 @@ textarea.graphfrontier-clipboard-input {
 }
 .menu-item.graphfrontier-removed-member[hidden] {
   display: none;
+}
+
+.graphfrontier-sidepanel button.graphfrontier-gear-button {
+  color: var(--text-muted);
+}
+
+.graphfrontier-sidepanel button.graphfrontier-gear-button.is-active {
+  color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.graphfrontier-sidepanel.graphfrontier-gear-popover {
+  top: 46px;
+  max-height: calc(100% - 54px);
+  box-shadow: var(--shadow-s);
+  z-index: 8;
+}
+
+.graphfrontier-sidepanel.graphfrontier-gear-popover[hidden] {
+  display: none;
+}
+
+.graphfrontier-file-types-header {
+  margin: 8px 0 4px;
+}
+
+.graphfrontier-other-files-details .graphfrontier-find-row {
+  margin-top: 0;
+}
+
+.graphfrontier-other-files-details.is-muted {
+  opacity: 0.55;
+}
+
+.graphfrontier-canvas.is-annotation-hover {
+  cursor: grab;
+}
+
+.graphfrontier-canvas.is-annotation-resize {
+  cursor: nwse-resize;
+}
+
+.graphfrontier-canvas.is-annotation-resize-ew {
+  cursor: ew-resize;
+}
+
+.graphfrontier-canvas.is-annotation-resize-ns {
+  cursor: ns-resize;
+}
+
+.graphfrontier-sidepanel.graphfrontier-floating-editor {
+  position: absolute;
+  right: auto;
+  width: 256px;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+  box-shadow: var(--shadow-l);
+  z-index: 9;
+}
+
+.graphfrontier-floating-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.graphfrontier-annotation-textarea {
+  width: 100%;
+  min-height: 44px;
+  height: auto;
+  margin-bottom: 6px;
+  padding: 5px 6px;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.35;
+}
+
+.graphfrontier-annotation-color-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.graphfrontier-annotation-color-controls .graphfrontier-sidepanel-save {
+  width: auto;
+  padding: 0 8px;
+}
+
+.graphfrontier-floating-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+}
+
+textarea.graphfrontier-inline-annotation-input {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px dashed rgba(128, 128, 128, 0.5);
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  font-weight: 600;
+  text-align: center;
+  white-space: pre;
+  overflow: hidden;
+  resize: none;
+}
+
+textarea.graphfrontier-inline-annotation-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: none;
+}
+
+.graphfrontier-sidepanel.graphfrontier-annotation-toolbar {
+  position: absolute;
+  right: auto;
+  pointer-events: auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  max-width: calc(100% - 16px);
+  padding: 5px 8px;
+  box-shadow: var(--shadow-l);
+}
+
+.graphfrontier-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.graphfrontier-toolbar-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.graphfrontier-sidepanel.graphfrontier-annotation-toolbar .graphfrontier-sidepanel-slider {
+  width: 68px;
+}
+
+.graphfrontier-sidepanel.graphfrontier-annotation-toolbar .graphfrontier-sidepanel-value {
+  min-width: 20px;
+}
+
+.graphfrontier-sidepanel.graphfrontier-annotation-toolbar .graphfrontier-sidepanel-save {
+  width: auto;
+  padding: 0 8px;
+}
+
+.graphfrontier-sidepanel button.graphfrontier-toolbar-reset {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  background: var(--background-modifier-form-field);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.graphfrontier-sidepanel button.graphfrontier-toolbar-reset:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.graphfrontier-sidepanel button.graphfrontier-toolbar-reset svg {
+  width: 13px;
+  height: 13px;
 }

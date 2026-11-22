@@ -58,8 +58,10 @@ test('official SDK handshake, tools/list and all graph tools work over loopback 
   const { url, view, writes, preferences } = await setup(t);
   const c = await client(t, url);
   const tools = await c.listTools();
-  assert.equal(tools.tools.length, 35);
+  assert.equal(tools.tools.length, 37);
   assert(tools.tools.some((tool) => tool.name === 'subgraph_nodes'));
+  assert(tools.tools.some((tool) => tool.name === 'edit_links'));
+  assert(tools.tools.some((tool) => tool.name === 'edit_annotations'));
   const call = (name, args = {}) => c.callTool({ name, arguments: args });
   const listed = await call('list_views');
   const ref = listed.structuredContent.views[0];

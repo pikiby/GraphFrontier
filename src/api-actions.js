@@ -6,6 +6,8 @@ import { validate } from './api-tools.js';
 import { NODE_VISUAL_SETTINGS, getNodeVisualSetting } from './node-visuals.js';
 import { PREFIX } from './dark-energy.js';
 import { SUBGRAPH_PREFIX } from './subgraphs.js';
+import { addCustomLinks, removeCustomLinks } from './custom-links.js';
+import { ANNOTATION_PREFIX, DEFAULT_ANNOTATION, normalizeAnnotations } from './annotations.js';
 import { HOTKEY_COMMANDS, normalizeAttachmentExtensions } from './constants.js';
 const copy = (value) => JSON.parse(JSON.stringify(value));
 
@@ -88,6 +90,8 @@ class GraphFrontierActions extends LayoutApi {
       whitelist: copy(this.plugin.data.whitelist),
       gravity: copy(this.plugin.data.dark_energy),
       subgraphs: copy(this.plugin.data.subgraphs),
+      customLinks: copy(this.plugin.data.custom_links),
+      annotations: copy(this.plugin.data.annotations),
       hotkeys: copy(this.plugin.data.hotkeys),
       commands: copy(HOTKEY_COMMANDS),
       search: {
@@ -522,6 +526,93 @@ class GraphFrontierActions extends LayoutApi {
     }
     this.changed();
     return this.state(view);
+  }
+
+  editLinks(raw) {
+    const args = this.input('editLinks', raw),
+      view = this.resolve(args, true);
+    if (args.action === 'clear') {
+      this.plugin.data.custom_links = [];
+      this.changed({ rebuild: true });
+      return { ...this.state(view), customLinks: [] };
+    }
+    if (!args.links?.length) fail('INVALID_ARGUMENT', 'links is required for add and remove.');
+    if (args.action === 'add') {
+      for (const link of args.links) {
+        if (link.source === link.target) fail('INVALID_ARGUMENT', 'Self-links are not allowed.');
+      }
+      const next = addCustomLinks(this.plugin.data.custom_links, args.links);
+      this.plugin.data.custom_links = next.links;
+      this.changed({ rebuild: true, kick: next.added > 0 });
+      return { ...this.state(view), added: next.added, customLinks: copy(next.links) };
+    }
+    const next = removeCustomLinks(this.plugin.data.custom_links, args.links);
+    this.plugin.data.custom_links = next.links;
+    this.changed({ rebuild: true });
+    return { ...this.state(view), removed: next.removed, customLinks: copy(next.links) };
+  }
+
+  editAnnotations(raw) {
+    const args = this.input('editAnnotations', raw),
+      view = this.resolve(args, true);
+    if (args.action === 'clear') {
+      this.plugin.data.annotations = [];
+      this.changed();
+      return { ...this.state(view), annotations: [] };
+    }
+    const existing = args.id
+      ? (this.plugin.data.annotations || []).find((item) => item.id === args.id)
+      : null;
+    if (args.action !== 'create' && !existing) fail('INVALID_ARGUMENT', 'Annotation not found.');
+    if (args.action === 'create') {
+      if (args.id) fail('INVALID_ARGUMENT', 'IDs are generated for new annotations.');
+      if (!args.text?.trim()) fail('INVALID_ARGUMENT', 'text is required.');
+      const createdRaw = {
+        ...DEFAULT_ANNOTATION,
+        x: 0,
+        y: 0,
+        id: `${ANNOTATION_PREFIX}${this.plugin.createGroupId()}`,
+        ...Object.fromEntries(
+          ['text', 'x', 'y', 'size', 'color']
+            .filter((key) => args[key] !== undefined)
+            .map((key) => [key, args[key]])
+        ),
+      };
+      this.plugin.data.annotations = normalizeAnnotations([
+        ...(this.plugin.data.annotations || []),
+        createdRaw,
+      ]);
+      const created = this.plugin.data.annotations.find((item) => item.id === createdRaw.id);
+      this.changed();
+      return {
+        ...this.state(view),
+        annotation: copy(created),
+        annotations: copy(this.plugin.data.annotations),
+      };
+    }
+    if (args.action === 'delete') {
+      this.plugin.data.annotations = (this.plugin.data.annotations || []).filter(
+        (item) => item.id !== args.id
+      );
+      this.changed();
+      return { ...this.state(view), annotations: copy(this.plugin.data.annotations) };
+    }
+    const updatedRaw = { ...existing };
+    for (const key of ['text', 'x', 'y', 'size', 'color']) {
+      if (args[key] !== undefined) updatedRaw[key] = args[key];
+    }
+    this.plugin.data.annotations = normalizeAnnotations(
+      (this.plugin.data.annotations || []).map((item) =>
+        item.id === existing.id ? updatedRaw : item
+      )
+    );
+    const updated = this.plugin.data.annotations.find((item) => item.id === existing.id);
+    this.changed();
+    return {
+      ...this.state(view),
+      annotation: copy(updated),
+      annotations: copy(this.plugin.data.annotations),
+    };
   }
 
   async getExportLocations(raw) {

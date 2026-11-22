@@ -59,3 +59,18 @@ jobs:
 
       - name: Check release metadata and assets
         run: npm run check:release
+
+      - name: Build standalone package
+        run: npm run build:standalone
+
+      - name: Test standalone package
+        run: npm run test:standalone
+
+      - name: Package VS Code extension
+        run: npm run package:vscode
+
+      - name: Test VS Code extension
+        run: npm run test:vscode
+
+      - name: Check VS Code release metadata and VSIX
+        run: npm run check:release:vscode

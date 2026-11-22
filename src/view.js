@@ -51,6 +51,14 @@ import {
 } from './subgraphs.js';
 import { SubgraphModal } from './subgraph-modal.js';
 import {
+  ANNOTATION_PREFIX,
+  DEFAULT_ANNOTATION,
+  normalizeAnnotations,
+  hitTestAnnotation,
+} from './annotations.js';
+import { AnnotationModal } from './annotation-modal.js';
+import { canonicalLinkKey } from './custom-links.js';
+import {
   NODE_VISUAL_SETTINGS,
   getNodeVisualOverride,
   getNodeVisualSetting,
@@ -62,6 +70,7 @@ const NODE_SHAPE_VALUES = NODE_VISUAL_SETTINGS.find((spec) => spec.key === 'node
 import {
   DEFAULT_DATA,
   SETTINGS_TABS,
+  LEGACY_SETTINGS_TABS,
   normalizeAttachmentExtensions,
   GRAPHFRONTIER_VIEW_TYPE,
   NODE_MULTIPLIER_MIN,
@@ -162,6 +171,8 @@ class GraphFrontierView extends ItemView {
     this.viewWidth = 1;
     this.viewHeight = 1;
     this.devicePixelRatio = 1;
+    this.backingScale = null;
+    this._backingDpr = null;
 
     this.nodes = [];
     this.nodeById = new Map();
@@ -201,6 +212,9 @@ class GraphFrontierView extends ItemView {
     this.dragMovedDistance = 0;
     this.panDragMovedDistance = 0;
     this.sidePanelOpen = !this.subgraphScope;
+    this.gearMenuOpen = false;
+    this.gearButtonEl = null;
+    this.gearPopoverEl = null;
     this.sideControls = new Map();
     const savedSidePanelSections =
       plugin.data?.view_state?.side_panel_sections &&
@@ -234,6 +248,14 @@ class GraphFrontierView extends ItemView {
     this.boxSelectDrag = null;
     this.boxSelectArmed = false;
     this.dragSelectionOffsets = null;
+    this.hoverAnnotationId = null;
+    this.hoverAnnotationPart = null;
+    this.dragAnnotationState = null;
+    this.editingAnnotationId = null;
+    this.floatingEditorEl = null;
+    this.floatingEditorCleanup = null;
+    this.floatingEditorSync = null;
+    this.linkSourceNodeId = null;
     this.layoutKickAtMs = Date.now();
     this.layoutStillFrames = 0;
     this.layoutAutosaveDirty = false;
@@ -423,7 +445,21 @@ class GraphFrontierView extends ItemView {
     this.clearTouchLongPressTimer();
     this.closeInputSuggestMenu();
     this.closeQuickPreview();
+    this.closeFloatingEditor();
+    this.closeGearMenu();
+    this.gearPopoverEl?.remove?.();
+    this.gearPopoverEl = null;
+    this.gearButtonEl = null;
     this.plugin.schedulePersist(250, { layout: false });
+  }
+
+  closeGearMenu() {
+    this.gearMenuOpen = false;
+    if (this.gearPopoverEl) this.gearPopoverEl.hidden = true;
+    if (this.gearButtonEl) {
+      this.gearButtonEl.toggleClass('is-active', false);
+      this.gearButtonEl.setAttribute('aria-expanded', 'false');
+    }
   }
 
   bindEvents() {
@@ -461,8 +497,28 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(this.canvasEl, 'mousedown', (event) => this.onMouseDown(event));
     this.registerDomEvent(this.canvasEl, 'mouseup', (event) => this.onMouseUp(event));
     this.registerDomEvent(this.canvasEl, 'mouseleave', () => {
+      const hadHoverAnn = !!this.hoverAnnotationId;
       this.hoverNodeId = null;
+      this.hoverAnnotationId = null;
+      this.hoverAnnotationPart = null;
+      this.canvasEl?.removeClass(
+        'is-annotation-hover',
+        'is-annotation-resize',
+        'is-annotation-resize-ew',
+        'is-annotation-resize-ns'
+      );
+      if (hadHoverAnn) this.requestFrame();
       this.onMouseUp();
+    });
+    this.registerDomEvent(this.contentEl.ownerDocument, 'keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      if (this.linkSourceNodeId) {
+        this.linkSourceNodeId = null;
+        this.canvasEl?.removeClass('is-wave-armed');
+        this.render();
+      } else if (this.floatingEditorEl && !this.inputSuggestMenu) {
+        this.closeFloatingEditor();
+      }
     });
     this.registerDomEvent(this.canvasEl, 'touchstart', (event) => this.onTouchStart(event), {
       passive: false,
@@ -481,8 +537,24 @@ class GraphFrontierView extends ItemView {
     });
     this.registerDomEvent(this.canvasEl, 'contextmenu', (event) => this.onContextMenu(event));
     this.registerDomEvent(this.contentEl.ownerDocument, 'mousedown', (event) => {
-      if (!this.quickPreviewEl || !this.quickPreviewEl.classList.contains('is-open')) return;
       const eventTarget = event.target;
+      if (
+        this.gearMenuOpen &&
+        this.gearPopoverEl &&
+        !this.gearPopoverEl.contains?.(eventTarget) &&
+        this.gearButtonEl !== eventTarget &&
+        !this.gearButtonEl?.contains?.(eventTarget)
+      ) {
+        this.closeGearMenu();
+      }
+      if (
+        this.floatingEditorEl &&
+        !this.floatingEditorEl.contains?.(eventTarget) &&
+        !this.inputSuggestMenu?.menuEl?.contains?.(eventTarget)
+      ) {
+        this.closeFloatingEditor();
+      }
+      if (!this.quickPreviewEl || !this.quickPreviewEl.classList.contains('is-open')) return;
       if (eventTarget && this.quickPreviewEl.contains(eventTarget)) return;
       this.closeQuickPreview();
     });
@@ -513,6 +585,9 @@ class GraphFrontierView extends ItemView {
   buildSidePanel() {
     if (!this.sidePanelEl) return;
     this.closeInputSuggestMenu();
+    this.gearPopoverEl?.remove?.();
+    this.gearPopoverEl = null;
+    this.gearButtonEl = null;
     // The panel itself scrolls; a rebuild keeps the reader where they were.
     const scrollTop = this.sidePanelEl.scrollTop || 0;
     this.sidePanelEl.empty();
@@ -522,6 +597,7 @@ class GraphFrontierView extends ItemView {
     this.searchInputEl = null;
     this.searchClearButtonEl = null;
     this.layoutList = null;
+    this.syncOtherFilesDetails = null;
     // An exported page without its settings menu shows only the graph.
     const exportPage = this.plugin.exportPage;
     this.sidePanelEl.toggleClass('is-export-hidden', !!exportPage && !exportPage.settings);
@@ -546,6 +622,49 @@ class GraphFrontierView extends ItemView {
     this.registerDomEvent(toggleBtn, 'click', () => {
       this.sidePanelOpen = !this.sidePanelOpen;
       this.buildSidePanel();
+    });
+
+    this.gearButtonEl = headerActions.createEl('button', {
+      cls: 'graphfrontier-history-button graphfrontier-gear-button',
+      type: 'button',
+    });
+    this.gearButtonEl.setAttribute('aria-label', 'Preferences');
+    this.gearButtonEl.setAttribute('title', 'Preferences');
+    this.gearButtonEl.setAttribute('aria-expanded', String(!!this.gearMenuOpen));
+    this.gearButtonEl.toggleClass('is-active', !!this.gearMenuOpen);
+    setIcon(this.gearButtonEl, 'settings');
+
+    const gearHost = this.wrapEl || header;
+    const gearPopover = gearHost.createDiv({
+      cls: 'graphfrontier-sidepanel graphfrontier-gear-popover is-open',
+    });
+    gearPopover.hidden = !this.gearMenuOpen;
+    this.gearPopoverEl = gearPopover;
+
+    const selectionGroup = this.createSidePanelGroup(gearPopover);
+    selectionGroup.createDiv({ text: 'Selection', cls: 'graphfrontier-groups-title' });
+    this.addSideModifierSelect(selectionGroup, 'Box select', 'selection_box_modifier', {
+      hint: 'Modifier key for box selection drag on empty space',
+    });
+    this.addSideModifierSelect(selectionGroup, 'Add/remove selected', 'selection_toggle_modifier', {
+      hint: 'Modifier key for toggling single-node selection on click',
+    });
+    this.addSideModifierSelect(selectionGroup, 'Add to search', 'quick_pick_modifier', {
+      hint: 'Modifier key + node click adds its name to search. None disables this action. Selection takes priority; this action takes priority over quick preview.',
+    });
+
+    if (!exportPage && this.plugin.mcp?.desktop) {
+      const mcpGroup = this.createSidePanelGroup(gearPopover);
+      mcpGroup.createDiv({ text: 'MCP', cls: 'graphfrontier-groups-title' });
+      this.plugin.mcp.renderToggle(mcpGroup);
+    }
+
+    this.registerDomEvent(this.gearButtonEl, 'click', (event) => {
+      event.stopPropagation?.();
+      this.gearMenuOpen = !this.gearMenuOpen;
+      if (this.gearPopoverEl) this.gearPopoverEl.hidden = !this.gearMenuOpen;
+      this.gearButtonEl?.toggleClass('is-active', this.gearMenuOpen);
+      this.gearButtonEl?.setAttribute('aria-expanded', String(this.gearMenuOpen));
     });
 
     const body = this.sidePanelEl.createDiv({ cls: 'graphfrontier-sidepanel-body' });
@@ -602,49 +721,6 @@ class GraphFrontierView extends ItemView {
     }
     this.syncSettingsTabs();
 
-    const setsSection = this.settingsTabs.get('sets').panel;
-    // Sets: collapsible Selection modifiers and Custom lists subgroups, as in Groups.
-    const selectionSection = this.createSidePanelSection(setsSection, {
-      id: 'selection',
-      title: 'Selection',
-      openByDefault: true,
-    });
-    selectionSection.addClass('graphfrontier-subgroup-section');
-    this.addSideModifierSelect(selectionSection, 'Box select', 'selection_box_modifier', {
-      hint: 'Modifier key for box selection drag on empty space',
-    });
-    this.addSideModifierSelect(
-      selectionSection,
-      'Add/remove selected',
-      'selection_toggle_modifier',
-      {
-        hint: 'Modifier key for toggling single-node selection on click',
-      }
-    );
-
-    this.addSideModifierSelect(selectionSection, 'Add to search', 'quick_pick_modifier', {
-      hint: 'Modifier key + node click adds its name to search. None disables this action. Selection takes priority; this action takes priority over quick preview.',
-    });
-
-    const simulationSection = this.createSidePanelSection(setsSection, {
-      id: 'simulation',
-      title: 'Simulation',
-      openByDefault: true,
-    });
-    simulationSection.addClass('graphfrontier-subgroup-section');
-    this.addSideSlider(
-      simulationSection,
-      'Physics steps',
-      'physics_steps_per_frame',
-      1,
-      5,
-      1,
-      'render',
-      {
-        hint: 'Physics steps per frame: more steps settle the graph faster. Steps stop for the frame after 8 ms; dragging always takes one step. HTML exports use the same value',
-      }
-    );
-
     const displaySection = this.settingsTabs.get('display').panel;
     // Display rows are grouped without titles: general, nodes, text, edges, grid.
     const generalGroup = this.createSidePanelGroup(displaySection);
@@ -685,6 +761,9 @@ class GraphFrontierView extends ItemView {
       values: NODE_SHAPE_VALUES,
       format: (value) => NODE_SHAPE_NAMES[normalizeNodeShape(value)],
       onChange: () => this.refreshShapeSwatches(),
+    });
+    this.addSideSlider(nodeGroup, 'Node border', 'node_border_width', 0, 2, 0.1, 'render', {
+      hint: 'Auto-contrast outline thickness around nodes (0 disables)',
     });
 
     const textGroup = this.createSidePanelGroup(displaySection);
@@ -778,7 +857,7 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(physicsSection, 'Orbit distance', 'orbit_distance', 1, 100, 1, 'render', {
       hint: 'Desired spacing between nodes pinned to same orbit',
     });
-    this.addSideSlider(physicsSection, 'Repel strength', 'repel_strength', 0, 200, 1, 'render', {
+    this.addSideSlider(physicsSection, 'Repel strength', 'repel_strength', 3, 200, 1, 'render', {
       hint: 'Repulsion force between nodes',
     });
     this.addSideSlider(physicsSection, 'Repel radius', 'repel_radius', 20, 1000, 5, 'render', {
@@ -790,6 +869,18 @@ class GraphFrontierView extends ItemView {
     this.addSideSlider(physicsSection, 'Damping', 'damping', 0.01, 0.9, 0.01, 'render', {
       hint: 'Speed damping per frame; higher means faster stop',
     });
+    this.addSideSlider(
+      physicsSection,
+      'Physics speed',
+      'physics_steps_per_frame',
+      1,
+      5,
+      1,
+      'render',
+      {
+        hint: 'Simulation speed: higher values settle the graph faster. HTML exports use the same value',
+      }
+    );
 
     // Effects animate how the graph is shown; they never move nodes or change the layout.
     const effectsSection = this.createSidePanelSection(physicsSection, {
@@ -798,17 +889,13 @@ class GraphFrontierView extends ItemView {
       openByDefault: true,
     });
     effectsSection.addClass('graphfrontier-subgroup-section');
-    // Each effect is its own collapsible subsection, like Groups and Filters.
-    const effectSection = (id, title) => {
-      const section = this.createSidePanelSection(effectsSection, {
-        id,
-        title,
-        openByDefault: true,
-      });
-      section.addClass('graphfrontier-subgroup-section');
-      return section;
+    // Grow and Wave stay always expanded inside the collapsible Effects section.
+    const effectGroup = (title) => {
+      const group = this.createSidePanelGroup(effectsSection);
+      group.createDiv({ text: title, cls: 'graphfrontier-groups-title' });
+      return group;
     };
-    const growGroup = effectSection('effect-grow', 'Grow');
+    const growGroup = effectGroup('Grow');
     this.addSideSlider(growGroup, 'Grow duration', 'grow_duration', 1, 60, 1, 'render', {
       hint: 'Seconds Grow takes to give birth to every node',
     });
@@ -820,7 +907,7 @@ class GraphFrontierView extends ItemView {
     );
     this.syncGrowButton();
 
-    const waveGroup = effectSection('effect-wave', 'Wave');
+    const waveGroup = effectGroup('Wave');
     this.addSideSlider(waveGroup, 'Wave depth', 'wave_depth', 1, 10, 1, 'render', {
       hint: 'How many link steps the wave spreads from the clicked node',
     });
@@ -852,19 +939,19 @@ class GraphFrontierView extends ItemView {
     groupListSection.addClass('graphfrontier-subgroup-section');
     this.buildGroupEditorSection(groupListSection);
 
-    // Filters: always-active Exclude (blacklist) and Include only (whitelist) query rules,
-    // then which files become nodes.
+    // Filters: always-active Exclude (blacklist) and Include only (whitelist) query rules.
     const filtersSection = this.createSidePanelSection(groupsSection, {
       id: 'filters',
       title: 'Filters',
       openByDefault: true,
     });
     filtersSection.addClass('graphfrontier-subgroup-section');
-    // Rules and file toggles are side panel groups, so a divider separates them as in Display.
     this.buildQueryRuleEditorSection(this.createSidePanelGroup(filtersSection));
-    this.buildFileFilterControls(filtersSection);
 
-    const customListsSection = this.createSidePanelSection(setsSection, {
+    const filesSection = this.settingsTabs.get('files').panel;
+    this.buildFileFilterControls(filesSection);
+
+    const customListsSection = this.createSidePanelSection(filesSection, {
       id: 'lists',
       title: 'Custom lists',
       openByDefault: true,
@@ -872,12 +959,6 @@ class GraphFrontierView extends ItemView {
     customListsSection.addClass('graphfrontier-subgroup-section');
     this.nodeListsTab = new NodeListsTab(this, customListsSection.createDiv());
     this.nodeListsTab.render();
-
-    if (!exportPage && this.plugin.mcp?.desktop) {
-      const mcpSection = this.createSidePanelSection(setsSection, { id: 'mcp', title: 'MCP' });
-      mcpSection.addClass('graphfrontier-subgroup-section');
-      this.plugin.mcp.renderToggle(mcpSection);
-    }
     // An exported page has the layout list with Layouts, and Save layout and Autosave with Saves.
     const pageLayouts = !exportPage || exportPage.layouts;
     const pageSaves = !exportPage || exportPage.saves;
@@ -894,55 +975,70 @@ class GraphFrontierView extends ItemView {
     this.sidePanelEl.scrollTop = scrollTop;
   }
 
-  // File filters: missing files, orphans and attachments. Attachment options appear only
-  // while Show attachments is on.
+  // File filters: general visibility toggles and collapsible Other files subsection.
   buildFileFilterControls(parentEl) {
-    const filesGroup = this.createSidePanelGroup(parentEl);
-    this.addSideToggle(filesGroup, 'Show only groups', 'show_only_groups', 'render', {
-      hint: 'Hide notes that match no group; has no effect while there are no groups',
-      onChange: () => this.plugin.markQueryRulesDirty(),
+    const notesGroup = this.createSidePanelGroup(parentEl);
+    this.addSideToggle(notesGroup, 'Show orphans', 'hide_orphans', 'data', {
+      inverted: true,
+      hint: 'Show Markdown notes without links (orphans)',
     });
-    this.addSideToggle(filesGroup, 'Existing files only', 'existing_files_only', 'data', {
+    this.addSideToggle(notesGroup, 'Existing files only', 'existing_files_only', 'data', {
       hint: 'Show only files that currently exist in vault',
     });
-    this.addSideToggle(filesGroup, 'Show orphans', 'hide_orphans', 'data', {
-      inverted: true,
-      hint: 'Show nodes without links (orphans)',
+    this.addSideToggle(notesGroup, 'Show only groups', 'show_only_groups', 'render', {
+      hint: 'Hide files that match no group; has no effect while there are no groups',
+      onChange: () => this.plugin.markQueryRulesDirty(),
     });
-    this.addSideToggle(filesGroup, 'Show attachments', 'hide_attachments', 'data', {
-      inverted: true,
-      rebuildPanelOnChange: true,
-      hint: 'Show non-markdown files as attachment nodes',
+
+    const otherFilesSection = this.createSidePanelSection(parentEl, {
+      id: 'other-files',
+      title: 'Other files',
+      openByDefault: true,
     });
-    if (!this.plugin.data.settings.hide_attachments) {
-      this.buildAttachmentFileTypesControl(filesGroup);
-      this.addSideToggle(
-        filesGroup,
-        'Show unlinked attachments',
-        'include_unlinked_attachments',
-        'data',
-        {
-          hint: 'Include all vault non-markdown files when Show attachments is on; Show orphans still applies',
+    otherFilesSection.addClass('graphfrontier-subgroup-section');
+    const otherGroup = this.createSidePanelGroup(otherFilesSection);
+
+    this.addSideToggle(otherGroup, 'Show other files', 'hide_attachments', 'data', {
+      inverted: true,
+      hint: 'Show non-Markdown project files: code, configs, data, media',
+      onChange: () => this.syncOtherFilesDetails?.(),
+    });
+    this.addSideToggle(otherGroup, 'Include unlinked', 'include_unlinked_attachments', 'data', {
+      hint: 'Show non-Markdown files even when no note links to them',
+      onChange: (value) => {
+        if (value && this.plugin.data.settings.hide_attachments) {
+          this.plugin.data.settings.hide_attachments = false;
+          this.sideControls.get('hide_attachments')?.updateButton(true);
         }
-      );
-      const colorRow = filesGroup.createDiv({ cls: 'graphfrontier-sidepanel-row' });
-      colorRow.createSpan({ text: 'Attachment node color', cls: 'graphfrontier-sidepanel-label' });
-      const colorInput = colorRow.createEl('input', { type: 'color' });
-      colorInput.setAttribute('aria-label', 'Attachment node color');
-      colorInput.addClass('graphfrontier-group-color-input');
-      const inheritedColor = () =>
-        this.plugin.getSettings().attachment_node_color ?? this.plugin.getSettings().node_color;
-      colorInput.value = inheritedColor();
-      this.sideControls.set('attachment_node_color', {
-        type: 'color',
-        input: colorInput,
-        getValue: inheritedColor,
-      });
-      this.registerDomEvent(colorInput, 'input', () => {
-        this.plugin.data.settings.attachment_node_color = colorInput.value;
-        this.plugin.persistNodeVisualSettings();
-      });
-    }
+        this.syncOtherFilesDetails?.();
+      },
+    });
+
+    const detailsEl = otherGroup.createDiv({ cls: 'graphfrontier-other-files-details' });
+    this.syncOtherFilesDetails = () => {
+      detailsEl.toggleClass('is-muted', !!this.plugin.getSettings().hide_attachments);
+    };
+
+    const colorRow = detailsEl.createDiv({ cls: 'graphfrontier-sidepanel-row' });
+    colorRow.createSpan({ text: 'Other files color', cls: 'graphfrontier-sidepanel-label' });
+    const colorInput = colorRow.createEl('input', { type: 'color' });
+    colorInput.setAttribute('aria-label', 'Other files color');
+    colorInput.addClass('graphfrontier-group-color-input');
+    const inheritedColor = () =>
+      this.plugin.getSettings().attachment_node_color ?? this.plugin.getSettings().node_color;
+    colorInput.value = inheritedColor();
+    this.sideControls.set('attachment_node_color', {
+      type: 'color',
+      input: colorInput,
+      getValue: inheritedColor,
+    });
+    this.registerDomEvent(colorInput, 'input', () => {
+      this.plugin.data.settings.attachment_node_color = colorInput.value;
+      this.plugin.persistNodeVisualSettings();
+    });
+
+    this.buildAttachmentFileTypesControl(detailsEl);
+    this.syncOtherFilesDetails();
   }
 
   syncSettingsTabs() {
@@ -956,14 +1052,15 @@ class GraphFrontierView extends ItemView {
   }
 
   selectSettingsTab(id, focus = false) {
-    if (!SETTINGS_TABS.includes(id)) return;
+    const resolved = LEGACY_SETTINGS_TABS[id] || id;
+    if (!SETTINGS_TABS.includes(resolved)) return;
     this.closeInputSuggestMenu();
-    const changed = this.plugin.getSettingsTab() !== id;
-    this.plugin.data.view_state.settings_tab = id;
+    const changed = this.plugin.getSettingsTab() !== resolved;
+    this.plugin.data.view_state.settings_tab = resolved;
     for (const view of new Set([this, ...this.getScopeLeaves().map((leaf) => leaf.view)])) {
       if (view?.plugin === this.plugin) view.syncSettingsTabs?.();
     }
-    if (focus) this.settingsTabs?.get(id)?.button.focus();
+    if (focus) this.settingsTabs?.get(resolved)?.button.focus();
     if (changed) this.plugin.schedulePersist(250, { layout: false });
   }
 
@@ -1019,7 +1116,11 @@ class GraphFrontierView extends ItemView {
   }
 
   buildAttachmentFileTypesControl(parentEl) {
-    const prefix = 'File type: ';
+    const headerRow = parentEl.createDiv({ cls: 'graphfrontier-file-types-header' });
+    headerRow.createEl('span', {
+      text: 'Filter by file type',
+      cls: 'graphfrontier-sidepanel-label',
+    });
     const row = parentEl.createDiv({ cls: 'graphfrontier-find-row' });
     const wrap = row.createDiv({
       cls: 'graphfrontier-search-input-wrap graphfrontier-input-anchor graphfrontier-file-types-search',
@@ -1027,8 +1128,12 @@ class GraphFrontierView extends ItemView {
     const input = wrap.createEl('input', {
       cls: 'graphfrontier-find-input',
       type: 'text',
-      placeholder: 'File types',
-      attr: { 'aria-label': 'File types', 'aria-expanded': 'false', 'aria-haspopup': 'listbox' },
+      placeholder: 'Filter file types...',
+      attr: {
+        'aria-label': 'Filter by file type',
+        'aria-expanded': 'false',
+        'aria-haspopup': 'listbox',
+      },
     });
     const clear = wrap.createEl('button', {
       cls: 'graphfrontier-search-inline-clear',
@@ -1057,15 +1162,14 @@ class GraphFrontierView extends ItemView {
       const exclusions = excluded();
       const selected = inventory.filter(([extension]) => !exclusions.has(extension));
       input.value =
-        prefix +
-        (selected.length === inventory.length
+        selected.length === inventory.length
           ? 'All file types'
           : selected.length
             ? selected
                 .slice(0, 3)
                 .map(([extension]) => label(extension))
                 .join(', ') + (selected.length > 3 ? ' +' + (selected.length - 3) : '')
-            : 'No file types');
+            : 'No file types';
       input.setAttr('title', input.value);
       input.setAttr('aria-expanded', closed ? 'false' : 'true');
       syncClear();
@@ -1075,7 +1179,7 @@ class GraphFrontierView extends ItemView {
         inventory = this.plugin.getAttachmentExtensionInventory();
         editing = true;
         showingSummary = false;
-        input.value = prefix + query;
+        input.value = query;
       }
       const search = query.trim().toLowerCase().replace(/^\./, '');
       const matched = inventory.filter(([extension]) =>
@@ -1106,6 +1210,13 @@ class GraphFrontierView extends ItemView {
           } else if (next.has(item.extension)) next.delete(item.extension);
           else next.add(item.extension);
           this.plugin.data.settings.excluded_attachment_extensions = [...next];
+          if (this.plugin.data.settings.hide_attachments) {
+            this.plugin.data.settings.hide_attachments = false;
+            this.plugin.data.settings.include_unlinked_attachments = true;
+            this.sideControls.get('hide_attachments')?.updateButton(true);
+            this.sideControls.get('include_unlinked_attachments')?.updateButton(true);
+            this.syncOtherFilesDetails?.();
+          }
           // Keep the active query and existing option callbacks while showing the new selection.
           showSummary(false);
           this.plugin.schedulePersist();
@@ -1133,28 +1244,18 @@ class GraphFrontierView extends ItemView {
       if (showingSummary) {
         showingSummary = false;
         query = '';
-        input.value = prefix;
-        input.setSelectionRange(prefix.length, prefix.length);
+        input.value = '';
+        input.setSelectionRange(0, 0);
         if (inputType.startsWith('delete')) {
           event.preventDefault();
           open();
           return;
         }
       }
-      if (
-        inputType.startsWith('delete') &&
-        input.selectionEnd <= prefix.length &&
-        (input.selectionStart < prefix.length || inputType.includes('Backward'))
-      ) {
-        event.preventDefault();
-        return;
-      }
-      this.protectQueryInputPrefix(input, event, prefix);
     });
     this.registerDomEvent(input, 'input', () => {
       showingSummary = false;
-      query = input.value.startsWith(prefix) ? input.value.slice(prefix.length) : input.value;
-      if (!input.value.startsWith(prefix)) input.value = prefix + query;
+      query = input.value;
       open();
     });
     this.registerDomEvent(input, 'blur', () => {
@@ -1183,7 +1284,7 @@ class GraphFrontierView extends ItemView {
       event.stopPropagation();
       query = '';
       showingSummary = false;
-      input.value = prefix;
+      input.value = '';
       open();
       input.focus();
     });
@@ -2978,20 +3079,24 @@ class GraphFrontierView extends ItemView {
     }
 
     const cellSize = Math.max(1, Number(this.nodeSpatialIndexCellSize) || 64);
-    const buckets = new Map();
+    const columns = new Map();
     for (const node of this.nodes) {
       const gx = Math.floor(node.x / cellSize);
       const gy = Math.floor(node.y / cellSize);
-      const key = `${gx}:${gy}`;
-      let bucket = buckets.get(key);
+      let column = columns.get(gx);
+      if (!column) {
+        column = new Map();
+        columns.set(gx, column);
+      }
+      let bucket = column.get(gy);
       if (!bucket) {
         bucket = [];
-        buckets.set(key, bucket);
+        column.set(gy, bucket);
       }
       bucket.push(node);
     }
 
-    this.nodeSpatialIndex = { buckets, cellSize };
+    this.nodeSpatialIndex = { columns, cellSize };
     this.nodeSpatialIndexBuildVersion = this.nodeSpatialIndexVersion;
     return this.nodeSpatialIndex;
   }
@@ -3517,6 +3622,7 @@ class GraphFrontierView extends ItemView {
   syncSidePanelControls() {
     this.syncSettingsTabs();
     this.refreshShapeSwatches();
+    this.syncOtherFilesDetails?.();
     if (this.arrowControlsEl) this.arrowControlsEl.hidden = !this.plugin.getSettings().show_arrows;
     if (this.reverseArrowsRowEl)
       this.reverseArrowsRowEl.style.display = this.plugin.getSettings().show_arrows ? '' : 'none';
@@ -3524,13 +3630,17 @@ class GraphFrontierView extends ItemView {
       this.backgroundColorRowEl.style.display = this.plugin.getSettings().custom_background
         ? ''
         : 'none';
-    if (!this.sidePanelOpen || this.sideControls.size === 0) return;
+    if ((!this.sidePanelOpen && !this.gearMenuOpen) || this.sideControls.size === 0) return;
     const activeEl = this.contentEl.ownerDocument
       ? this.contentEl.ownerDocument.activeElement
       : null;
 
     for (const [key, meta] of this.sideControls.entries()) {
       const currentValue = meta.getValue ? meta.getValue() : this.plugin.data.settings[key];
+      if (meta.type === 'custom') {
+        meta.sync?.();
+        continue;
+      }
       if (meta.type === 'style-picker') {
         meta.sync(currentValue);
         continue;
@@ -3649,12 +3759,23 @@ class GraphFrontierView extends ItemView {
     const rect = this.wrapEl.getBoundingClientRect();
     this.viewWidth = Math.max(1, Math.floor(rect.width));
     this.viewHeight = Math.max(1, Math.floor(rect.height));
-    this.devicePixelRatio = this.contentEl.win.devicePixelRatio || 1;
+    const rawDpr = this.contentEl.win.devicePixelRatio || 1;
+    this.devicePixelRatio = rawDpr;
+    this._backingDpr = rawDpr;
+    this.backingScale = Math.max(1, rawDpr);
 
-    this.canvasEl.width = Math.floor(this.viewWidth * this.devicePixelRatio);
-    this.canvasEl.height = Math.floor(this.viewHeight * this.devicePixelRatio);
+    if (rect.width >= 1 && rect.height >= 1 && this.canvasEl.style) {
+      this.canvasEl.style.width = `${this.viewWidth}px`;
+      this.canvasEl.style.height = `${this.viewHeight}px`;
+    }
 
-    this.ctx.setTransform(this.devicePixelRatio, 0, 0, this.devicePixelRatio, 0, 0);
+    this.canvasEl.width = Math.max(1, Math.round(this.viewWidth * this.backingScale));
+    this.canvasEl.height = Math.max(1, Math.round(this.viewHeight * this.backingScale));
+
+    this.ctx.setTransform(this.backingScale, 0, 0, this.backingScale, 0, 0);
+    if (this.ctx.imageSmoothingQuality !== undefined) {
+      this.ctx.imageSmoothingQuality = 'high';
+    }
     this.finishSubgraphFraming();
     this.render();
   }
@@ -3802,11 +3923,13 @@ class GraphFrontierView extends ItemView {
   buildNextNodesFromGraphData(rawNodes, oldNodes, options = {}) {
     const nextNodes = [];
     const nextNodeById = new Map();
+    const nodeOptions =
+      options.totalCount != null ? options : { ...options, totalCount: rawNodes.length };
     let index = 0;
 
     for (const rawNode of rawNodes) {
       const oldNode = oldNodes.get(rawNode.id);
-      const node = this.createRuntimeNode(rawNode, oldNode, index, options);
+      const node = this.createRuntimeNode(rawNode, oldNode, index, nodeOptions);
       nextNodes.push(node);
       nextNodeById.set(node.id, node);
       index += 1;
@@ -3859,8 +3982,9 @@ class GraphFrontierView extends ItemView {
       x = rawNode.meta.subgraph.x;
       y = rawNode.meta.subgraph.y;
     } else {
-      const angle = (index % 360) * (Math.PI / 180);
-      const radius = 80 + 10 * Math.sqrt(index + 1);
+      const largeSpawn = (options?.totalCount || 0) > 500;
+      const angle = largeSpawn ? index * 2.399963229728653 : (index % 360) * (Math.PI / 180);
+      const radius = 80 + (largeSpawn ? 22 : 10) * Math.sqrt(index + 1);
       const jitterX = (Math.random() - 0.5) * 18;
       const jitterY = (Math.random() - 0.5) * 18;
       x = this.camera.x + Math.cos(angle) * radius + jitterX;
@@ -4168,6 +4292,7 @@ class GraphFrontierView extends ItemView {
     // History changes with moves and pins, so the header buttons follow every render.
     this.syncHistoryButtons();
     const result = renderFrameRender(this);
+    this.floatingEditorSync?.();
     this.requestFrame();
     return result;
   }
@@ -4322,6 +4447,19 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
+    if (this.dragAnnotationState) {
+      const state = this.dragAnnotationState;
+      const item = (this.plugin.data.annotations || []).find((entry) => entry.id === state.id);
+      if (item) {
+        const world = this.screenToWorld(screenX, screenY);
+        item.x = world.x + state.offsetX;
+        item.y = world.y + state.offsetY;
+        state.moved = true;
+        this.requestFrame();
+      }
+      return;
+    }
+
     if (this.panDrag) {
       const dx = screenX - this.panDrag.startX;
       const dy = screenY - this.panDrag.startY;
@@ -4334,10 +4472,31 @@ class GraphFrontierView extends ItemView {
 
     const hoverNode = this.getNodeAtScreen(screenX, screenY);
     this.hoverNodeId = hoverNode ? hoverNode.id : null;
+    const prevAnnId = this.hoverAnnotationId;
+    const prevAnnPart = this.hoverAnnotationPart;
+    if (!hoverNode) {
+      const hitAnn = this.getAnnotationAtScreen(screenX, screenY);
+      this.hoverAnnotationId = hitAnn ? hitAnn.item.id : null;
+      this.hoverAnnotationPart = hitAnn ? hitAnn.part : null;
+      this.canvasEl.toggleClass('is-annotation-hover', hitAnn?.part === 'move');
+    } else {
+      this.hoverAnnotationId = null;
+      this.hoverAnnotationPart = null;
+      this.canvasEl.removeClass(
+        'is-annotation-hover',
+        'is-annotation-resize',
+        'is-annotation-resize-ew',
+        'is-annotation-resize-ns'
+      );
+    }
+    if (prevAnnId !== this.hoverAnnotationId || prevAnnPart !== this.hoverAnnotationPart) {
+      this.requestFrame();
+    }
   }
 
   onMouseDown(event) {
     this.requestFrame();
+    if (this.gearMenuOpen) this.closeGearMenu();
     if (Date.now() < this.ignoreMouseUntilMs) return;
     if (event.button !== 0) return;
 
@@ -4347,6 +4506,17 @@ class GraphFrontierView extends ItemView {
     if (this.consumeWavePress(screenX, screenY)) return;
 
     const node = this.getNodeAtScreen(screenX, screenY);
+    if (this.linkSourceNodeId) {
+      const sourceId = this.linkSourceNodeId;
+      this.linkSourceNodeId = null;
+      this.canvasEl.removeClass('is-wave-armed');
+      if (node && node.id !== sourceId && !node.meta?.darkEnergy) {
+        this.plugin.addCustomLinks([{ source: sourceId, target: node.id }]);
+        this.kickLayoutSearch();
+      }
+      this.render();
+      return;
+    }
     const selectionToggleModifier = this.getSelectionToggleModifier();
     const quickPreviewModifier = this.getQuickPreviewModifier();
     const boxSelectModifier = this.getBoxSelectModifier();
@@ -4413,6 +4583,28 @@ class GraphFrontierView extends ItemView {
       return;
     }
 
+    const hitAnn = this.getAnnotationAtScreen(screenX, screenY);
+    if (hitAnn) {
+      const world = this.screenToWorld(screenX, screenY);
+      const m = hitAnn.metrics;
+      this.dragAnnotationState = {
+        id: hitAnn.item.id,
+        part: hitAnn.part,
+        offsetX: hitAnn.item.x - world.x,
+        offsetY: hitAnn.item.y - world.y,
+        startLeft: m.left,
+        startTop: m.top,
+        startWidth: m.width,
+        startHeight: m.height,
+        minWidth: m.minWidth,
+        minHeight: m.minHeight,
+        moved: false,
+      };
+      this.panDrag = null;
+      this.canvasEl.addClass('is-dragging');
+      return;
+    }
+
     this.panDrag = {
       startX: screenX,
       startY: screenY,
@@ -4429,6 +4621,19 @@ class GraphFrontierView extends ItemView {
     const fromTouch = !!(options && options.fromTouch);
     const suppressClick = !!(options && options.suppressClick);
     if (!fromTouch && Date.now() < this.ignoreMouseUntilMs) return;
+
+    if (this.dragAnnotationState) {
+      const state = this.dragAnnotationState;
+      this.dragAnnotationState = null;
+      this.canvasEl.removeClass('is-dragging');
+      if (state.moved) {
+        this.plugin.schedulePersist();
+      } else if (!suppressClick && event && event.button === 0 && event.detail >= 2) {
+        const item = (this.plugin.data.annotations || []).find((entry) => entry.id === state.id);
+        if (item) this.editAnnotation(item);
+      }
+      return;
+    }
 
     if (this.boxSelectDrag) {
       const selectedNodeIds = this.getNodeIdsInScreenRect(this.boxSelectDrag);
@@ -4937,6 +5142,28 @@ class GraphFrontierView extends ItemView {
         this.addCombineSubgraphItem(menu, snapshot);
         this.addRemoveFromSubgraphItem(menu, snapshot);
         this.addSelectionActionsToMenu(menu, snapshot, clientX, clientY);
+      } else {
+        const hitAnn = this.getAnnotationAtScreen?.(screenX, screenY);
+        if (hitAnn) {
+          menu.addItem((item) =>
+            item
+              .setTitle('Edit text...')
+              .setIcon('pencil')
+              .onClick(() => {
+                if (this.plugin?.data === sourceData) this.editAnnotation(hitAnn.item);
+              })
+          );
+          menu.addItem((item) =>
+            item
+              .setTitle('Delete text')
+              .setIcon('trash')
+              .onClick(() => {
+                if (this.plugin?.data === sourceData) this.removeAnnotation(hitAnn.item.id);
+              })
+          );
+          this.showMenuAtPointer(menu, clientX, clientY, event);
+          return;
+        }
       }
       menu.addItem((item) =>
         item
@@ -4948,10 +5175,180 @@ class GraphFrontierView extends ItemView {
             this.editDarkEnergy(null, position);
           })
       );
+      menu.addItem((item) =>
+        item
+          .setTitle('Create text')
+          .setIcon('type')
+          .onClick(() => {
+            if (this.plugin?.data !== sourceData) return;
+            if (snapshot && !this.isNodeActionSnapshotCurrent(snapshot)) return;
+            this.editAnnotation(null, position);
+          })
+      );
       this.showMenuAtPointer(menu, clientX, clientY, event);
       return;
     }
     this.showNodeContextMenu(node, clientX, clientY, event);
+  }
+
+  getAnnotationAtScreen(screenX, screenY) {
+    const world = this.screenToWorld(screenX, screenY);
+    return hitTestAnnotation(
+      this.plugin?.data?.annotations,
+      world.x,
+      world.y,
+      this.camera.zoom,
+      this.ctx
+    );
+  }
+
+  closeFloatingEditor() {
+    this.closeInputSuggestMenu();
+    this.floatingEditorSync = null;
+    const cleanup = this.floatingEditorCleanup;
+    this.floatingEditorCleanup = null;
+    const wasEditingAnnotation = !!this.editingAnnotationId;
+    this.editingAnnotationId = null;
+    cleanup?.();
+    this.floatingEditorEl?.remove?.();
+    this.floatingEditorEl = null;
+    if (wasEditingAnnotation) this.requestFrame();
+  }
+
+  openFloatingEditor(anchorWorld, renderFn, options = {}) {
+    this.closeFloatingEditor();
+    const host = this.wrapEl || this.contentEl;
+    if (!host) return null;
+    const opts = typeof options === 'function' ? { onCleanup: options } : options || {};
+    const editorEl = host.createDiv({
+      cls: opts.overlay
+        ? 'graphfrontier-floating-overlay'
+        : 'graphfrontier-sidepanel graphfrontier-floating-editor is-open',
+    });
+    const positionCard = () => {
+      if (opts.overlay) return;
+      const vw = this.viewWidth || 400;
+      const vh = this.viewHeight || 300;
+      const zoom = Math.max(this.camera?.zoom || 1, 0.0001);
+      const targetNode = opts.nodeId ? this.nodeById?.get(opts.nodeId) : null;
+      const ax = targetNode ? targetNode.x : anchorWorld.x;
+      const ay = targetNode ? targetNode.y : anchorWorld.y;
+      const sx = (ax - (this.camera?.x || 0)) * zoom + vw / 2;
+      const sy = (ay - (this.camera?.y || 0)) * zoom + vh / 2;
+      const clearance = Math.max(
+        26,
+        (targetNode ? this.getNodeRadius(targetNode) * zoom : 14) + 18
+      );
+      const panelW = Math.min(256, Math.max(180, vw - 16));
+      const panelH = Math.min(vh - 16, editorEl.offsetHeight || 270);
+      let left;
+      let top = Math.max(8, Math.min(sy - 30, Math.max(8, vh - panelH - 8)));
+      if (vw - (sx + clearance) >= panelW) {
+        left = sx + clearance;
+      } else if (sx - clearance >= panelW + 8) {
+        left = sx - clearance - panelW;
+      } else {
+        left = Math.max(8, Math.min(sx - panelW / 2, vw - panelW - 8));
+        if (sy + clearance + panelH <= vh - 8) {
+          top = sy + clearance;
+        } else if (sy - clearance - panelH >= 8) {
+          top = sy - clearance - panelH;
+        }
+      }
+      editorEl.style.left = `${Math.round(left)}px`;
+      editorEl.style.top = `${Math.round(top)}px`;
+    };
+    this.floatingEditorEl = editorEl;
+    this.floatingEditorCleanup = opts.onCleanup || null;
+    this.floatingEditorSync = opts.sync || (opts.overlay ? null : positionCard);
+    renderFn(editorEl, () => this.closeFloatingEditor());
+    positionCard();
+    return editorEl;
+  }
+
+  editAnnotation(existing = null, position = { x: 0, y: 0 }) {
+    const sourceData = this.plugin.data;
+    const isNew = !existing;
+    const initial = existing
+      ? { ...existing }
+      : {
+          id: `${ANNOTATION_PREFIX}${this.plugin.createGroupId()}`,
+          ...DEFAULT_ANNOTATION,
+          ...position,
+          selectAll: true,
+        };
+    if (isNew) this.setAnnotation(initial);
+    const applyDraft = (item) => {
+      if (this.plugin.data !== sourceData) {
+        new Notice('Layout changed. Reopen the text editor.');
+        return;
+      }
+      this.setAnnotation(item);
+    };
+    const deleteCurrent = () => {
+      if (this.plugin.data === sourceData) this.removeAnnotation(initial.id);
+    };
+    const modal = new AnnotationModal(this, initial, applyDraft, deleteCurrent, {
+      onChange: applyDraft,
+    });
+    if (this.wrapEl) {
+      let cleaned = false;
+      let syncInline = null;
+      const finish = () => {
+        if (cleaned) return;
+        cleaned = true;
+        modal.commitOnClose?.();
+        modal.onClose?.();
+      };
+      this.openFloatingEditor(
+        initial,
+        (el, close) => {
+          this.editingAnnotationId = initial.id;
+          syncInline = modal.renderInlineEditor(el, close);
+        },
+        {
+          overlay: true,
+          onCleanup: finish,
+          sync: () => syncInline?.(),
+        }
+      );
+      this.requestFrame();
+      return modal;
+    }
+    modal.open();
+    return modal;
+  }
+
+  setAnnotation(item) {
+    const items = (this.plugin.data.annotations || []).filter((entry) => entry.id !== item.id);
+    this.plugin.data.annotations = normalizeAnnotations([...items, item]);
+    this.plugin.schedulePersist();
+    this.plugin.renderAllViews();
+  }
+
+  removeAnnotation(id) {
+    this.plugin.data.annotations = (this.plugin.data.annotations || []).filter(
+      (entry) => entry.id !== id
+    );
+    if (this.hoverAnnotationId === id) {
+      this.hoverAnnotationId = null;
+      this.hoverAnnotationPart = null;
+      this.canvasEl?.removeClass(
+        'is-annotation-hover',
+        'is-annotation-resize',
+        'is-annotation-resize-ew',
+        'is-annotation-resize-ns'
+      );
+    }
+    this.plugin.schedulePersist();
+    this.plugin.renderAllViews();
+  }
+
+  startLinkingFromNode(nodeId) {
+    this.linkSourceNodeId = nodeId;
+    this.canvasEl?.addClass('is-wave-armed');
+    new Notice('Click target node to link (Esc to cancel)');
+    this.render();
   }
 
   onPaneMenu(menu, source) {
@@ -5271,34 +5668,62 @@ class GraphFrontierView extends ItemView {
 
   editDarkEnergy(node = null, position = { x: 0, y: 0 }) {
     const sourceData = this.plugin.data;
+    const isNew = !node;
     const initial = node?.meta?.darkEnergy || {
       id: `${PREFIX}${this.plugin.createGroupId()}`,
       name: 'Gravity node',
-      queries: ['name:'],
+      queries: [],
       strength: 10,
+      repulsion: 0,
       ...position,
     };
-    new DarkEnergyModal(this, initial, (item) => {
+    if (isNew) this.setDarkEnergy(initial);
+    const applyGravity = (item) => {
       if (this.plugin.data !== sourceData) {
         new Notice('Layout changed. Reopen the gravity node editor.');
         return;
       }
       this.setDarkEnergy(item);
-    }).open();
+    };
+    const useFloating = !!this.wrapEl;
+    const modal = new DarkEnergyModal(this, initial, applyGravity, {
+      onChange: applyGravity,
+      onDelete:
+        !isNew || useFloating
+          ? () => {
+              if (this.plugin.data === sourceData) this.removeDarkEnergy({ id: initial.id });
+            }
+          : null,
+    });
+    if (useFloating) {
+      this.openFloatingEditor(
+        initial,
+        (el, close) => modal.renderEditor(el, close, { floating: true }),
+        {
+          nodeId: initial.id,
+          onCleanup: () => modal.onClose?.(),
+        }
+      );
+      return modal;
+    }
+    modal.open();
+    return modal;
   }
 
   setDarkEnergy(item) {
     const existing = this.plugin.data.dark_energy.some((entry) => entry.id === item.id);
+    const liveNode = this.nodeById?.get(item.id);
+    const nextItem = liveNode ? { ...item, x: liveNode.x, y: liveNode.y } : item;
     if (!existing && this.hasValidSubgraphScope()) {
       this.plugin.data.subgraphs = this.plugin.data.subgraphs.map((group) =>
         group.id === this.subgraphScope.id
-          ? { ...group, members: [...group.members, item.id] }
+          ? { ...group, members: [...group.members, nextItem.id] }
           : group
       );
-      this.plugin.data.saved_positions[item.id] = { x: item.x, y: item.y };
+      this.plugin.data.saved_positions[nextItem.id] = { x: nextItem.x, y: nextItem.y };
     }
-    const items = (this.plugin.data.dark_energy || []).filter((entry) => entry.id !== item.id);
-    this.plugin.data.dark_energy = normalizeDarkEnergy([...items, item], (query) =>
+    const items = (this.plugin.data.dark_energy || []).filter((entry) => entry.id !== nextItem.id);
+    this.plugin.data.dark_energy = normalizeDarkEnergy([...items, nextItem], (query) =>
       this.plugin.parseGroupQuery(query)
     );
     this.plugin.schedulePersist();
@@ -6635,6 +7060,48 @@ class GraphFrontierView extends ItemView {
   }
 
   addSelectionActionsToMenu(menu, snapshot, clientX, clientY) {
+    const linkableIds = snapshot.ids.filter(
+      (id) => this.nodeById.get(id) && !this.nodeById.get(id).meta?.darkEnergy
+    );
+    if (linkableIds.length >= 2) {
+      const pairs = [];
+      for (let i = 0; i < linkableIds.length; i++) {
+        for (let j = i + 1; j < linkableIds.length; j++) {
+          pairs.push({ source: linkableIds[i], target: linkableIds[j] });
+        }
+      }
+      const existingKeys = new Set(
+        (this.plugin.data.custom_links || []).map((l) => canonicalLinkKey(l.source, l.target))
+      );
+      const hasUnlinked = pairs.some(
+        (p) => !existingKeys.has(canonicalLinkKey(p.source, p.target))
+      );
+      const hasLinked = pairs.some((p) => existingKeys.has(canonicalLinkKey(p.source, p.target)));
+      if (hasUnlinked) {
+        const toAdd = linkableIds.slice(1).map((id) => ({ source: linkableIds[0], target: id }));
+        menu.addItem((item) =>
+          item
+            .setTitle('Link selected')
+            .setIcon('link')
+            .onClick(() => {
+              if (!this.isNodeActionSnapshotCurrent(snapshot)) return;
+              this.plugin.addCustomLinks(toAdd);
+              this.kickLayoutSearch();
+            })
+        );
+      }
+      if (hasLinked) {
+        menu.addItem((item) =>
+          item
+            .setTitle('Unlink selected')
+            .setIcon('unlink')
+            .onClick(() => {
+              if (!this.isNodeActionSnapshotCurrent(snapshot)) return;
+              this.plugin.removeCustomLinks(pairs);
+            })
+        );
+      }
+    }
     const submenu = (title, icon, fillSubmenu) =>
       this.addContextSubmenuItem(menu, {
         title,
@@ -7423,8 +7890,20 @@ class GraphFrontierView extends ItemView {
     const cache = this.maxNodeRadiusCache;
     if (cache && cache.renderCount === this.renderCount && cache.nodes === this.nodes)
       return cache.value;
+    const appCache =
+      this.appearanceCache &&
+      this.appearanceCache.nodes === this.nodes &&
+      this.appearanceCache.nodeCount === this.nodes.length
+        ? this.appearanceCache.nodeStyleList
+        : null;
     let value = 0;
-    for (const node of this.nodes) value = Math.max(value, this.getNodeRadius(node));
+    for (let i = 0; i < this.nodes.length; i++) {
+      const node = this.nodes[i];
+      const r = appCache
+        ? Math.max(0.2, (3 + Math.log2(node.degree + 2) * 1.4) * appCache[i].scale * 0.5)
+        : this.getNodeRadius(node);
+      if (r > value) value = r;
+    }
     this.maxNodeRadiusCache = { renderCount: this.renderCount, nodes: this.nodes, value };
     return value;
   }
@@ -7473,8 +7952,10 @@ class GraphFrontierView extends ItemView {
     let bestScore = Infinity;
 
     for (let offsetX = -bucketRange; offsetX <= bucketRange; offsetX += 1) {
+      const column = spatialIndex.columns.get(centerGX + offsetX);
+      if (!column) continue;
       for (let offsetY = -bucketRange; offsetY <= bucketRange; offsetY += 1) {
-        const bucket = spatialIndex.buckets.get(`${centerGX + offsetX}:${centerGY + offsetY}`);
+        const bucket = column.get(centerGY + offsetY);
         if (!bucket) continue;
         for (const node of bucket) {
           if (hasFilter && (!visibleNodeIds || !visibleNodeIds.has(node.id))) continue;

@@ -157,7 +157,7 @@ test('bundled desktop plugin serves all MCP tools over localhost HTTP without co
   t.after(() => c.close());
   await c.connect(transport);
 
-  assert.equal((await c.listTools()).tools.length, 35);
+  assert.equal((await c.listTools()).tools.length, 37);
   const res = await c.callTool({ name: 'list_views', arguments: {} });
   assert.equal(res.isError, undefined);
   assert.equal(res.structuredContent.views.length, 1);

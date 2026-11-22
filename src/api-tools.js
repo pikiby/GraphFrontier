@@ -37,6 +37,7 @@ const settings = Object.fromEntries(
 );
 Object.assign(settings, visuals, {
   attachment_node_color: color.nullable(),
+  node_border_width: number(0, 2),
   edge_color: color.nullable(),
   hover_highlight_color: color.nullable(),
   background_color: color.nullable(),
@@ -48,7 +49,7 @@ Object.assign(settings, visuals, {
   grid_line_width: number(0.1, 2).multipleOf(0.1),
   base_link_strength: number(1, 100),
   link_distance: number(1, 50),
-  repel_strength: number(0, 200),
+  repel_strength: number(3, 200),
   repel_radius: number(20, 1000),
   center_strength: number(1, 100),
   damping: number(0.01, 0.9),
@@ -247,6 +248,35 @@ const tools = [
       memberIds: ids.optional(),
     },
     'subgraphNodes',
+  ],
+  [
+    'edit_links',
+    'Add, remove or clear persistent custom links between any files or nodes (including non-Markdown code, config or media files). Saved with the layout and treated as graph edges by physics and export.',
+    {
+      ...ref,
+      action: z.enum(['add', 'remove', 'clear']),
+      links: z
+        .array(z.object({ source: id, target: id }).strict())
+        .min(1)
+        .max(500)
+        .optional(),
+    },
+    'editLinks',
+  ],
+  [
+    'edit_annotations',
+    'Create, update, delete or clear visual text labels on the graph canvas. Annotations have no physics and save with the layout.',
+    {
+      ...ref,
+      action: z.enum(['create', 'update', 'delete', 'clear']),
+      id: id.optional(),
+      text: z.string().min(1).max(2000).optional(),
+      x: position.x.optional(),
+      y: position.y.optional(),
+      size: number(10, 120).optional(),
+      color: color.nullable().optional(),
+    },
+    'editAnnotations',
   ],
   ['list_layouts', 'List saved layouts and the current layout.', {}, 'listLayouts', true],
   [

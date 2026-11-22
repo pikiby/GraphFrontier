@@ -153,9 +153,9 @@ test('backup payloads omit Settings tab and restore preserves the current UI pre
   assert.equal('settings_tab' in bundle.data.view_state, false);
   for (const layout of bundle.layouts)
     assert.equal('settings_tab' in layout.data.view_state, false);
-  f.view.selectSettingsTab('sets');
+  f.view.selectSettingsTab('files');
   await f.manager.restore(raw);
-  assert.equal(f.plugin.getSettingsTab(), 'sets');
+  assert.equal(f.plugin.getSettingsTab(), 'files');
   for (const layout of bundle.layouts)
     assert.equal(
       'settings_tab' in JSON.parse(f.files.get(f.layoutPath(layout.name))).view_state,

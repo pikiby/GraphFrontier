@@ -315,6 +315,29 @@ function buildNodeContextMenu(view, node, clientX, clientY, options = {}) {
       'Combine linked'
     );
   if (!only) view.addRemoveFromSubgraphItem(menu, singleSnapshot);
+  add(menu, 'Link to node...', 'link', () => view.startLinkingFromNode(node.id), !only);
+  const manualPeers = (plugin.data.custom_links || [])
+    .filter((link) => link.source === node.id || link.target === node.id)
+    .map((link) => (link.source === node.id ? link.target : link.source));
+  submenu(
+    'Unlink manual',
+    'unlink',
+    (target) => {
+      for (const peerId of manualPeers) {
+        add(target, view.getLinkedNodeDisplayName({ id: peerId, label: peerId }), 'x', () =>
+          plugin.removeCustomLinks([{ source: node.id, target: peerId }])
+        );
+      }
+      if (manualPeers.length > 1) {
+        add(target, 'Clear all on node', 'trash', () =>
+          plugin.removeCustomLinks(
+            manualPeers.map((peerId) => ({ source: node.id, target: peerId }))
+          )
+        );
+      }
+    },
+    !only && manualPeers.length > 0
+  );
   // Bookmark lives in Other only.
   menu.addSeparator();
   addToList();

@@ -369,7 +369,7 @@ function stepSimulation(view) {
     (item) => view.nodeById.has(item.id) && (item.strength > 0 || item.repulsion > 0)
   );
   const noForces = !hasRepel && !hasCenter && !hasLink && !hasDarkEnergy;
-  const minRepelDistance = 28;
+  const minRepelDistance = 12;
   const maxRepelForce = 16;
   const maxSpringForce = 20;
   const maxCenterForce = 1.6;

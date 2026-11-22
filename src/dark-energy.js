@@ -2,16 +2,18 @@ const PREFIX = 'graphfrontier:dark-energy:';
 const matchCaches = new WeakMap();
 const emptyTargets = new Map();
 const REPULSION_RADIUS = 1000;
+const GRAVITY_CORE_RADIUS = 45;
 
 function normalizeDarkEnergy(items, parseQuery) {
   const ids = new Set();
   return (Array.isArray(items) ? items : []).flatMap((item) => {
     if (!item || typeof item.id !== 'string' || !item.id.startsWith(PREFIX) || ids.has(item.id))
       return [];
-    const queries = (Array.isArray(item.queries) ? item.queries : []).filter(
+    const rawQueries = Array.isArray(item.queries) ? item.queries : [];
+    const queries = rawQueries.filter(
       (query) => typeof query === 'string' && parseQuery(query)?.value
     );
-    if (!queries.length) return [];
+    if (rawQueries.length > 0 && !queries.length) return [];
     ids.add(item.id);
     return [
       {
@@ -76,25 +78,45 @@ function applyDarkEnergyForce(view, node, accel, targets) {
   for (const { item, matches } of targets.get(node.id) || []) {
     const center = view.nodeById.get(item.id);
     if (!center) continue;
-    let dx = center.x - node.x;
-    let dy = center.y - node.y;
-    let distance = Math.hypot(dx, dy);
-    if (!matches && !distance) {
+    const dx = center.x - node.x;
+    const dy = center.y - node.y;
+    const distance = Math.hypot(dx, dy);
+    let ux;
+    let uy;
+    if (!distance) {
+      if (matches ? item.strength <= 0 : item.repulsion <= 0) continue;
       // Stable direction separates coincident nodes without random jitter.
       let hash = 0;
       for (const char of node.id) hash = (Math.imul(hash, 31) + char.charCodeAt(0)) | 0;
       const angle = (hash / 2147483648) * Math.PI;
-      dx = Math.cos(angle);
-      dy = Math.sin(angle);
-      distance = 1;
+      ux = Math.cos(angle);
+      uy = Math.sin(angle);
+    } else {
+      ux = dx / distance;
+      uy = dy / distance;
     }
-    if (!distance) continue;
-    const force = matches
-      ? Math.min(1.6, distance * item.strength * 0.00015) / 2
-      : -0.002 * item.repulsion * Math.max(0, 1 - distance / REPULSION_RADIUS) ** 2;
-    accel.ax += (dx / distance) * force;
-    accel.ay += (dy / distance) * force;
+    let force;
+    if (matches) {
+      if (item.strength <= 0) continue;
+      if (distance >= GRAVITY_CORE_RADIUS) {
+        force = Math.min(1.6, (distance - GRAVITY_CORE_RADIUS) * item.strength * 0.00015) / 2;
+      } else {
+        const u = 1 - distance / GRAVITY_CORE_RADIUS;
+        force = -Math.min(0.8, (0.04 + item.strength * 0.004) * u * u);
+      }
+    } else {
+      force = -0.002 * item.repulsion * Math.max(0, 1 - distance / REPULSION_RADIUS) ** 2;
+    }
+    accel.ax += ux * force;
+    accel.ay += uy * force;
   }
 }
 
-export { PREFIX, normalizeDarkEnergy, darkEnergyNodes, getDarkEnergyTargets, applyDarkEnergyForce };
+export {
+  PREFIX,
+  GRAVITY_CORE_RADIUS,
+  normalizeDarkEnergy,
+  darkEnergyNodes,
+  getDarkEnergyTargets,
+  applyDarkEnergyForce,
+};

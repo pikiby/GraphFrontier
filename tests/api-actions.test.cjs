@@ -1153,4 +1153,91 @@ test('new visual API fields validate, clear both color stores and keep explicit 
     { show_arrows: 1 },
   ])
     assert.throws(() => f.api.updateSettings({ ...ref, settings }), { code: 'INVALID_ARGUMENT' });
+  assert.throws(() => f.api.updateSettings({ ...ref, settings: { repel_strength: 0 } }), {
+    code: 'INVALID_ARGUMENT',
+  });
+  assert.throws(() => f.api.updateSettings({ ...ref, settings: { repel_strength: 2 } }), {
+    code: 'INVALID_ARGUMENT',
+  });
+  const minRepel = f.api.updateSettings({ ...ref, settings: { repel_strength: 3 } });
+  assert.equal(minRepel.settings.repel_strength, 3);
+});
+
+test('edit_links creates persistent non-md file links in graph/export and edit_annotations manages text labels', (t) => {
+  const f = setup(t);
+  const ref = f.ref();
+  const vaultFiles = [
+    { path: 'alpha.md', basename: 'alpha', extension: 'md' },
+    { path: 'src/service.py', basename: 'service.py', extension: 'py' },
+    { path: 'src/schema.sql', basename: 'schema.sql', extension: 'sql' },
+  ];
+  f.app.vault.getFiles = () => vaultFiles;
+  f.app.vault.getAbstractFileByPath = (p) => vaultFiles.find((entry) => entry.path === p) || null;
+  f.plugin.data.settings.hide_attachments = false;
+  f.plugin.data.settings.include_unlinked_attachments = false;
+  f.plugin.data.settings.hide_orphans = true;
+
+  assert.throws(
+    () =>
+      f.api.editLinks({
+        ...ref,
+        action: 'add',
+        links: [{ source: 'src/service.py', target: 'src/service.py' }],
+      }),
+    { code: 'INVALID_ARGUMENT' }
+  );
+
+  const added = f.api.editLinks({
+    ...ref,
+    action: 'add',
+    links: [{ source: 'src/service.py', target: 'src/schema.sql' }],
+  });
+  assert.equal(added.added, 1);
+  const collected = Object.getPrototypeOf(f.plugin).collectGraphData.call(f.plugin);
+  assert.deepEqual(collected.nodes.map((n) => n.id).sort(), ['src/schema.sql', 'src/service.py']);
+  assert.equal(collected.edges.length, 1);
+
+  assert.throws(
+    () =>
+      f.api.editAnnotations({
+        ...f.ref(),
+        action: 'create',
+        text: 'Framed',
+        border: true,
+      }),
+    { code: 'INVALID_ARGUMENT' }
+  );
+
+  const created = f.api.editAnnotations({
+    ...f.ref(),
+    action: 'create',
+    text: 'Data Pipeline',
+    x: 120,
+    y: -80,
+    size: 28,
+    color: '#22cc88',
+  });
+  assert.equal(created.annotations.length, 1);
+  assert.equal(created.annotation.border, false);
+  assert.equal(created.annotation.color, '#22cc88');
+
+  const updated = f.api.editAnnotations({
+    ...f.ref(),
+    action: 'update',
+    id: created.annotation.id,
+    text: 'Pipeline v2',
+    size: 32,
+  });
+  assert.equal(updated.annotation.text, 'Pipeline v2');
+  assert.equal(updated.annotation.size, 32);
+  assert.equal(updated.annotation.border, false);
+
+  const cfg = f.api.getConfiguration(f.ref());
+  assert.equal(cfg.customLinks.length, 1);
+  assert.equal(cfg.annotations.length, 1);
+
+  f.api.editLinks({ ...f.ref(), action: 'clear' });
+  f.api.editAnnotations({ ...f.ref(), action: 'delete', id: created.annotation.id });
+  assert.deepEqual(f.plugin.data.custom_links, []);
+  assert.deepEqual(f.plugin.data.annotations, []);
 });

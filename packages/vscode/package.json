@@ -1,0 +1,160 @@
+{
+  "name": "graphfrontier-vscode",
+  "displayName": "GraphFrontier",
+  "description": "Interactive graph workspace for Markdown and codebase vaults with layout saving, pinning, subgraphs, local graph sidebar, and MCP.",
+  "version": "0.9.7",
+  "publisher": "pikiby",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pikiby/GraphFrontier.git",
+    "directory": "packages/vscode"
+  },
+  "homepage": "https://github.com/pikiby/GraphFrontier/tree/main/packages/vscode#readme",
+  "bugs": {
+    "url": "https://github.com/pikiby/GraphFrontier/issues"
+  },
+  "keywords": [
+    "graph",
+    "markdown",
+    "obsidian",
+    "knowledge-graph",
+    "visualization",
+    "mcp",
+    "cursor",
+    "pkm"
+  ],
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "qna": "marketplace",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.cjs",
+  "scripts": {
+    "build": "node scripts/build-vscode.cjs",
+    "package": "node scripts/build-vscode.cjs && node scripts/package-vsix.cjs",
+    "check:release": "node scripts/check-vscode-release.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "vscode:prepublish": "node scripts/build-vscode.cjs"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "graphfrontier-sidebar",
+          "title": "GraphFrontier",
+          "icon": "media/activity-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "graphfrontier-sidebar": [
+        {
+          "id": "graphfrontier.launcher",
+          "name": "GraphFrontier"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "graphfrontier.openGraph",
+        "title": "GraphFrontier: Open GraphFrontier",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "graphfrontier.openGraphBeside",
+        "title": "GraphFrontier: Open GraphFrontier to the Side",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "graphfrontier.openLocalGraph",
+        "title": "GraphFrontier: Open Local Graph",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "graphfrontier.copyMcpUrl",
+        "title": "GraphFrontier: Copy MCP Server URL"
+      },
+      {
+        "command": "graphfrontier.refreshIndex",
+        "title": "GraphFrontier: Refresh Workspace Index",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "graphfrontier.importFromObsidian",
+        "title": "GraphFrontier: Import Saves from Obsidian (.obsidian)",
+        "icon": "$(cloud-download)"
+      }
+    ],
+    "menus": {
+      "titleBar": [
+        {
+          "command": "graphfrontier.openGraph",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "graphfrontier.openGraph",
+          "group": "navigation@1"
+        },
+        {
+          "command": "graphfrontier.openLocalGraph",
+          "when": "editorLangId == markdown || activeWebviewPanelId == markdown.preview",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "graphfrontier.openLocalGraph",
+          "when": "editorLangId == markdown",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "graphfrontier.openLocalGraph",
+          "when": "resourceExtname == .md",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GraphFrontier",
+      "properties": {
+        "graphfrontier.storageMode": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "workspace",
+            "obsidian",
+            "readOnly"
+          ],
+          "default": "vscode",
+          "description": "Where VS Code GraphFrontier stores its own layouts and settings: vscode uses isolated VS Code workspace storage (default, separate from Obsidian and CLI), workspace uses .vscode/graphfrontier/, obsidian shares .obsidian/plugins/graphfrontier/, readOnly never writes to disk."
+        },
+        "graphfrontier.preferObsidianTheme": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply the workspace's .obsidian CSS theme instead of adapting to the active VS Code color theme."
+        },
+        "graphfrontier.mcpEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the built-in localhost Streamable HTTP MCP server for AI agents."
+        }
+      }
+    }
+  }
+}

@@ -252,15 +252,18 @@ function pulseFront(wave, nowMs) {
 }
 
 // Push on one node from all travelling fronts: a soft bump around each front line.
-function pulseForce(view, node, nowMs = Date.now()) {
+function pulseForce(view, node, nowMs = Date.now(), preparedWaves = null) {
   let ax = 0;
   let ay = 0;
-  for (const wave of activePulseWaves(view, nowMs)) {
+  const waves = preparedWaves || activePulseWaves(view, nowMs);
+  for (let i = 0; i < waves.length; i++) {
+    const entry = waves[i];
+    const wave = preparedWaves ? entry.wave : entry;
     const dx = node.x - wave.x;
     const dy = node.y - wave.y;
     const distance = Math.hypot(dx, dy);
     if (distance < 0.001 || distance > wave.radius) continue;
-    const front = pulseFront(wave, nowMs);
+    const front = preparedWaves ? entry.front : pulseFront(wave, nowMs);
     const offset = (distance - front.radius) / wave.width;
     const push = wave.strength * wave.direction * front.fade * Math.exp(-offset * offset);
     ax += (dx / distance) * push;
