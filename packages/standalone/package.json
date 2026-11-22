@@ -9,7 +9,7 @@
   "scripts": {
     "build": "node scripts/build-standalone.cjs",
     "start": "node bin/graphfrontier.cjs",
-    "test": "node --test tests/*.test.cjs",
+    "test": "node --test tests/standalone.test.cjs",
     "verify:parity": "node scripts/verify-parity.cjs"
   }
 }

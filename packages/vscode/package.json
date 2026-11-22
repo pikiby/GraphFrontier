@@ -45,7 +45,7 @@
     "build": "node scripts/build-vscode.cjs",
     "package": "node scripts/build-vscode.cjs && node scripts/package-vsix.cjs",
     "check:release": "node scripts/check-vscode-release.cjs",
-    "test": "node --test tests/*.test.cjs",
+    "test": "node --test tests/vscode-extension.test.cjs",
     "vscode:prepublish": "node scripts/build-vscode.cjs"
   },
   "contributes": {
